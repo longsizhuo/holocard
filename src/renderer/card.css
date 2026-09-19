@@ -160,27 +160,38 @@
   pointer-events: none;
   --hc-halo-intensity: 0.35;
 
+  /*
+   * 光带中心在渐变轴上的位置，随倾角横扫过卡面。
+   * --background-x 在 37%..63%、--background-y 在 33%..67% 之间，
+   * 所以 --hc-sweep 大约在 -50%..150% 之间，光带可以完全扫出卡面两端。
+   */
+  --hc-sweep: calc(50% + (50% - var(--background-x)) * 5 + (50% - var(--background-y)) * 2);
+
+  /*
+   * 移动的是色标位置，不是背景块本身。
+   *
+   * 早先的写法是把渐变铺在一张 300% 大的背景块上，再用 background-position 平移它。
+   * 位移一旦超出 0..100%，背景块的边缘就会滑进卡面；background-repeat 默认平铺，
+   * 而斜向渐变在块与块的接缝处颜色对不上，横竖两条缝正好把卡面切成四个格子。
+   * 现在背景块就是卡面本身那么大，色标落到 0..100% 之外只是看不见，不存在接缝。
+   */
   background-image: linear-gradient(
     115deg,
-    transparent 18%,
-    hsla(283, 100%, 73%, 0.75) 34%,
-    hsla(228, 100%, 74%, 0.75) 42%,
-    hsla(176, 100%, 76%, 0.75) 50%,
-    hsla(93, 100%, 69%, 0.75) 58%,
-    hsla(53, 100%, 69%, 0.75) 66%,
-    hsla(2, 100%, 73%, 0.75) 74%,
-    transparent 88%
+    transparent calc(var(--hc-sweep) - 36%),
+    hsla(283, 100%, 73%, 0.75) calc(var(--hc-sweep) - 22%),
+    hsla(228, 100%, 74%, 0.75) calc(var(--hc-sweep) - 13%),
+    hsla(176, 100%, 76%, 0.75) calc(var(--hc-sweep) - 4%),
+    hsla(93, 100%, 69%, 0.75) calc(var(--hc-sweep) + 5%),
+    hsla(53, 100%, 69%, 0.75) calc(var(--hc-sweep) + 14%),
+    hsla(2, 100%, 73%, 0.75) calc(var(--hc-sweep) + 23%),
+    transparent calc(var(--hc-sweep) + 37%)
   );
-  background-size: 300% 300%;
-  /* 光带随倾角横扫过卡面 */
-  background-position:
-    calc(((50% - var(--background-x)) * 7) + 50%)
-    calc(((50% - var(--background-y)) * 5) + 50%);
+  background-repeat: no-repeat;
 
   mix-blend-mode: color-dodge;
   filter: brightness(0.75) contrast(1.35);
   opacity: calc(var(--hc-halo) * var(--hc-halo-intensity) * var(--card-opacity));
-  will-change: opacity, background-position;
+  will-change: opacity, background-image;
 }
 
 /* ---------- 无障碍 ---------- */
