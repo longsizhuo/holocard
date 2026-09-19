@@ -48,32 +48,63 @@ sudo chown -R longsizhuo:longsizhuo /var/www/holocard
 **2. nginx 站点**：见 [nginx-holocard.conf](nginx-holocard.conf)，文件头有安装步骤。
 独立的一个 vhost，没有动 `default` 里已有的站点。
 
-**3. 隧道 ingress**：在 `/etc/cloudflared/config.yml` 的兜底规则**之前**加一条，然后重启 cloudflared。
+**3. 专用隧道**
+
+服务器上原有的那条 `ssh-tunnel` 是在 Cloudflare 后台远程管理的：cloudflared 启动后会被云端下发的配置覆盖，
+本地 `config.yml` 里的 ingress 形同虚设，从命令行改不了它的入口规则。
+所以给 HoloCard 单独建了一条本地管理的隧道，和 SSH 那条完全隔离：
+
+```bash
+cloudflared tunnel create holocard
+# 配置：~/.cloudflared/holocard.yml
+# 服务：/etc/systemd/system/cloudflared-holocard.service（以 longsizhuo 身份运行）
+sudo systemctl enable --now cloudflared-holocard
+```
 
 ```yaml
+# ~/.cloudflared/holocard.yml
+tunnel: 8517be93-9aba-4ffd-99ea-e87b6bc9db9a
+credentials-file: /home/longsizhuo/.cloudflared/8517be93-9aba-4ffd-99ea-e87b6bc9db9a.json
+
 ingress:
-  - hostname: ssh.longsizhuo.com
-    service: ssh://localhost:22
-  - hostname: holocard.longsizhuo.com      # 新增
-    service: http://127.0.0.1:8377         # 新增
+  - hostname: holocard.longsizhuo.com
+    service: http://127.0.0.1:8377
   - service: http_status:404
 ```
 
-改之前先 `cloudflared tunnel --config <文件> ingress validate` 校验。
-这条隧道同时承载着 SSH 入口，配置写坏了重启会把远程 SSH 一起带下线。
-
-**4. DNS**：在 Cloudflare 上建一条指向隧道的 CNAME。
+**4. DNS**
 
 ```bash
-cloudflared tunnel route dns 1a956a2e-0b74-43b6-b667-081b65584c36 holocard.longsizhuo.com
+cloudflared tunnel route dns -f 8517be93-9aba-4ffd-99ea-e87b6bc9db9a holocard.longsizhuo.com
+```
+
+这台机器到 `api.cloudflare.com` 的线路时通时断，`cloudflared tunnel` 的各个子命令经常报
+`context deadline exceeded`，多试几次就好，不是权限问题。
+
+## 整个撤掉
+
+```bash
+sudo systemctl disable --now cloudflared-holocard
+sudo rm /etc/systemd/system/cloudflared-holocard.service && sudo systemctl daemon-reload
+cloudflared tunnel delete holocard
+sudo rm /etc/nginx/sites-enabled/holocard /etc/nginx/sites-available/holocard
+sudo nginx -t && sudo systemctl reload nginx
+# 最后到 Cloudflare 后台删掉 holocard 这条 CNAME
 ```
 
 ## 用户侧的流量
 
+用无缓存的浏览器对线上站点实测（`node scripts/verify-live.mjs --image 照片路径`）：
+
 | | 来源 | 体积 |
 |---|---|---|
 | 页面本身 | 本服务器 | 约 27KB |
-| onnxruntime 的 wasm | 本服务器 | 6.7MB（gzip 后），带哈希永久缓存 |
-| 深度模型权重 | Hugging Face CDN | 约 50MB，不经过本服务器 |
+| 推理代码 | 本服务器 | 约 160KB |
+| onnxruntime 的 wasm | jsDelivr CDN | 约 5.3MB |
+| 深度模型权重 | Hugging Face CDN | 约 47MB |
 
-后两项只在用户真的上传了照片时才会拉取，而且都是一次性的。
+后三项只在用户真的上传了照片时才会拉取，而且都是一次性的。
+大头都走公共 CDN，家里的上行带宽对每个新访客只出约 200KB。
+
+dist 里那份 26MB 的 wasm 线上没有任何请求会用到（transformers.js 默认从 jsDelivr 取），
+只是白占每个 release 约 33MB 的磁盘。

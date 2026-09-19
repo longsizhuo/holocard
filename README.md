@@ -158,11 +158,16 @@ pnpm capture --image 照片路径 --out out/demo.gif
 **不需要自己托管模型。** transformers.js 默认从 Hugging Face 官方 CDN 拉权重，
 整个站是纯静态的，GitHub Pages / Cloudflare Pages 直接部署。
 
-| | |
-|---|---|
-| 浏览演示页 | 约 27KB（transformers.js 被动态 import 挡在首屏之外） |
-| 首次处理照片 | 约 50MB 权重，一次性，之后走浏览器缓存 |
-| 缓存后再处理 | 0 额外下载，单张几秒（WebGPU） |
+| | 来源 | 体积 |
+|---|---|---|
+| 浏览演示页 | 本站 | 约 27KB（transformers.js 被动态 import 挡在首屏之外） |
+| 首次处理照片：推理代码 | 本站 | 约 160KB |
+| 首次处理照片：onnxruntime 的 wasm | jsDelivr CDN | 约 5.3MB |
+| 首次处理照片：深度模型权重 | Hugging Face CDN | 约 47MB |
+| 缓存后再处理 | — | 0 额外下载，单张几秒（WebGPU） |
+
+以上是用无缓存的浏览器对线上站点实测的结果（`node scripts/verify-live.mjs`）。
+大头都走公共 CDN，自己的服务器对每个新访客只出约 200KB。
 
 **huggingface.co 在中国大陆访问困难**，需要镜像时改环境变量即可，见 `.env.example`：
 
@@ -171,6 +176,7 @@ VITE_MODEL_HOST=https://hf-mirror.com/
 ```
 
 也可以指向自建的 R2 / OSS / jsDelivr 镜像，或用 `VITE_MODEL_DTYPE=q8` 把权重压到约 25MB。
+`cdn.jsdelivr.net` 在大陆同样不稳定，面向大陆用户的话 wasm 也需要换源，这一项目前还没做成配置。
 
 **为什么不放服务端推理？** 「图片不出设备」这个卖点会没，而且推理成本随用户数线性增长。
 
@@ -190,8 +196,10 @@ VITE_MODEL_HOST=https://hf-mirror.com/
 - **BiRefNet 全量 ONNX 有 973MB**，浏览器直接爆 WASM 内存，必须用 lite 版。
 - **SAM 自动 mask 生成在浏览器不现实**——要在图上撒网格点跑几百次 decoder。
 
-构建产物里有一个 26MB 的 `ort-wasm-simd-threaded.asyncify.wasm`，这是 ONNX Runtime 的 WASM 后端，
-只在 WebGPU 不可用时按需拉取，不是首屏成本。
+构建产物里有一个 26MB 的 `ort-wasm-simd-threaded.asyncify.wasm`，但线上**没有任何请求会用到它**：
+transformers.js 默认把 onnxruntime 的 wasm 路径指向 jsDelivr，Vite 只是因为源码里有一处
+`new URL(…, import.meta.url)` 引用才把它打了进来。另外要注意这个 wasm 不是「WebGPU 不可用时的退路」——
+ORT 的 WebGPU 后端本身就跑在这个 wasm 运行时上，开着 WebGPU 也照样要拉。
 
 ## 路线图
 
