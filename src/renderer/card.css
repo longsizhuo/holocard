@@ -4,9 +4,14 @@
  * 由 JS 注入的 CSS 变量驱动，渲染器本身不碰 style 属性之外的东西：
  *   --hc-nx / --hc-ny     指针相对卡片中心的归一化偏移，范围 -1..1
  *   --hc-mx / --hc-my     指针在卡片内的百分比位置，范围 0..100，用于定位渐变
- *   --hc-active           效果强度，0 = 静止，1 = 完全激活（用于淡入淡出）
- *   --hc-parallax         每层各自的视差系数
- *   --hc-scale            每层各自的缩放补偿（见下方说明）
+ *   --hc-active           交互淡入淡出，0 = 静止，1 = 正在交互
+ *   --hc-halo             卡面炫光强度，0..1，由卡面法线与光源的夹角算出
+ *   --hc-parallax         每个「景深层」各自的视差系数
+ *   --hc-scale            每个景深层各自的缩放补偿
+ *
+ * 结构上区分两类东西，这个区分是这份样式的核心：
+ *   景深层 .hc__layer —— 画面内容，参与视差
+ *   卡面层 .hc__halo / .hc__glare —— 卡面本身的物理属性，压在所有景深层之上，不参与视差
  */
 
 .hc {
@@ -23,6 +28,7 @@
   --hc-mx: 50;
   --hc-my: 50;
   --hc-active: 0;
+  --hc-halo: 0;
   --hc-tilt: 14deg;
   /* 视差振幅：位移量相对卡片宽度的比例。百分比位移天然分辨率无关 */
   --hc-amp: 6%;
@@ -65,6 +71,8 @@
   background: #0b0d16;
 }
 
+/* ---------- 景深层：参与视差 ---------- */
+
 .hc__layer {
   position: absolute;
   inset: 0;
@@ -97,46 +105,48 @@
   transition: none;
 }
 
-/* ---------- 光泽 ---------- */
+/* ---------- 卡面层：不参与视差 ---------- */
 
-.hc__foil {
+/*
+ * 卡面炫光。
+ *
+ * 真实卡片的箔膜是压在卡面上的一层，不属于画面内容：
+ * 转动卡片时它不会跟着画面里的人物一起位移，所以这里没有任何 translate。
+ *
+ * 强度完全由 --hc-halo 驱动，那个值是卡面法线与光源夹角算出来的——
+ * 只有转到某个倾角、把光正好反射进眼睛时才爆出五彩，其余角度只剩很淡的底光。
+ * 这和「鼠标在哪就亮哪」是两回事。
+ */
+.hc__halo {
   position: absolute;
   inset: 0;
   pointer-events: none;
-  --hc-parallax: 0;
-  --hc-foil-intensity: 1;
+  --hc-halo-intensity: 0.55;
 
-  /* 光泽层要跟着它所属的那一层一起动，否则会和图案错位 */
-  transform: translate3d(
-    calc(var(--hc-nx) * var(--hc-parallax) * var(--hc-amp)),
-    calc(var(--hc-ny) * var(--hc-parallax) * var(--hc-amp)),
-    0
-  );
-  transition:
-    transform 0.35s cubic-bezier(0.23, 1, 0.32, 1),
-    opacity 0.35s ease;
-  opacity: calc(var(--hc-active) * var(--hc-foil-intensity));
+  opacity: calc(var(--hc-halo) * var(--hc-halo-intensity) * var(--hc-active));
+  transition: opacity 0.35s ease;
 }
 
-.hc.is-interacting .hc__foil {
+.hc.is-interacting .hc__halo {
+  /* 跟手时炫光要立刻响应倾角，加过渡会糊掉「转到某个角度突然爆」的观感 */
   transition: none;
 }
 
 /*
- * 这是本项目相对 pokemon-cards-css 的关键差异：
- * 光泽可以只作用在某一层的 alpha 形状内（比如只有人物闪、背景不闪）。
- * mask 用的就是那一层自己的图片，所以形状天然对齐。
+ * 局部压印：用某一景深层的 alpha 当压印形状。
+ * 注意压印本身依然在卡面上、不随视差移动，所以大角度倾斜时
+ * 它会和画面里的主体轻微错开——这是对的，就像窗户上的灰尘不会跟着窗外景物一起动。
  */
-.hc__foil[data-masked='true'] {
-  -webkit-mask-image: var(--hc-foil-mask);
-  mask-image: var(--hc-foil-mask);
+.hc__halo[data-masked='true'] {
+  -webkit-mask-image: var(--hc-halo-mask);
+  mask-image: var(--hc-halo-mask);
   -webkit-mask-size: 100% 100%;
   mask-size: 100% 100%;
   -webkit-mask-repeat: no-repeat;
   mask-repeat: no-repeat;
 }
 
-.hc__foil[data-type='rainbow'] {
+.hc__halo[data-type='rainbow'] {
   background-image:
     repeating-linear-gradient(
       100deg,
@@ -153,7 +163,7 @@
   filter: brightness(0.85) contrast(1.9) saturate(1.5);
 }
 
-.hc__foil[data-type='linear'] {
+.hc__halo[data-type='linear'] {
   background-image: linear-gradient(
     calc(var(--hc-nx) * 40deg + 110deg),
     transparent 30%,
@@ -165,7 +175,7 @@
   mix-blend-mode: overlay;
 }
 
-.hc__foil[data-type='galaxy'] {
+.hc__halo[data-type='galaxy'] {
   background-image:
     radial-gradient(
       circle at calc(var(--hc-mx) * 1%) calc(var(--hc-my) * 1%),
@@ -182,12 +192,11 @@
   filter: contrast(1.4) saturate(1.3);
 }
 
-.hc__foil[data-type='none'] {
+.hc__halo[data-type='none'] {
   display: none;
 }
 
-/* ---------- 跟随指针的高光 ---------- */
-
+/* 跟随指针的镜面高光。同样是卡面效果，不随视差移动 */
 .hc__glare {
   position: absolute;
   inset: 0;
@@ -209,13 +218,12 @@
 
 @media (prefers-reduced-motion: reduce) {
   .hc__inner,
-  .hc__layer,
-  .hc__foil {
+  .hc__layer {
     transition: none;
     transform: none;
   }
   .hc__glare,
-  .hc__foil {
+  .hc__halo {
     opacity: 0;
   }
 }

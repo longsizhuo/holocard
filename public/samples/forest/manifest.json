@@ -8,7 +8,12 @@
     { "file": "layer-2.svg", "depth": 0.92, "parallax": 1.0,  "bbox": [0, 556, 734, 468], "inpainted": false }
   ],
   "effects": {
-    "foil": { "layers": [2], "type": "rainbow", "intensity": 1 },
+    "halo": {
+      "type": "rainbow",
+      "intensity": 0.55,
+      "maskLayer": null,
+      "light": { "peakAt": [0.7, -0.7], "sharpness": 120 }
+    },
     "glare": true
   }
 }

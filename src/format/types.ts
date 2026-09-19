@@ -19,8 +19,8 @@ export const LAYERS_FORMAT_VERSION = 1;
 /** 包围盒，像素坐标，[x, y, width, height] */
 export type BBox = readonly [x: number, y: number, width: number, height: number];
 
-/** 光泽类型 */
-export type FoilType = 'rainbow' | 'linear' | 'galaxy' | 'none';
+/** 炫光花纹类型 */
+export type HaloType = 'rainbow' | 'linear' | 'galaxy' | 'none';
 
 export interface LayerSource {
   /** 原图宽度（像素） */
@@ -56,18 +56,66 @@ export interface LayerEntry {
   inpainted: boolean;
 }
 
-export interface FoilEffect {
-  /** 光泽作用在哪几层（LayerEntry 在数组中的下标）。空数组 = 整卡统一光泽 */
-  layers: number[];
-  type: FoilType;
-  /** 强度 0..1 */
+/**
+ * 卡面光照模型。
+ *
+ * 真实卡片的炫光不是「鼠标在哪就亮哪」，而是卡面法线转到某个角度、
+ * 正好把光源反射进眼睛时才爆出虹彩，其余角度只剩很淡的底光。
+ * 这里不直接描述光源坐标，而是用「虹彩最强时的卡片姿态」来描述——
+ * 调起来直观得多，而且与倾斜角设成多少无关。
+ */
+export interface HaloLight {
+  /** 虹彩最强时的卡片姿态，用归一化指针位置表示，各分量 -1..1 */
+  peakAt: readonly [nx: number, ny: number];
+  /**
+   * 角度窗口锐度。越大，虹彩出现的倾角范围越窄，
+   * 越接近真卡那种「转到某个角度突然爆开」的观感。
+   */
+  sharpness: number;
+}
+
+/**
+ * 卡面炫光。
+ *
+ * 关键：这是卡面本身的物理属性，不属于任何景深层。
+ * 真实卡片的箔膜压在卡面上，转动卡片时它不会跟着画面里的人物一起位移，
+ * 所以 halo 既不参与视差，也默认铺满整张卡面。
+ */
+export interface HaloEffect {
+  type: HaloType;
+  /** 强度 0..1。真卡的虹彩是「细微的五彩」，默认给得克制 */
   intensity: number;
+  /**
+   * 压印形状：null = 整张卡面，这是真实卡片的常态。
+   * 给层下标则用该层的 alpha 当压印形状——但压印依然在卡面上，不随视差移动，
+   * 所以大角度倾斜时它会和画面里的主体轻微错开。这是对的：
+   * 就像窗户上的灰尘不会跟着窗外的景物一起动。
+   */
+  maskLayer: number | null;
+  light: HaloLight;
 }
 
 export interface LayerEffects {
-  foil: FoilEffect;
-  /** 是否启用跟随指针的高光 */
+  halo: HaloEffect;
+  /** 跟随指针的镜面高光。同样是卡面效果，不随视差移动 */
   glare: boolean;
+}
+
+export const DEFAULT_HALO_LIGHT: HaloLight = {
+  // 默认光源在右上方，卡片朝那个方向抬起时爆虹彩
+  peakAt: [0.7, -0.7],
+  // 倾斜角只有十几度，法线夹角很小，锐度必须给得很高才切得出角度窗口
+  sharpness: 120,
+};
+
+/** 卡面炫光的默认配置：整张卡面、克制的强度 */
+export function defaultHalo(): HaloEffect {
+  return {
+    type: 'rainbow',
+    intensity: 0.55,
+    maskLayer: null,
+    light: { ...DEFAULT_HALO_LIGHT },
+  };
 }
 
 export interface LayerManifest {

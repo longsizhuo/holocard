@@ -9,7 +9,7 @@
  * 边缘精修（BiRefNet_lite 出主体 alpha）还没接，见 README 的路线图。
  */
 
-import { LAYERS_FORMAT_VERSION, type LayerEntry, type LayerSet } from '../format/types';
+import { LAYERS_FORMAT_VERSION, defaultHalo, type LayerEntry, type LayerSet } from '../format/types';
 import { estimateDepth, type LoadProgress } from './depth';
 import { analyzeDepth, type SliceOptions } from './slice';
 import { extractLayers, type ExtractOptions } from './extract';
@@ -125,8 +125,9 @@ export async function segmentToLayerSet(
       generator: buildGeneratorTag(cuts, prominences),
       layers,
       effects: {
-        // 默认让光泽只作用在最近的那一层，这是本项目相对整卡光泽的差异点
-        foil: { layers: [layers.length - 1], type: 'rainbow', intensity: 1 },
+        // 炫光是卡面本身的属性，默认铺满整张卡面——这才是真实卡片的常态。
+        // 要做局部压印的话，把 halo.maskLayer 指到某一层即可。
+        halo: defaultHalo(),
         glare: true,
       },
     },

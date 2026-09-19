@@ -1,12 +1,16 @@
 /**
  * HoloCard 渲染器
  *
- * 吃一个 LayerSet，产出一张会跟着指针倾斜 + 分层视差 + 闪光的卡片。
+ * 吃一个 LayerSet，产出一张会跟着指针倾斜 + 分层视差 + 卡面炫光的卡片。
  * 不依赖任何框架，也不依赖分层算法——手工切的图一样能渲染。
+ *
+ * 结构上严格区分两类东西：
+ *   景深层（画面内容）参与视差；
+ *   卡面层（炫光、高光）是卡面本身的物理属性，压在所有景深层之上，不参与视差。
  */
 
 import './card.css';
-import type { LayerSet } from '../format/types';
+import type { HaloEffect, HaloLight, LayerSet } from '../format/types';
 
 export interface HoloCardOptions {
   /** 最大倾斜角，单位度 */
@@ -29,6 +33,57 @@ function clamp(value: number, min: number, max: number): number {
   return value < min ? min : value > max ? max : value;
 }
 
+/**
+ * 由归一化指针位置算出卡面法线。
+ *
+ * 必须和 CSS 里的 `rotateX(ny * tilt) rotateY(nx * tilt)` 严格对应，
+ * 否则算出来的炫光角度和肉眼看到的卡片姿态对不上。
+ *
+ * 推导：法线初始为 (0,0,1)，先绕 Y 转 ay 再绕 X 转 ax，
+ *   Ry·(0,0,1) = (sin ay, 0, cos ay)
+ *   Rx·(sin ay, 0, cos ay) = (sin ay, -sin ax · cos ay, cos ax · cos ay)
+ */
+export function surfaceNormal(
+  nx: number,
+  ny: number,
+  tiltDeg: number,
+): readonly [number, number, number] {
+  const toRad = Math.PI / 180;
+  const ax = ny * tiltDeg * toRad;
+  const ay = nx * tiltDeg * toRad;
+  const cosAy = Math.cos(ay);
+  return [Math.sin(ay), -Math.sin(ax) * cosAy, Math.cos(ax) * cosAy];
+}
+
+/**
+ * 算某个卡片姿态下的卡面炫光强度，返回 0..1。
+ *
+ * 模型很简单：卡面法线越接近「能把光源反射进眼睛」的那个朝向，虹彩越强。
+ * 用两瓣叠加——一瓣宽而弱当底光，一瓣窄而亮当主峰，
+ * 这样既不会全程死黑，又能保留「转到某个角度突然爆开」的观感。
+ *
+ * 抽成纯函数是为了能单独验证，也方便将来用陀螺仪之类的其他输入驱动。
+ */
+export function computeHalo(
+  nx: number,
+  ny: number,
+  tiltDeg: number,
+  light: HaloLight,
+): number {
+  const current = surfaceNormal(nx, ny, tiltDeg);
+  const peak = surfaceNormal(light.peakAt[0], light.peakAt[1], tiltDeg);
+
+  const dot = Math.max(
+    0,
+    current[0] * peak[0] + current[1] * peak[1] + current[2] * peak[2],
+  );
+
+  const sharpness = Math.max(1, light.sharpness);
+  const wide = Math.pow(dot, Math.max(1, sharpness / 5));
+  const tight = Math.pow(dot, sharpness);
+  return 0.2 * wide + 0.8 * tight;
+}
+
 export class HoloCard {
   readonly #host: HTMLElement;
   #options: HoloCardOptions;
@@ -36,6 +91,8 @@ export class HoloCard {
   #root: HTMLDivElement | null = null;
   /** 当前持有的 object URL，切换卡片和销毁时必须全部 revoke，否则内存泄漏 */
   #objectUrls: string[] = [];
+  /** 当前卡面炫光配置，每帧算强度时要用 */
+  #halo: HaloEffect | null = null;
 
   /** 待写入的指针状态，由 rAF 统一 flush，避免 pointermove 里频繁改样式 */
   #pendingNx = 0;
@@ -52,6 +109,11 @@ export class HoloCard {
     this.#options = { ...DEFAULT_OPTIONS, ...options };
   }
 
+  /** 当前卡片的根节点，供演示页读调试数值。未挂载时为 null */
+  get element(): HTMLDivElement | null {
+    return this.#root;
+  }
+
   /** 挂载（或替换）一组层。重复调用会先清掉上一组的资源 */
   setLayerSet(set: LayerSet): void {
     this.#teardownDom();
@@ -62,6 +124,9 @@ export class HoloCard {
         `层数对不上：manifest 声明 ${manifest.layers.length} 层，实际给了 ${images.length} 张图`,
       );
     }
+
+    const halo = manifest.effects.halo;
+    this.#halo = halo;
 
     const root = document.createElement('div');
     root.className = 'hc';
@@ -75,16 +140,15 @@ export class HoloCard {
     const stack = document.createElement('div');
     stack.className = 'hc__stack';
 
-    const foilTargets = new Set(manifest.effects.foil.layers);
-    const foilType = manifest.effects.foil.type;
-    const wholeCardFoil = foilTargets.size === 0 && foilType !== 'none';
-
+    // 景深层：按由远及近的顺序铺，各自带视差系数
+    const layerUrls: string[] = [];
     manifest.layers.forEach((layer, index) => {
       const blob = images[index];
       if (!blob) return; // 上面已校验过长度，这里只为满足类型收窄
 
       const url = URL.createObjectURL(blob);
       this.#objectUrls.push(url);
+      layerUrls.push(url);
 
       const img = document.createElement('img');
       img.className = 'hc__layer';
@@ -98,16 +162,22 @@ export class HoloCard {
         String(1 + 2 * Math.abs(layer.parallax) * this.#options.amplitude),
       );
       stack.append(img);
-
-      // 该层需要独立光泽时，紧跟在这一层后面插一个被它形状裁剪的光泽层
-      if (foilTargets.has(index)) {
-        stack.append(this.#createFoil(foilType, layer.parallax, manifest.effects.foil.intensity, url));
-      }
     });
 
-    // 没有指定作用层时退化成整卡一层光泽（也就是 pokemon-cards-css 的做法）
-    if (wholeCardFoil) {
-      stack.append(this.#createFoil(foilType, 0, manifest.effects.foil.intensity, null));
+    // 卡面层：压在所有景深层之上，不带任何 translate
+    if (halo.type !== 'none') {
+      const el = document.createElement('div');
+      el.className = 'hc__halo';
+      el.dataset['type'] = halo.type;
+      el.style.setProperty('--hc-halo-intensity', String(halo.intensity));
+
+      // 局部压印：借用某一景深层的形状，但压印本身留在卡面上
+      const maskUrl = halo.maskLayer === null ? null : layerUrls[halo.maskLayer];
+      if (maskUrl) {
+        el.dataset['masked'] = 'true';
+        el.style.setProperty('--hc-halo-mask', `url("${maskUrl}")`);
+      }
+      stack.append(el);
     }
 
     if (manifest.effects.glare) {
@@ -120,6 +190,9 @@ export class HoloCard {
     root.append(inner);
     this.#host.append(root);
     this.#root = root;
+
+    // 静止姿态下的炫光也要算出来，否则首帧是全黑的
+    root.style.setProperty('--hc-halo', this.#computeHalo(0, 0).toFixed(4));
 
     this.#bindPointer(root);
   }
@@ -141,30 +214,19 @@ export class HoloCard {
         String(1 + 2 * Math.abs(parallax) * this.#options.amplitude),
       );
     }
+
+    // 倾斜角变了，同一个指针位置对应的法线也变了，炫光要重算
+    this.#scheduleFlush();
   }
 
   destroy(): void {
     this.#teardownDom();
   }
 
-  #createFoil(
-    type: string,
-    parallax: number,
-    intensity: number,
-    maskUrl: string | null,
-  ): HTMLDivElement {
-    const foil = document.createElement('div');
-    foil.className = 'hc__foil';
-    foil.dataset['type'] = type;
-    foil.style.setProperty('--hc-parallax', String(parallax));
-    foil.style.setProperty('--hc-foil-intensity', String(intensity));
-
-    if (maskUrl !== null) {
-      // 用这一层自己的图做遮罩，光泽就被关在它的 alpha 形状里
-      foil.dataset['masked'] = 'true';
-      foil.style.setProperty('--hc-foil-mask', `url("${maskUrl}")`);
-    }
-    return foil;
+  #computeHalo(nx: number, ny: number): number {
+    const halo = this.#halo;
+    if (!halo || halo.type === 'none') return 0;
+    return computeHalo(nx, ny, this.#options.tilt, halo.light);
   }
 
   #bindPointer(root: HTMLDivElement): void {
@@ -236,6 +298,10 @@ export class HoloCard {
       root.style.setProperty('--hc-ny', this.#pendingNy.toFixed(4));
       root.style.setProperty('--hc-mx', this.#pendingMx.toFixed(2));
       root.style.setProperty('--hc-my', this.#pendingMy.toFixed(2));
+      root.style.setProperty(
+        '--hc-halo',
+        this.#computeHalo(this.#pendingNx, this.#pendingNy).toFixed(4),
+      );
     });
   }
 
@@ -251,6 +317,7 @@ export class HoloCard {
       URL.revokeObjectURL(url);
     }
     this.#objectUrls = [];
+    this.#halo = null;
 
     this.#root?.remove();
     this.#root = null;

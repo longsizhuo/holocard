@@ -19,7 +19,7 @@
         <div class="stage" id="stage"></div>
 
         <aside class="panel">
-          <h2 class="panel__title">调参</h2>
+          <h2 class="panel__title">景深</h2>
 
           <label class="field">
             <span class="field__label">倾斜角 <output id="out-tilt">14°</output></span>
@@ -32,9 +32,17 @@
             <small class="field__hint">调大更爽，但也更容易暴露补洞质量</small>
           </label>
 
+          <hr class="panel__sep" />
+
+          <h2 class="panel__title">卡面</h2>
+          <p class="panel__lead">
+            炫光是<strong>卡面本身</strong>的属性，压在所有景深层之上，不随视差移动。
+            强度由卡面法线与光源的夹角决定——转到某个倾角才爆出五彩。
+          </p>
+
           <label class="field">
-            <span class="field__label">光泽类型</span>
-            <select id="ctl-foil">
+            <span class="field__label">花纹</span>
+            <select id="ctl-halo">
               <option value="rainbow">彩虹箔 rainbow</option>
               <option value="linear">线性扫光 linear</option>
               <option value="galaxy">星河 galaxy</option>
@@ -42,12 +50,35 @@
             </select>
           </label>
 
+          <label class="field">
+            <span class="field__label">强度 <output id="out-intensity">0.55</output></span>
+            <input id="ctl-intensity" type="range" min="0" max="1" step="0.05" value="0.55" />
+          </label>
+
+          <label class="field">
+            <span class="field__label">角度锐度 <output id="out-sharp">120</output></span>
+            <input id="ctl-sharp" type="range" min="10" max="400" step="10" value="120" />
+            <small class="field__hint">
+              越大，出虹彩的倾角窗口越窄。调到最小会变成「哪都亮」，那就是不对的观感
+            </small>
+          </label>
+
+          <div class="readout">
+            <span>当前炫光</span>
+            <div class="readout__bar"><i id="halo-fill"></i></div>
+            <output id="out-halo">0.00</output>
+          </div>
+          <small class="field__hint">
+            把指针在卡面上慢慢划过，看这个数值什么时候冲起来
+          </small>
+
           <label class="field field--row">
-            <input id="ctl-foil-subject" type="checkbox" checked />
-            <span>光泽只作用于主体层</span>
+            <input id="ctl-halo-mask" type="checkbox" />
+            <span>压印到主体形状</span>
           </label>
           <small class="field__hint">
-            关掉就退化成整卡一层光泽，也就是 pokemon-cards-css 的做法。对比一下层次差别。
+            局部箔。压印依然在卡面上不随视差移动，所以大角度倾斜时会和主体轻微错开——
+            这是对的，就像窗户上的灰尘不会跟着窗外景物一起动。
           </small>
 
           <hr class="panel__sep" />

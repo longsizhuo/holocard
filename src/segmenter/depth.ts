@@ -6,10 +6,28 @@
  * CC-BY-NC，开源项目用不了。
  */
 
-import { pipeline, RawImage } from '@huggingface/transformers';
+import { env, pipeline, RawImage } from '@huggingface/transformers';
 import type { DepthMap } from './slice';
 
 const MODEL_ID = 'onnx-community/depth-anything-v2-small';
+
+/**
+ * 配置权重来源。
+ *
+ * 默认走 Hugging Face 官方 CDN——模型本来就公开托管在那里，
+ * 我们一台服务器都不用出，也没有带宽账单。
+ *
+ * 但 huggingface.co 在中国大陆访问困难，所以留了构建期覆盖：
+ *   VITE_MODEL_HOST=https://hf-mirror.com/
+ * 也可以指向自己的 R2 / OSS / jsDelivr 镜像，见 README 的部署一节。
+ */
+function configureModelSource(): void {
+  const host = import.meta.env.VITE_MODEL_HOST;
+  if (host) env.remoteHost = host;
+
+  const template = import.meta.env.VITE_MODEL_PATH_TEMPLATE;
+  if (template) env.remotePathTemplate = template;
+}
 
 /** 模型加载进度，透传给 UI 做进度条 */
 export interface LoadProgress {
@@ -44,11 +62,16 @@ export async function loadDepthModel(
   if (estimatorPromise) return estimatorPromise;
 
   estimatorPromise = (async () => {
+    configureModelSource();
     const device = await pickDevice();
+
+    // WebGPU 下用 fp16，约 50MB；WASM 上 fp16 没有加速，不如 q8。
+    // 想进一步压下载量可以在构建期强制 q8，代价是深度图细节略糊。
+    const dtype = import.meta.env.VITE_MODEL_DTYPE ?? (device === 'webgpu' ? 'fp16' : 'q8');
+
     return pipeline('depth-estimation', MODEL_ID, {
       device,
-      // WebGPU 下用 fp16 体积减半；WASM 上 fp16 没有加速，还不如 q8
-      dtype: device === 'webgpu' ? 'fp16' : 'q8',
+      dtype,
       ...(onProgress ? { progress_callback: (p: unknown) => onProgress(p as LoadProgress) } : {}),
     });
   })();

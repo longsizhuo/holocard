@@ -1,8 +1,11 @@
 /** .layers 的读写与校验 */
 
 import {
+  DEFAULT_HALO_LIGHT,
   LAYERS_FORMAT_VERSION,
+  defaultHalo,
   type BBox,
+  type HaloType,
   type LayerEntry,
   type LayerManifest,
   type LayerSet,
@@ -58,6 +61,12 @@ function parseLayer(raw: unknown, index: number): LayerEntry {
   };
 }
 
+function parseHaloType(raw: unknown, fallback: HaloType): HaloType {
+  return raw === 'rainbow' || raw === 'linear' || raw === 'galaxy' || raw === 'none'
+    ? raw
+    : fallback;
+}
+
 /** 把任意 JSON 解析成 LayerManifest，字段缺失时给出可用的默认值 */
 export function parseManifest(raw: unknown): LayerManifest {
   if (typeof raw !== 'object' || raw === null) {
@@ -84,21 +93,37 @@ export function parseManifest(raw: unknown): LayerManifest {
   // 渲染器依赖「数组顺序 == 由远及近」这个不变量，这里强制成立
   layers.sort((a, b) => a.depth - b.depth);
 
+  const fallback = defaultHalo();
   const effects = (o['effects'] ?? {}) as Record<string, unknown>;
-  const foil = (effects['foil'] ?? {}) as Record<string, unknown>;
+  const halo = (effects['halo'] ?? {}) as Record<string, unknown>;
+  const light = (halo['light'] ?? {}) as Record<string, unknown>;
+
+  const rawPeak = light['peakAt'];
+  const peakAt: readonly [number, number] =
+    Array.isArray(rawPeak) && rawPeak.length === 2 && rawPeak.every(isFiniteNumber)
+      ? [rawPeak[0] as number, rawPeak[1] as number]
+      : DEFAULT_HALO_LIGHT.peakAt;
+
+  // maskLayer 越界时当成整卡面处理，而不是报错——手写 manifest 很容易填错下标
+  const rawMask = halo['maskLayer'];
+  const maskLayer =
+    isFiniteNumber(rawMask) && rawMask >= 0 && rawMask < layers.length ? Math.trunc(rawMask) : null;
 
   const manifest: LayerManifest = {
     version: LAYERS_FORMAT_VERSION,
     source: { width: source['width'], height: source['height'] },
     layers,
     effects: {
-      foil: {
-        layers: Array.isArray(foil['layers']) ? foil['layers'].filter(isFiniteNumber) : [],
-        type:
-          foil['type'] === 'linear' || foil['type'] === 'galaxy' || foil['type'] === 'none'
-            ? foil['type']
-            : 'rainbow',
-        intensity: isFiniteNumber(foil['intensity']) ? foil['intensity'] : 1,
+      halo: {
+        type: parseHaloType(halo['type'], fallback.type),
+        intensity: isFiniteNumber(halo['intensity']) ? halo['intensity'] : fallback.intensity,
+        maskLayer,
+        light: {
+          peakAt,
+          sharpness: isFiniteNumber(light['sharpness'])
+            ? light['sharpness']
+            : DEFAULT_HALO_LIGHT.sharpness,
+        },
       },
       glare: effects['glare'] !== false,
     },

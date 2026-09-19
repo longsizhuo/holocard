@@ -99,3 +99,41 @@ select {
   background: var(--accent);
   transition: width 0.25s ease;
 }
+
+/* ---------- 炫光读数 ---------- */
+
+.panel__lead {
+  margin: -6px 0 16px;
+  font-size: 12px;
+  line-height: 1.6;
+  color: var(--muted);
+}
+.panel__lead strong { color: var(--fg); font-weight: 600; }
+
+.readout {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 12px;
+  color: var(--muted);
+  margin: 4px 0 6px;
+}
+.readout__bar {
+  flex: 1;
+  height: 4px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.08);
+  overflow: hidden;
+}
+.readout__bar i {
+  display: block;
+  height: 100%;
+  width: 0%;
+  background: linear-gradient(90deg, #5fd6ff, #a97bff, #ffed5f);
+}
+.readout output {
+  font-variant-numeric: tabular-nums;
+  color: var(--accent);
+  min-width: 2.6em;
+  text-align: right;
+}
