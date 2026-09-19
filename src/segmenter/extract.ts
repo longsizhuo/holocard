@@ -17,6 +17,7 @@
 
 import type { BBox } from '../format/types';
 import { blurAlpha, dilateMask, growForeground, nearestSource, snapDepthEdges } from './morph';
+import { createRefiner, guideFromImage, type Guide, type RefineOptions } from './refine';
 import type { DepthMap } from './slice';
 
 export interface ExtractOptions {
@@ -37,6 +38,14 @@ export interface ExtractOptions {
   fringe: number;
   /** 镜像纹理填充最多深入遮挡区多远（相对图宽），再往里退化成平滑填充 */
   mirrorReach: number;
+  /** 是否用引导滤波把层边界吸附到真实的物体边缘上。关掉则边界完全来自深度图 */
+  refineEdges: boolean;
+  refine: Partial<RefineOptions>;
+  /**
+   * 额外的向导通道，比如抠图模型给出的前景 alpha。会和原图 RGB 拼在一起当向导用。
+   * 尺寸必须和输出一致，取值 0..1。
+   */
+  extraGuide: Float32Array[] | null;
 }
 
 export const DEFAULT_EXTRACT_OPTIONS: ExtractOptions = {
@@ -45,8 +54,11 @@ export const DEFAULT_EXTRACT_OPTIONS: ExtractOptions = {
   snapRadius: 0.01,
   snapThreshold: 0.12,
   foregroundGrow: 0.004,
-  fringe: 0.003,
+  fringe: 0.005,
   mirrorReach: 0.12,
+  refineEdges: true,
+  refine: {},
+  extraGuide: null,
 };
 
 export interface LayerStat {
@@ -66,6 +78,13 @@ export interface ExtractResult {
 const COVERED = 0.5;
 /** 盖到这个程度才认为下面像素的颜色完全不可信，需要重新填 */
 const FULLY_COVERED = 0.98;
+/**
+ * 在确认有真实物体边缘的地方，盖到这个程度就算颜色不可信。
+ * 精修后的边缘是软的（发丝、抗锯齿），半透明的那一圈像素已经混进了前景的颜色，
+ * 拿它们当填充源会把前景的颜色抹进背景；而平缓过渡区里同样是半透明，颜色却是干净的。
+ * 两者靠精修给出的置信度区分。
+ */
+const TOUCHED = 0.05;
 
 function smoothstep(edge0: number, edge1: number, x: number): number {
   if (edge1 <= edge0) return x < edge0 ? 0 : 1;
@@ -355,19 +374,91 @@ export async function extractLayers(
     Math.round(width * opts.foregroundGrow),
   );
 
-  // 每层「看得见的部分」的 alpha：落在本层深度带内为 1，跨越分界时 smoothstep 过渡。
-  // 吸附后的边缘是硬台阶，轻轻糊一下补回抗锯齿。
+  /*
+   * 每条层分界对应一张累积遮罩 cutMasks[k]：像素比第 k 条分界更近的程度，0..1。
+   * 精修是针对「分界」做的而不是针对「层」：一条分界修好了，它两侧的层同时受益，
+   * 而且两侧的 alpha 天然互补，不会在边界上叠出缝隙或者重影。
+   */
+  const cutMasks: Float32Array[] = cuts.map((cut) => {
+    const mask = new Float32Array(pixelCount);
+    for (let p = 0; p < pixelCount; p++) mask[p] = smoothstep(cut - f, cut + f, sampled[p] ?? 0);
+    return mask;
+  });
+
+  // 哪些地方确认有真实的物体边缘，补全时要据此判断颜色可不可信
+  const edgeConfidence = new Float32Array(pixelCount);
+
+  if (opts.refineEdges && cutMasks.length > 0) {
+    const guide: Guide = guideFromImage(src, width, height);
+    if (opts.extraGuide) guide.channels.push(...opts.extraGuide);
+    const refiner = createRefiner(guide, opts.refine);
+
+    cutMasks.forEach((mask, k) => {
+      const { alpha, confidence } = refiner.refine(mask);
+      cutMasks[k] = alpha;
+      for (let p = 0; p < pixelCount; p++) {
+        const c = confidence[p] ?? 0;
+        if (c > (edgeConfidence[p] ?? 0)) edgeConfidence[p] = c;
+      }
+    });
+
+    /*
+     * 两条分界落在同一条物体边缘上时，要共用同一条精修后的边。
+     *
+     * 典型情况：头部（最近层）直接压在天空（最远层）上，中间层在这附近根本不存在。
+     * 这时「比分界 0 近」和「比分界 1 近」是同一个集合，两张遮罩本该处处相等；
+     * 但它们是各自精修的，软边的形状不会完全一致，一相减就在轮廓上剩下一圈属于中间层的细环。
+     * 判据：第 k 层在附近一个不确定带的范围内都没出现过，就让它下面那条分界直接照抄上面那条。
+     */
+    const reach = Math.max(2, Math.round(width * (opts.refine.bandRadius ?? 0.016)));
+    for (let k = cutMasks.length - 1; k >= 1; k--) {
+      const upper = cutMasks[k];
+      const lower = cutMasks[k - 1];
+      const loCut = cuts[k - 1];
+      const hiCut = cuts[k];
+      if (!upper || !lower || loCut === undefined || hiCut === undefined) continue;
+
+      // 精修之前，哪些像素的深度落在第 k 层的区间里
+      const present = new Uint8Array(pixelCount);
+      for (let p = 0; p < pixelCount; p++) {
+        const d = sampled[p] ?? 0;
+        present[p] = d >= loCut && d < hiCut ? 1 : 0;
+      }
+      const nearby = dilateMask(present, width, height, reach);
+      for (let p = 0; p < pixelCount; p++) {
+        if (!nearby[p]) lower[p] = upper[p] ?? 0;
+      }
+    }
+
+    // 分界是嵌套的：比第 k 条更近，必然也比第 k-1 条更近。各自精修之后要把这个关系扳回来
+    for (let k = 1; k < cutMasks.length; k++) {
+      const nearer = cutMasks[k];
+      const farther = cutMasks[k - 1];
+      if (!nearer || !farther) continue;
+      for (let p = 0; p < pixelCount; p++) {
+        if ((nearer[p] ?? 0) > (farther[p] ?? 0)) nearer[p] = farther[p] ?? 0;
+      }
+    }
+  }
+
+  /*
+   * 每层「看得见的部分」的 alpha = 比下边界近的程度 − 比上边界近的程度。
+   *
+   * 这里必须用减法而不是乘法。分界遮罩是嵌套的，一个被前景覆盖了 t 的边缘像素，
+   * 对两条分界的取值都是 t：减法给出中间层 t − t = 0，是对的；
+   * 乘法给出 t·(1 − t)，最大 0.25，会在每条软边上给中间层凭空造出一圈环。
+   * 硬边上两者没有区别，所以这个错在接入精修之前一直没暴露。
+   */
   const visibleAlphas: Float32Array[] = [];
   for (let i = 0; i < layerCount; i++) {
-    const lo = i === 0 ? Number.NEGATIVE_INFINITY : (cuts[i - 1] ?? 0);
-    const hi = i === layerCount - 1 ? Number.POSITIVE_INFINITY : (cuts[i] ?? 1);
+    const lower = i === 0 ? null : cutMasks[i - 1];
+    const upper = i === layerCount - 1 ? null : cutMasks[i];
     const a = new Float32Array(pixelCount);
     for (let p = 0; p < pixelCount; p++) {
-      const d = sampled[p] ?? 0;
-      const lower = Number.isFinite(lo) ? smoothstep(lo - f, lo + f, d) : 1;
-      const upper = Number.isFinite(hi) ? 1 - smoothstep(hi - f, hi + f, d) : 1;
-      a[p] = lower * upper;
+      const v = (lower ? (lower[p] ?? 0) : 1) - (upper ? (upper[p] ?? 0) : 0);
+      a[p] = v > 0 ? v : 0;
     }
+    // 吸附后的边缘是硬台阶，轻轻糊一下补回抗锯齿
     visibleAlphas.push(i === 0 ? a : blurAlpha(a, width, height));
   }
 
@@ -396,10 +487,13 @@ export async function extractLayers(
         }
       }
 
-      // 颜色不可信的区域：被完全盖住的部分，再向外吃掉一圈混色边缘
+      // 颜色不可信的区域：被完全盖住的部分，加上真实物体边缘上那圈半透明的混色像素，
+      // 再向外吃掉一圈
       const fullyCovered = new Uint8Array(pixelCount);
       for (let p = 0; p < pixelCount; p++) {
-        fullyCovered[p] = (above[p] ?? 0) >= FULLY_COVERED ? 1 : 0;
+        const covered = above[p] ?? 0;
+        const atRealEdge = (edgeConfidence[p] ?? 0) >= 0.5 && covered >= TOUCHED;
+        fullyCovered[p] = covered >= FULLY_COVERED || atRealEdge ? 1 : 0;
       }
       const unknown = dilateMask(fullyCovered, width, height, fringePx);
 

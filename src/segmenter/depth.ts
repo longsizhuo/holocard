@@ -6,55 +6,16 @@
  * CC-BY-NC，开源项目用不了。
  */
 
-import { env, pipeline, RawImage } from '@huggingface/transformers';
+import { pipeline, RawImage } from '@huggingface/transformers';
+import { configureModelSource, pickDevice, type LoadProgress } from './runtime';
 import type { DepthMap } from './slice';
 
 const MODEL_ID = 'onnx-community/depth-anything-v2-small';
-
-/**
- * 配置权重来源。
- *
- * 默认走 Hugging Face 官方 CDN——模型本来就公开托管在那里，
- * 我们一台服务器都不用出，也没有带宽账单。
- *
- * 但 huggingface.co 在中国大陆访问困难，所以留了构建期覆盖：
- *   VITE_MODEL_HOST=https://hf-mirror.com/
- * 也可以指向自己的 R2 / OSS / jsDelivr 镜像，见 README 的部署一节。
- */
-function configureModelSource(): void {
-  const host = import.meta.env.VITE_MODEL_HOST;
-  if (host) env.remoteHost = host;
-
-  const template = import.meta.env.VITE_MODEL_PATH_TEMPLATE;
-  if (template) env.remotePathTemplate = template;
-}
-
-/** 模型加载进度，透传给 UI 做进度条 */
-export interface LoadProgress {
-  status: string;
-  file?: string;
-  progress?: number;
-  loaded?: number;
-  total?: number;
-}
 
 type DepthEstimator = Awaited<ReturnType<typeof pipeline<'depth-estimation'>>>;
 
 /** 模型只加载一次，后续调用复用。浏览器 Cache API 会缓存权重，二次打开是秒开 */
 let estimatorPromise: Promise<DepthEstimator> | null = null;
-
-/** 探测 WebGPU 是否可用。不可用就退回 WASM，慢很多但至少能跑 */
-async function pickDevice(): Promise<'webgpu' | 'wasm'> {
-  const gpu = (navigator as Navigator & { gpu?: { requestAdapter(): Promise<unknown> } }).gpu;
-  if (!gpu) return 'wasm';
-  try {
-    const adapter = await gpu.requestAdapter();
-    return adapter ? 'webgpu' : 'wasm';
-  } catch {
-    // 有些环境有 navigator.gpu 但握手会抛，一律退回 WASM
-    return 'wasm';
-  }
-}
 
 export async function loadDepthModel(
   onProgress?: (p: LoadProgress) => void,

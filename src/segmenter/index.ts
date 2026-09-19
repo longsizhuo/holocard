@@ -1,16 +1,14 @@
 /**
  * 分层流水线：一张图片 → 一组 .layers
  *
- * 流程是「深度定序 + 羽化定边界 + push-pull 补洞」：
+ * 流程：
  *   estimateDepth  拿到连续深度，决定谁在前
  *   analyzeDepth   在深度直方图的谷底切层，层数自适应
- *   extractLayers  羽化出每层 alpha，并把底层的遮挡区补掉
+ *   extractLayers  深度边缘吸附、引导滤波精修边界、逐层补全
  *
  * 产出的每一层同时承担两个角色：带视差的画面，以及这一层箔面的遮罩——
  * 参考项目里那张靠手工准备的 --mask 图，在这里是自动生成的。
  * 所以层边缘的干净程度直接决定箔面边缘好不好看。
- *
- * 边缘精修（BiRefNet_lite 出主体 alpha）还没接，见 README 的路线图。
  */
 
 import {
@@ -20,7 +18,8 @@ import {
   type LayerEntry,
   type LayerSet,
 } from '../format/types';
-import { estimateDepth, type LoadProgress } from './depth';
+import { estimateDepth } from './depth';
+import type { LoadProgress } from './runtime';
 import { analyzeDepth, type SliceOptions } from './slice';
 import { extractLayers, type ExtractOptions } from './extract';
 
