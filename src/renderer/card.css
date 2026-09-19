@@ -1,65 +1,77 @@
 /*
- * HoloCard 渲染器样式
+ * HoloCard 渲染器的结构样式
  *
- * 由 JS 注入的 CSS 变量驱动，渲染器本身不碰 style 属性之外的东西：
- *   --hc-nx / --hc-ny     指针相对卡片中心的归一化偏移，范围 -1..1
- *   --hc-mx / --hc-my     指针在卡片内的百分比位置，范围 0..100，用于定位渐变
- *   --hc-active           交互淡入淡出，0 = 静止，1 = 正在交互
- *   --hc-halo             卡面炫光强度，0..1，由卡面法线与光源的夹角算出
- *   --hc-parallax         每个「景深层」各自的视差系数
- *   --hc-scale            每个景深层各自的缩放补偿
+ * 箔面配方和整卡高光在 foils.css（移植自 pokemon-cards-css）。
+ * 这份文件只管我们自己的部分：3D 结构、景深层的视差、每层的箔面遮罩、整卡炫光。
  *
- * 结构上区分两类东西，这个区分是这份样式的核心：
- *   景深层 .hc__layer —— 画面内容，参与视差
- *   卡面层 .hc__halo / .hc__glare —— 卡面本身的物理属性，压在所有景深层之上，不参与视差
+ * 所有动态量都由 JS 里的弹簧每帧写到 .hc 上：
+ *   --pointer-x / --pointer-y          指针位置 0%..100%（已过弹簧）
+ *   --pointer-from-center/top/left     0..1
+ *   --background-x / --background-y    收窄到 37%..63% / 33%..67% 的背景位移量
+ *   --rotate-x / --rotate-y            卡片转角
+ *   --card-opacity                     交互淡入淡出 0..1
+ *   --hc-nx / --hc-ny                  指针归一化偏移 -1..1，驱动视差
+ *   --hc-halo                          整卡炫光强度 0..1，由卡面法线与光源夹角算出
+ *
+ * 前六组变量名与上游保持一致，这样 foils.css 里的配方可以原样工作。
  */
 
 .hc {
-  /* perspective 放在外层容器上，内层才能真正产生 3D 透视 */
-  perspective: 1200px;
   display: inline-block;
-  /* 卡片自身的宽高比由 JS 按原图尺寸写入 */
-  aspect-ratio: var(--hc-aspect, 5 / 7);
   width: 100%;
   max-width: 420px;
+  /* 卡片自身的宽高比由 JS 按原图尺寸写入 */
+  aspect-ratio: var(--hc-aspect, 0.718);
+
+  --pointer-x: 50%;
+  --pointer-y: 50%;
+  --pointer-from-center: 0;
+  --pointer-from-top: 0.5;
+  --pointer-from-left: 0.5;
+  --background-x: 50%;
+  --background-y: 50%;
+  --rotate-x: 0deg;
+  --rotate-y: 0deg;
+  --card-opacity: 0;
 
   --hc-nx: 0;
   --hc-ny: 0;
-  --hc-mx: 50;
-  --hc-my: 50;
-  --hc-active: 0;
   --hc-halo: 0;
-  --hc-tilt: 14deg;
   /* 视差振幅：位移量相对卡片宽度的比例。百分比位移天然分辨率无关 */
   --hc-amp: 6%;
-  --hc-radius: 4.5% / 3.2%;
+  --hc-radius: 4.55% / 3.5%;
 }
 
-.hc__inner {
+/* perspective 必须放在旋转元素的父级上才生效；600px 与上游一致，透视感比较强 */
+.hc__translater {
+  width: 100%;
+  height: 100%;
+  perspective: 600px;
+  transform-origin: center;
+}
+
+.hc__rotator {
   position: relative;
   width: 100%;
   height: 100%;
   border-radius: var(--hc-radius);
-  transform-style: preserve-3d;
+  transform-origin: center;
 
   /*
-   * 注意这里只做旋转，不做 translateZ。
-   * translateZ 会引入透视缩放，每层大小对不上，需要额外 scale 补偿且很难调；
-   * 分层视差改由每层各自的 2D 位移实现（见 .hc__layer），完全可控。
+   * 与上游一致：rotateY 吃 --rotate-x，rotateX 吃 --rotate-y。
+   * 效果是指针所在的那一侧朝观察者抬起来。
+   * 这里没有 transition——运动完全交给 JS 的弹簧，CSS 过渡会和弹簧打架。
    */
-  transform:
-    rotateX(calc(var(--hc-ny) * var(--hc-tilt)))
-    rotateY(calc(var(--hc-nx) * var(--hc-tilt)));
+  transform: rotateY(var(--rotate-x)) rotateX(var(--rotate-y));
+  will-change: transform, box-shadow;
 
-  transition: transform 0.35s cubic-bezier(0.23, 1, 0.32, 1);
   box-shadow:
-    0 0.5rem 1.5rem rgba(0, 0, 0, 0.35),
-    0 0 0 1px rgba(255, 255, 255, 0.08) inset;
-}
+    0px 10px 20px -5px black,
+    0 2px 15px -5px black;
 
-.hc.is-interacting .hc__inner {
-  /* 跟手时去掉过渡，否则会有拖影 */
-  transition: none;
+  /* 竖向滑动留给页面滚动，横向拖动用来转卡 */
+  touch-action: pan-y;
+  cursor: grab;
 }
 
 .hc__stack {
@@ -67,163 +79,115 @@
   inset: 0;
   overflow: hidden; /* 裁掉被视差推出边界的部分 */
   border-radius: inherit;
-  isolation: isolate; /* 把 mix-blend-mode 的作用范围关在卡片内 */
+  isolation: isolate; /* 把整卡炫光、高光的混合范围关在卡片内 */
   background: #0b0d16;
+  pointer-events: none;
 }
 
-/* ---------- 景深层：参与视差 ---------- */
+/* ---------- 景深层 ---------- */
 
-.hc__layer {
+/*
+ * 一个 plane = 一层画面 + 这一层自己的箔面。
+ *
+ * 位移加在 plane 上而不是分别加在画面和箔面上，有两个目的：
+ *   1. 箔面天然跟着所在层一起动，不会和画面错位
+ *   2. transform 会让 plane 成为独立的层叠上下文，于是箔面的 color-dodge
+ *      只会和「这一层自己的画面」混合，不会透下去染到更远的层——
+ *      这正是「每层各有各的箔」想要的语义
+ */
+.hc__plane {
+  position: absolute;
+  inset: 0;
+
+  --hc-parallax: 0;
+  --hc-scale: 1;
+
+  /*
+   * 负号：指针在右侧时卡片右缘朝观察者抬起，相当于观察者站到了右边，
+   * 此时近处的东西相对远处向左移，所以近层的位移方向与指针相反。
+   *
+   * scale 是必须的：某一层平移 d 像素后，另一侧边缘会露出空白。
+   * 系数由渲染器按 1 + 2d/宽度 算出来写进 --hc-scale。
+   */
+  transform:
+    translate3d(
+      calc(var(--hc-nx) * var(--hc-parallax) * var(--hc-amp) * -1),
+      calc(var(--hc-ny) * var(--hc-parallax) * var(--hc-amp) * -1),
+      0
+    )
+    scale(var(--hc-scale));
+  will-change: transform;
+}
+
+.hc__art {
   position: absolute;
   inset: 0;
   width: 100%;
   height: 100%;
   object-fit: cover;
   display: block;
-  pointer-events: none;
-
-  --hc-parallax: 0;
-  --hc-scale: 1;
-
-  /*
-   * 放大一点点是必须的：某一层向右移动 d 像素后，它的左边缘会露出空白。
-   * 缩放系数由渲染器按 1 + 2d/宽度 算出来写进 --hc-scale。
-   */
-  transform:
-    translate3d(
-      calc(var(--hc-nx) * var(--hc-parallax) * var(--hc-amp)),
-      calc(var(--hc-ny) * var(--hc-parallax) * var(--hc-amp)),
-      0
-    )
-    scale(var(--hc-scale));
-
-  transition: transform 0.35s cubic-bezier(0.23, 1, 0.32, 1);
-  will-change: transform;
 }
-
-.hc.is-interacting .hc__layer {
-  transition: none;
-}
-
-/* ---------- 卡面层：不参与视差 ---------- */
 
 /*
- * 卡面炫光。
- *
- * 真实卡片的箔膜是压在卡面上的一层，不属于画面内容：
- * 转动卡片时它不会跟着画面里的人物一起位移，所以这里没有任何 translate。
- *
- * 强度完全由 --hc-halo 驱动，那个值是卡面法线与光源夹角算出来的——
- * 只有转到某个倾角、把光正好反射进眼睛时才爆出五彩，其余角度只剩很淡的底光。
- * 这和「鼠标在哪就亮哪」是两回事。
+ * 每层的箔面：用这一层自己的图当遮罩，箔只出现在该层的 alpha 形状里。
+ * 上游靠作者为每张卡手工准备的 --mask 图来做这件事，我们的分层结果就是自动生成的 mask。
+ * 配方本身在 foils.css。
  */
-.hc__halo {
+.hc__shine {
   position: absolute;
   inset: 0;
-  pointer-events: none;
-  --hc-halo-intensity: 0.55;
 
-  opacity: calc(var(--hc-halo) * var(--hc-halo-intensity) * var(--hc-active));
-  transition: opacity 0.35s ease;
-}
-
-.hc.is-interacting .hc__halo {
-  /* 跟手时炫光要立刻响应倾角，加过渡会糊掉「转到某个角度突然爆」的观感 */
-  transition: none;
-}
-
-/*
- * 局部压印：用某一景深层的 alpha 当压印形状。
- * 注意压印本身依然在卡面上、不随视差移动，所以大角度倾斜时
- * 它会和画面里的主体轻微错开——这是对的，就像窗户上的灰尘不会跟着窗外景物一起动。
- */
-.hc__halo[data-masked='true'] {
-  -webkit-mask-image: var(--hc-halo-mask);
-  mask-image: var(--hc-halo-mask);
+  -webkit-mask-image: var(--hc-mask);
+  mask-image: var(--hc-mask);
   -webkit-mask-size: 100% 100%;
   mask-size: 100% 100%;
   -webkit-mask-repeat: no-repeat;
   mask-repeat: no-repeat;
 }
 
-.hc__halo[data-type='rainbow'] {
-  background-image:
-    repeating-linear-gradient(
-      100deg,
-      #ff7773 0%, #ffed5f 11%, #6cff78 22%,
-      #5fd6ff 33%, #a97bff 44%, #ff7773 55%
-    ),
-    repeating-linear-gradient(-32deg, #0e152e 0%, #7d8fb3 9%, #0e152e 18%);
-  background-size: 220% 220%, 160% 160%;
-  background-position:
-    calc(var(--hc-mx) * 1%) calc(var(--hc-my) * 1%),
-    calc(100% - var(--hc-mx) * 1%) calc(100% - var(--hc-my) * 1%);
-  background-blend-mode: hard-light;
-  mix-blend-mode: color-dodge;
-  filter: brightness(0.85) contrast(1.9) saturate(1.5);
-}
+/* ---------- 整卡炫光 ---------- */
 
-.hc__halo[data-type='linear'] {
-  background-image: linear-gradient(
-    calc(var(--hc-nx) * 40deg + 110deg),
-    transparent 30%,
-    rgba(255, 255, 255, 0.55) 48%,
-    rgba(255, 255, 255, 0.85) 50%,
-    rgba(255, 255, 255, 0.55) 52%,
-    transparent 70%
-  );
-  mix-blend-mode: overlay;
-}
-
-.hc__halo[data-type='galaxy'] {
-  background-image:
-    radial-gradient(
-      circle at calc(var(--hc-mx) * 1%) calc(var(--hc-my) * 1%),
-      rgba(255, 255, 255, 0.9) 0%,
-      rgba(150, 190, 255, 0.35) 12%,
-      transparent 45%
-    ),
-    conic-gradient(
-      from calc(var(--hc-nx) * 60deg),
-      #3a1c71, #d76d77, #ffaf7b, #3a1c71
-    );
-  background-blend-mode: screen;
-  mix-blend-mode: color-dodge;
-  filter: contrast(1.4) saturate(1.3);
-}
-
-.hc__halo[data-type='none'] {
-  display: none;
-}
-
-/* 跟随指针的镜面高光。同样是卡面效果，不随视差移动 */
-.hc__glare {
+/*
+ * 铺满整张卡面、压在所有层之上、不参与视差。
+ *
+ * 它和每层的箔面是两回事：箔面是主角，一悬停就亮；
+ * 这个只是卡面转到特定角度、正好把光反射进眼睛时才浮出来的一层细微五彩，
+ * 其余角度几乎看不见。强度 --hc-halo 由卡面法线与光源的夹角算出。
+ */
+.hc__halo {
   position: absolute;
   inset: 0;
-  border-radius: inherit;
   pointer-events: none;
-  mix-blend-mode: overlay;
-  opacity: var(--hc-active);
-  background: radial-gradient(
-    farthest-corner circle at calc(var(--hc-mx) * 1%) calc(var(--hc-my) * 1%),
-    rgba(255, 255, 255, 0.85) 4%,
-    rgba(255, 255, 255, 0.3) 18%,
-    rgba(120, 120, 140, 0.1) 42%,
-    rgba(0, 0, 0, 0.6) 100%
+  --hc-halo-intensity: 0.35;
+
+  background-image: linear-gradient(
+    115deg,
+    transparent 18%,
+    hsla(283, 100%, 73%, 0.75) 34%,
+    hsla(228, 100%, 74%, 0.75) 42%,
+    hsla(176, 100%, 76%, 0.75) 50%,
+    hsla(93, 100%, 69%, 0.75) 58%,
+    hsla(53, 100%, 69%, 0.75) 66%,
+    hsla(2, 100%, 73%, 0.75) 74%,
+    transparent 88%
   );
-  transition: opacity 0.35s ease;
+  background-size: 300% 300%;
+  /* 光带随倾角横扫过卡面 */
+  background-position:
+    calc(((50% - var(--background-x)) * 7) + 50%)
+    calc(((50% - var(--background-y)) * 5) + 50%);
+
+  mix-blend-mode: color-dodge;
+  filter: brightness(0.75) contrast(1.35);
+  opacity: calc(var(--hc-halo) * var(--hc-halo-intensity) * var(--card-opacity));
+  will-change: opacity, background-position;
 }
 
 /* ---------- 无障碍 ---------- */
 
 @media (prefers-reduced-motion: reduce) {
-  .hc__inner,
-  .hc__layer {
-    transition: none;
+  .hc__rotator,
+  .hc__plane {
     transform: none;
-  }
-  .hc__glare,
-  .hc__halo {
-    opacity: 0;
   }
 }

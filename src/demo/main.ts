@@ -3,7 +3,7 @@
 import './style.css';
 import { HoloCard } from '../renderer/card';
 import { loadLayerSet } from '../format/io';
-import type { HaloType, LayerSet } from '../format/types';
+import { FOIL_TYPES, type FoilType, type LayerSet } from '../format/types';
 
 /** 取元素并断言存在，省掉一堆空判断 */
 function need<T extends Element>(selector: string): T {
@@ -12,17 +12,21 @@ function need<T extends Element>(selector: string): T {
   return el;
 }
 
+const FOIL_LABEL: Record<FoilType, string> = {
+  none: '哑光（不上箔）',
+  holo: '经典闪卡 holo',
+  sunpillar: '日柱 sunpillar',
+  rainbow: '彩虹闪粉 rainbow',
+};
+
 const stage = need<HTMLDivElement>('#stage');
 const status = need<HTMLParagraphElement>('#status');
+const foilList = need<HTMLDivElement>('#foil-list');
 
-const ctlTilt = need<HTMLInputElement>('#ctl-tilt');
 const ctlAmp = need<HTMLInputElement>('#ctl-amp');
-const ctlHalo = need<HTMLSelectElement>('#ctl-halo');
 const ctlIntensity = need<HTMLInputElement>('#ctl-intensity');
 const ctlSharp = need<HTMLInputElement>('#ctl-sharp');
-const ctlHaloMask = need<HTMLInputElement>('#ctl-halo-mask');
 
-const outTilt = need<HTMLOutputElement>('#out-tilt');
 const outAmp = need<HTMLOutputElement>('#out-amp');
 const outIntensity = need<HTMLOutputElement>('#out-intensity');
 const outSharp = need<HTMLOutputElement>('#out-sharp');
@@ -35,54 +39,99 @@ const progress = need<HTMLDivElement>('#progress');
 const progressFill = need<HTMLElement>('#progress-fill');
 const progressText = need<HTMLSpanElement>('#progress-text');
 
-const card = new HoloCard(stage, {
-  tilt: Number(ctlTilt.value),
-  amplitude: Number(ctlAmp.value) / 100,
-});
+const card = new HoloCard(stage, { amplitude: Number(ctlAmp.value) / 100 });
 
-/** 当前这组层的原始数据，改卡面配置时要基于它重建 */
+// 开发环境下把实例挂到 window 上，方便在控制台里 __holocard.setPose({x:25,y:25}) 摆姿态看效果
+if (import.meta.env.DEV) {
+  (window as Window & { __holocard?: HoloCard }).__holocard = card;
+}
+
+/** 当前这组层。面板上的改动会同步写回这里，导出时拿到的就是调好的配置 */
 let current: LayerSet | null = null;
 /** 分层中，防止重复提交 */
 let busy = false;
 
-/**
- * 卡面配置写在 manifest 里，改配置就得重建 DOM。
- * 层数很少、图片已在内存，重建开销可以忽略。
- */
-function applyHaloSettings(): void {
-  if (!current) return;
-
-  const layerCount = current.manifest.layers.length;
-  card.setLayerSet({
-    ...current,
-    manifest: {
-      ...current.manifest,
-      effects: {
-        ...current.manifest.effects,
-        halo: {
-          ...current.manifest.effects.halo,
-          type: ctlHalo.value as HaloType,
-          intensity: Number(ctlIntensity.value),
-          // 勾上就把炫光压印成最近那一层的形状，否则铺满整张卡面
-          maskLayer: ctlHaloMask.checked ? layerCount - 1 : null,
-          light: {
-            ...current.manifest.effects.halo.light,
-            sharpness: Number(ctlSharp.value),
-          },
-        },
-      },
-    },
-  });
+/** 层的称呼：由远及近 */
+function layerName(index: number, count: number): string {
+  if (count === 1) return '整张';
+  if (index === 0) return '最远层（背景）';
+  if (index === count - 1) return '最近层（主体）';
+  return count === 3 ? '中间层' : `中间层 ${index}`;
 }
 
-/**
- * 把渲染器算出来的炫光强度显示出来。
- * 这是个纯读数：让人直观看到「只有转到某个倾角才爆」不是说辞。
- */
+/** 按当前层数重建「各层箔面」面板。层数是算出来的，不能写死在 HTML 里 */
+function buildFoilControls(set: LayerSet): void {
+  foilList.replaceChildren();
+  const count = set.manifest.layers.length;
+
+  // 面板从近到远排，和肉眼看卡的顺序一致：先看到主体，再看到背景
+  for (let index = count - 1; index >= 0; index--) {
+    const layer = set.manifest.layers[index];
+    if (!layer) continue;
+
+    const row = document.createElement('div');
+    row.className = 'foil-row';
+
+    const name = document.createElement('span');
+    name.className = 'foil-row__name';
+    name.textContent = layerName(index, count);
+
+    const select = document.createElement('select');
+    for (const type of FOIL_TYPES) {
+      const option = document.createElement('option');
+      option.value = type;
+      option.textContent = FOIL_LABEL[type];
+      select.append(option);
+    }
+    select.value = layer.foil.type;
+
+    const strength = document.createElement('input');
+    strength.type = 'range';
+    strength.min = '0';
+    strength.max = '1';
+    strength.step = '0.05';
+    strength.value = String(layer.foil.intensity);
+    strength.title = '这一层的箔面强度';
+
+    const apply = (): void => {
+      layer.foil = { type: select.value as FoilType, intensity: Number(strength.value) };
+      strength.disabled = layer.foil.type === 'none';
+      card.setLayerFoil(index, layer.foil);
+    };
+    select.addEventListener('change', apply);
+    strength.addEventListener('input', apply);
+    strength.disabled = layer.foil.type === 'none';
+
+    row.append(name, select, strength);
+    foilList.append(row);
+  }
+}
+
+/** 换一组层：渲染 + 重建面板 + 让面板上的全局参数继续生效 */
+function show(set: LayerSet): void {
+  current = set;
+  set.manifest.effects.halo.intensity = Number(ctlIntensity.value);
+  set.manifest.effects.halo.light = {
+    ...set.manifest.effects.halo.light,
+    sharpness: Number(ctlSharp.value),
+  };
+  card.setLayerSet(set);
+  buildFoilControls(set);
+}
+
+function applyHalo(): void {
+  if (!current) return;
+  const halo = current.manifest.effects.halo;
+  halo.intensity = Number(ctlIntensity.value);
+  halo.light = { ...halo.light, sharpness: Number(ctlSharp.value) };
+  card.setHalo(halo);
+}
+
+/** 把渲染器算出来的炫光强度显示出来，纯读数 */
 function pollHalo(): void {
   const root = card.element;
   if (root) {
-    const value = Number(getComputedStyle(root).getPropertyValue('--hc-halo')) || 0;
+    const value = Number(root.style.getPropertyValue('--hc-halo')) || 0;
     outHalo.value = value.toFixed(2);
     haloFill.style.width = `${Math.round(value * 100)}%`;
   }
@@ -112,8 +161,7 @@ async function processImage(file: File): Promise<void> {
       onProgress: (p) => showProgress(p.detail, p.ratio),
     });
 
-    current = set;
-    applyHaloSettings();
+    show(set);
     progress.hidden = true;
     status.textContent = `已切成 ${set.manifest.layers.length} 层 · ${set.manifest.generator ?? ''}`;
   } catch (error) {
@@ -124,12 +172,6 @@ async function processImage(file: File): Promise<void> {
   }
 }
 
-ctlTilt.addEventListener('input', () => {
-  const tilt = Number(ctlTilt.value);
-  outTilt.value = `${tilt}°`;
-  card.setOptions({ tilt });
-});
-
 ctlAmp.addEventListener('input', () => {
   const pct = Number(ctlAmp.value);
   outAmp.value = `${pct}%`;
@@ -138,16 +180,13 @@ ctlAmp.addEventListener('input', () => {
 
 ctlIntensity.addEventListener('input', () => {
   outIntensity.value = Number(ctlIntensity.value).toFixed(2);
-  applyHaloSettings();
+  applyHalo();
 });
 
 ctlSharp.addEventListener('input', () => {
   outSharp.value = ctlSharp.value;
-  applyHaloSettings();
+  applyHalo();
 });
-
-ctlHalo.addEventListener('change', applyHaloSettings);
-ctlHaloMask.addEventListener('change', applyHaloSettings);
 
 drop.addEventListener('click', () => filePicker.click());
 filePicker.addEventListener('change', () => {
@@ -174,9 +213,9 @@ drop.addEventListener('drop', (event) => {
 });
 
 try {
-  current = await loadLayerSet(`${import.meta.env.BASE_URL}samples/forest`);
-  applyHaloSettings();
-  status.textContent = `已加载 ${current.manifest.layers.length} 层手工素材 samples/forest`;
+  const sample = await loadLayerSet(`${import.meta.env.BASE_URL}samples/forest`);
+  show(sample);
+  status.textContent = `已加载 ${sample.manifest.layers.length} 层手工素材 samples/forest`;
 } catch (error) {
   status.textContent = `素材加载失败：${error instanceof Error ? error.message : String(error)}`;
 }

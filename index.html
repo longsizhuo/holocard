@@ -3,15 +3,15 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>HoloCard — 把任意照片变成分层视差闪卡</title>
-    <meta name="description" content="自动切分前中后景，渲染成可交互的分层视差闪卡。全部在浏览器本地完成。" />
+    <title>HoloCard — 把任意照片变成分层闪卡</title>
+    <meta name="description" content="自动切分前中后景，每层各上各的箔面，渲染成可交互的闪卡。全部在浏览器本地完成。" />
   </head>
   <body>
     <main class="page">
       <header class="page__head">
         <h1>HoloCard</h1>
         <p class="page__sub">
-          把任意照片自动切成前中后景，渲染成分层视差闪卡。全部在浏览器本地完成，图片不上传。
+          把任意照片自动切成前中后景，每层各上各的箔面，渲染成闪卡。全部在浏览器本地完成，图片不上传。
         </p>
       </header>
 
@@ -19,48 +19,38 @@
         <div class="stage" id="stage"></div>
 
         <aside class="panel">
+          <h2 class="panel__title">各层箔面</h2>
+          <p class="panel__lead">
+            真实闪卡的底材是箔：主体用不透明油墨盖住所以哑光，背景不盖所以闪。
+            分层结果就是自动生成的箔面遮罩，每层可以上不同的箔。
+          </p>
+          <div id="foil-list"></div>
+
+          <hr class="panel__sep" />
+
           <h2 class="panel__title">景深</h2>
-
-          <label class="field">
-            <span class="field__label">倾斜角 <output id="out-tilt">14°</output></span>
-            <input id="ctl-tilt" type="range" min="0" max="30" step="1" value="14" />
-          </label>
-
           <label class="field">
             <span class="field__label">视差振幅 <output id="out-amp">6%</output></span>
             <input id="ctl-amp" type="range" min="0" max="16" step="0.5" value="6" />
-            <small class="field__hint">调大更爽，但也更容易暴露补洞质量</small>
+            <small class="field__hint">拉到 0 卡面就是完全平的。调大更有纵深，但也更容易暴露补洞质量</small>
           </label>
 
           <hr class="panel__sep" />
 
-          <h2 class="panel__title">卡面</h2>
+          <h2 class="panel__title">整卡炫光</h2>
           <p class="panel__lead">
-            炫光是<strong>卡面本身</strong>的属性，压在所有景深层之上，不随视差移动。
-            强度由卡面法线与光源的夹角决定——转到某个倾角才爆出五彩。
+            压在所有层之上的一层细微五彩，只在卡面转到特定角度时浮出来。
           </p>
 
           <label class="field">
-            <span class="field__label">花纹</span>
-            <select id="ctl-halo">
-              <option value="rainbow">彩虹箔 rainbow</option>
-              <option value="linear">线性扫光 linear</option>
-              <option value="galaxy">星河 galaxy</option>
-              <option value="none">关闭 none</option>
-            </select>
-          </label>
-
-          <label class="field">
-            <span class="field__label">强度 <output id="out-intensity">0.55</output></span>
-            <input id="ctl-intensity" type="range" min="0" max="1" step="0.05" value="0.55" />
+            <span class="field__label">强度 <output id="out-intensity">0.35</output></span>
+            <input id="ctl-intensity" type="range" min="0" max="1" step="0.05" value="0.35" />
           </label>
 
           <label class="field">
             <span class="field__label">角度锐度 <output id="out-sharp">120</output></span>
             <input id="ctl-sharp" type="range" min="10" max="400" step="10" value="120" />
-            <small class="field__hint">
-              越大，出虹彩的倾角窗口越窄。调到最小会变成「哪都亮」，那就是不对的观感
-            </small>
+            <small class="field__hint">越大，出五彩的倾角窗口越窄</small>
           </label>
 
           <div class="readout">
@@ -68,18 +58,6 @@
             <div class="readout__bar"><i id="halo-fill"></i></div>
             <output id="out-halo">0.00</output>
           </div>
-          <small class="field__hint">
-            把指针在卡面上慢慢划过，看这个数值什么时候冲起来
-          </small>
-
-          <label class="field field--row">
-            <input id="ctl-halo-mask" type="checkbox" />
-            <span>压印到主体形状</span>
-          </label>
-          <small class="field__hint">
-            局部箔。压印依然在卡面上不随视差移动，所以大角度倾斜时会和主体轻微错开——
-            这是对的，就像窗户上的灰尘不会跟着窗外景物一起动。
-          </small>
 
           <hr class="panel__sep" />
 
@@ -94,9 +72,15 @@
             <span id="progress-text">准备中</span>
           </div>
 
-          <p class="panel__note" id="status">已加载手工素材 <code>samples/forest</code></p>
+          <p class="panel__note" id="status">正在加载素材</p>
         </aside>
       </section>
+
+      <footer class="page__foot">
+        箔面配方与交互手感移植自
+        <a href="https://github.com/simeydotme/pokemon-cards-css" target="_blank" rel="noreferrer">pokemon-cards-css</a>
+        （Simon Goellner，GPL-3.0）。本项目同样以 GPL-3.0 发布。
+      </footer>
     </main>
 
     <script type="module" src="/src/demo/main.ts"></script>

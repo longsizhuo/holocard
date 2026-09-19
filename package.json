@@ -4,7 +4,7 @@
   "private": true,
   "type": "module",
   "description": "把任意照片自动切成前中后景，渲染成可交互的分层视差闪卡",
-  "license": "MIT",
+  "license": "GPL-3.0-only",
   "scripts": {
     "dev": "vite",
     "build": "tsc --noEmit && vite build",

@@ -2,11 +2,14 @@
 
 import {
   DEFAULT_HALO_LIGHT,
+  FOIL_TYPES,
   LAYERS_FORMAT_VERSION,
+  defaultFoilFor,
   defaultHalo,
   type BBox,
-  type HaloType,
+  type FoilType,
   type LayerEntry,
+  type LayerFoil,
   type LayerManifest,
   type LayerSet,
 } from './types';
@@ -26,6 +29,10 @@ function isFiniteNumber(v: unknown): v is number {
   return typeof v === 'number' && Number.isFinite(v);
 }
 
+function isFoilType(v: unknown): v is FoilType {
+  return typeof v === 'string' && (FOIL_TYPES as readonly string[]).includes(v);
+}
+
 function parseBBox(raw: unknown, index: number): BBox {
   if (!Array.isArray(raw) || raw.length !== 4 || !raw.every(isFiniteNumber)) {
     throw new LayerFormatError(`第 ${index} 层的 bbox 必须是 4 个数字`);
@@ -34,7 +41,17 @@ function parseBBox(raw: unknown, index: number): BBox {
   return [x!, y!, w!, h!] as const;
 }
 
-function parseLayer(raw: unknown, index: number): LayerEntry {
+/** foil 缺省或写错时返回 null，由调用方按层序补默认值 */
+function parseFoil(raw: unknown): LayerFoil | null {
+  if (typeof raw !== 'object' || raw === null) return null;
+  const o = raw as Record<string, unknown>;
+  if (!isFoilType(o['type'])) return null;
+  const intensity = isFiniteNumber(o['intensity']) ? Math.min(1, Math.max(0, o['intensity'])) : 1;
+  return { type: o['type'], intensity };
+}
+
+/** 解析单层。foil 先留空位，等全部层排好序、知道层序之后再补默认值 */
+function parseLayer(raw: unknown, index: number): Omit<LayerEntry, 'foil'> & { foil: LayerFoil | null } {
   if (typeof raw !== 'object' || raw === null) {
     throw new LayerFormatError(`第 ${index} 层不是对象`);
   }
@@ -58,13 +75,8 @@ function parseLayer(raw: unknown, index: number): LayerEntry {
     parallax: isFiniteNumber(o['parallax']) ? o['parallax'] : o['depth'],
     bbox: parseBBox(o['bbox'], index),
     inpainted: o['inpainted'] === true,
+    foil: parseFoil(o['foil']),
   };
-}
-
-function parseHaloType(raw: unknown, fallback: HaloType): HaloType {
-  return raw === 'rainbow' || raw === 'linear' || raw === 'galaxy' || raw === 'none'
-    ? raw
-    : fallback;
 }
 
 /** 把任意 JSON 解析成 LayerManifest，字段缺失时给出可用的默认值 */
@@ -88,10 +100,16 @@ export function parseManifest(raw: unknown): LayerManifest {
   if (!Array.isArray(o['layers']) || o['layers'].length === 0) {
     throw new LayerFormatError('layers 为空');
   }
-  const layers = o['layers'].map(parseLayer);
+  const parsed = o['layers'].map(parseLayer);
 
   // 渲染器依赖「数组顺序 == 由远及近」这个不变量，这里强制成立
-  layers.sort((a, b) => a.depth - b.depth);
+  parsed.sort((a, b) => a.depth - b.depth);
+
+  // 层序定下来之后才能补默认箔面：最远层上箔、最近层哑光
+  const layers: LayerEntry[] = parsed.map((layer, i) => ({
+    ...layer,
+    foil: layer.foil ?? defaultFoilFor(i, parsed.length),
+  }));
 
   const fallback = defaultHalo();
   const effects = (o['effects'] ?? {}) as Record<string, unknown>;
@@ -104,20 +122,13 @@ export function parseManifest(raw: unknown): LayerManifest {
       ? [rawPeak[0] as number, rawPeak[1] as number]
       : DEFAULT_HALO_LIGHT.peakAt;
 
-  // maskLayer 越界时当成整卡面处理，而不是报错——手写 manifest 很容易填错下标
-  const rawMask = halo['maskLayer'];
-  const maskLayer =
-    isFiniteNumber(rawMask) && rawMask >= 0 && rawMask < layers.length ? Math.trunc(rawMask) : null;
-
   const manifest: LayerManifest = {
     version: LAYERS_FORMAT_VERSION,
     source: { width: source['width'], height: source['height'] },
     layers,
     effects: {
       halo: {
-        type: parseHaloType(halo['type'], fallback.type),
         intensity: isFiniteNumber(halo['intensity']) ? halo['intensity'] : fallback.intensity,
-        maskLayer,
         light: {
           peakAt,
           sharpness: isFiniteNumber(light['sharpness'])

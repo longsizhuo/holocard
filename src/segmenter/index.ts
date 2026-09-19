@@ -6,10 +6,20 @@
  *   analyzeDepth   在深度直方图的谷底切层，层数自适应
  *   extractLayers  羽化出每层 alpha，并把底层的遮挡区补掉
  *
+ * 产出的每一层同时承担两个角色：带视差的画面，以及这一层箔面的遮罩——
+ * 参考项目里那张靠手工准备的 --mask 图，在这里是自动生成的。
+ * 所以层边缘的干净程度直接决定箔面边缘好不好看。
+ *
  * 边缘精修（BiRefNet_lite 出主体 alpha）还没接，见 README 的路线图。
  */
 
-import { LAYERS_FORMAT_VERSION, defaultHalo, type LayerEntry, type LayerSet } from '../format/types';
+import {
+  LAYERS_FORMAT_VERSION,
+  defaultFoilFor,
+  defaultHalo,
+  type LayerEntry,
+  type LayerSet,
+} from '../format/types';
 import { estimateDepth, type LoadProgress } from './depth';
 import { analyzeDepth, type SliceOptions } from './slice';
 import { extractLayers, type ExtractOptions } from './extract';
@@ -114,6 +124,8 @@ export async function segmentToLayerSet(
     bbox: stat.bbox,
     // 只有最底层做了补洞；其余层的空缺由底层顶上
     inpainted: i === 0,
+    // 按真实闪卡的印法给默认箔面：最远层上箔，最近层（主体）哑光
+    foil: defaultFoilFor(i, stats.length),
   }));
 
   report('done');
@@ -125,8 +137,6 @@ export async function segmentToLayerSet(
       generator: buildGeneratorTag(cuts, prominences),
       layers,
       effects: {
-        // 炫光是卡面本身的属性，默认铺满整张卡面——这才是真实卡片的常态。
-        // 要做局部压印的话，把 halo.maskLayer 指到某一层即可。
         halo: defaultHalo(),
         glare: true,
       },

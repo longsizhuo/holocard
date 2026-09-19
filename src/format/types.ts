@@ -11,6 +11,12 @@
  *   ├── layer-0.png     ← 最远
  *   ├── layer-1.png
  *   └── layer-2.png     ← 最近
+ *
+ * 一张卡由四样东西叠成，这个划分对应真实闪卡的印刷结构：
+ *   1. 景深层        画面内容，带视差
+ *   2. 每层的箔面    各层各有各的箔，随所在层一起移动（LayerEntry.foil）
+ *   3. 整卡炫光      铺满卡面的细微五彩，只在特定倾角出现（effects.halo）
+ *   4. 整卡高光      跟随指针的镜面反光（effects.glare）
  */
 
 /** 当前格式版本，破坏性变更时递增 */
@@ -19,8 +25,22 @@ export const LAYERS_FORMAT_VERSION = 1;
 /** 包围盒，像素坐标，[x, y, width, height] */
 export type BBox = readonly [x: number, y: number, width: number, height: number];
 
-/** 炫光花纹类型 */
-export type HaloType = 'rainbow' | 'linear' | 'galaxy' | 'none';
+/**
+ * 箔面配方。配方本身移植自 pokemon-cards-css（GPL-3.0），见 renderer/foils.css。
+ *   none       哑光，不上箔。真实闪卡的主体通常就是这样：不透明油墨把箔底盖住了
+ *   holo       经典闪卡：斜向彩虹 + 细扫描线 + 竖向光栅（原 rare holo）
+ *   sunpillar  V 卡那种斜向日柱彩虹，带金属颗粒（原 rare holo v）
+ *   rainbow    彩虹稀有：闪粉 + 多色渐变（原 rare rainbow）
+ */
+export type FoilType = 'none' | 'holo' | 'sunpillar' | 'rainbow';
+
+export const FOIL_TYPES: readonly FoilType[] = ['none', 'holo', 'sunpillar', 'rainbow'];
+
+export interface LayerFoil {
+  type: FoilType;
+  /** 强度 0..1 */
+  intensity: number;
+}
 
 export interface LayerSource {
   /** 原图宽度（像素） */
@@ -54,68 +74,69 @@ export interface LayerEntry {
 
   /** 该层被遮挡区域是否已经做过补洞。未补洞的层大幅位移时会露出空洞 */
   inpainted: boolean;
+
+  /**
+   * 这一层的箔面。箔只出现在该层自己的 alpha 形状里，并随该层一起做视差位移。
+   *
+   * 参考项目里这件事靠作者为每张卡手工准备的 --mask 图来做；
+   * 我们的分层结果就是自动生成的 mask。
+   */
+  foil: LayerFoil;
 }
 
 /**
- * 卡面光照模型。
+ * 整卡炫光的光照模型。
  *
- * 真实卡片的炫光不是「鼠标在哪就亮哪」，而是卡面法线转到某个角度、
- * 正好把光源反射进眼睛时才爆出虹彩，其余角度只剩很淡的底光。
- * 这里不直接描述光源坐标，而是用「虹彩最强时的卡片姿态」来描述——
- * 调起来直观得多，而且与倾斜角设成多少无关。
+ * 炫光不是「鼠标在哪就亮哪」，而是卡面转到某个角度、
+ * 正好把光源反射进眼睛时才浮出细微的五彩，其余角度几乎看不见。
+ * 这里用「五彩最强时的指针位置」来描述那个角度，比直接写光源坐标好调。
  */
 export interface HaloLight {
-  /** 虹彩最强时的卡片姿态，用归一化指针位置表示，各分量 -1..1 */
+  /** 五彩最强时的指针位置，归一化到 -1..1，[0,0] 是卡片中心 */
   peakAt: readonly [nx: number, ny: number];
-  /**
-   * 角度窗口锐度。越大，虹彩出现的倾角范围越窄，
-   * 越接近真卡那种「转到某个角度突然爆开」的观感。
-   */
+  /** 角度窗口锐度。越大，出五彩的倾角范围越窄 */
   sharpness: number;
 }
 
 /**
- * 卡面炫光。
- *
- * 关键：这是卡面本身的物理属性，不属于任何景深层。
- * 真实卡片的箔膜压在卡面上，转动卡片时它不会跟着画面里的人物一起位移，
- * 所以 halo 既不参与视差，也默认铺满整张卡面。
+ * 整卡炫光：铺满整张卡面、压在所有层之上、不参与视差。
+ * 和每层的箔面是两回事——箔面是主角，这个只是面向光源时浮出的一层细微五彩。
  */
 export interface HaloEffect {
-  type: HaloType;
-  /** 强度 0..1。真卡的虹彩是「细微的五彩」，默认给得克制 */
+  /** 强度 0..1，0 即关闭。应当给得克制 */
   intensity: number;
-  /**
-   * 压印形状：null = 整张卡面，这是真实卡片的常态。
-   * 给层下标则用该层的 alpha 当压印形状——但压印依然在卡面上，不随视差移动，
-   * 所以大角度倾斜时它会和画面里的主体轻微错开。这是对的：
-   * 就像窗户上的灰尘不会跟着窗外的景物一起动。
-   */
-  maskLayer: number | null;
   light: HaloLight;
 }
 
 export interface LayerEffects {
   halo: HaloEffect;
-  /** 跟随指针的镜面高光。同样是卡面效果，不随视差移动 */
+  /** 跟随指针的整卡镜面高光 */
   glare: boolean;
 }
 
 export const DEFAULT_HALO_LIGHT: HaloLight = {
-  // 默认光源在右上方，卡片朝那个方向抬起时爆虹彩
+  // 默认光源在右上方
   peakAt: [0.7, -0.7],
   // 倾斜角只有十几度，法线夹角很小，锐度必须给得很高才切得出角度窗口
   sharpness: 120,
 };
 
-/** 卡面炫光的默认配置：整张卡面、克制的强度 */
 export function defaultHalo(): HaloEffect {
-  return {
-    type: 'rainbow',
-    intensity: 0.55,
-    maskLayer: null,
-    light: { ...DEFAULT_HALO_LIGHT },
-  };
+  return { intensity: 0.35, light: { ...DEFAULT_HALO_LIGHT } };
+}
+
+/**
+ * 按层序给出默认箔面。
+ *
+ * 思路来自真实闪卡的印法：底材是箔，主体用不透明油墨盖住所以哑光，
+ * 背景不盖所以闪。于是最远层上最抢眼的箔，最近层（主体）保持哑光，
+ * 中间层用另一种箔拉开层次。
+ */
+export function defaultFoilFor(index: number, layerCount: number): LayerFoil {
+  if (layerCount <= 1) return { type: 'sunpillar', intensity: 1 };
+  if (index === layerCount - 1) return { type: 'none', intensity: 1 };
+  if (index === 0) return { type: 'sunpillar', intensity: 1 };
+  return { type: 'holo', intensity: 0.8 };
 }
 
 export interface LayerManifest {

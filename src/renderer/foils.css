@@ -1,0 +1,332 @@
+/*
+ * 箔面配方
+ *
+ * 本文件移植自 pokemon-cards-css
+ *   作者  Simon Goellner (@simeydotme)
+ *   仓库  https://github.com/simeydotme/pokemon-cards-css
+ *   许可  GPL-3.0
+ *
+ * 对应的上游文件：
+ *   public/css/cards/base.css          → 变量、.hc__shine 基础规则、.hc__glare
+ *   public/css/cards.css               → 调色与尺寸变量
+ *   public/css/cards/regular-holo.css  → [data-foil="holo"]
+ *   public/css/cards/v-regular.css     → [data-foil="sunpillar"]
+ *   public/css/cards/rainbow-holo.css  → [data-foil="rainbow"]
+ *
+ * 相对上游的改动只有三处，配方里的渐变、混合模式、滤镜数值一律没动：
+ *   1. 选择器从 .card[data-rarity=…] .card__shine 换成 .hc__shine[data-foil=…]
+ *   2. 去掉了 clip-path（上游用它把箔限制在卡牌的插画窗口里；
+ *      我们的箔是按层的 alpha 做遮罩，见 card.css）
+ *   3. rainbow 的 :before 依赖每张卡专属的 --foil 蚀刻图，我们没有，所以略去
+ *
+ * 变量名（--pointer-x、--background-x、--card-opacity 等）刻意保持与上游一致，
+ * 以后要再移植别的稀有度，配方可以直接贴过来。
+ */
+
+.hc {
+  --sunpillar-1: hsl(2, 100%, 73%);
+  --sunpillar-2: hsl(53, 100%, 69%);
+  --sunpillar-3: hsl(93, 100%, 69%);
+  --sunpillar-4: hsl(176, 100%, 76%);
+  --sunpillar-5: hsl(228, 100%, 74%);
+  --sunpillar-6: hsl(283, 100%, 73%);
+
+  --sunpillar-clr-1: var(--sunpillar-1);
+  --sunpillar-clr-2: var(--sunpillar-2);
+  --sunpillar-clr-3: var(--sunpillar-3);
+  --sunpillar-clr-4: var(--sunpillar-4);
+  --sunpillar-clr-5: var(--sunpillar-5);
+  --sunpillar-clr-6: var(--sunpillar-6);
+
+  --glittersize: 25%;
+  --space: 5%;
+  --angle: 133deg;
+  --imgsize: cover;
+
+  --red: #f80e35;
+  --yellow: #eedf10;
+  --green: #21e985;
+  --blue: #0dbde9;
+  --violet: #c929f1;
+}
+
+/* ---------- 基础规则（base.css） ---------- */
+
+.hc__shine {
+  overflow: hidden;
+  background: transparent;
+  background-size: cover;
+  background-position: center;
+
+  filter: brightness(0.85) contrast(2.75) saturate(0.65);
+  mix-blend-mode: color-dodge;
+
+  /* 上游是 var(--card-opacity)，这里多乘一个每层各自的强度 */
+  opacity: calc(var(--card-opacity) * var(--hc-foil-intensity, 1));
+
+  will-change: transform, opacity, background-image, background-size, background-position,
+    background-blend-mode, filter;
+}
+
+/* 两个伪元素各自错开一格日柱配色，叠起来颜色才不会撞在一起 */
+.hc__shine:before,
+.hc__shine:after {
+  --sunpillar-clr-1: var(--sunpillar-5);
+  --sunpillar-clr-2: var(--sunpillar-6);
+  --sunpillar-clr-3: var(--sunpillar-1);
+  --sunpillar-clr-4: var(--sunpillar-2);
+  --sunpillar-clr-5: var(--sunpillar-3);
+  --sunpillar-clr-6: var(--sunpillar-4);
+
+  position: absolute;
+  inset: 0;
+}
+
+.hc__shine:after {
+  --sunpillar-clr-1: var(--sunpillar-6);
+  --sunpillar-clr-2: var(--sunpillar-1);
+  --sunpillar-clr-3: var(--sunpillar-2);
+  --sunpillar-clr-4: var(--sunpillar-3);
+  --sunpillar-clr-5: var(--sunpillar-4);
+  --sunpillar-clr-6: var(--sunpillar-5);
+}
+
+.hc__shine[data-foil='none'] {
+  display: none;
+}
+
+/* ---------- holo：经典闪卡（regular-holo.css / rare holo） ---------- */
+
+.hc__shine[data-foil='holo'] {
+  --scanlines-space: 1px;
+  --scanlines-light: #666;
+  --scanlines-dark: black;
+  --bars: 3%;
+  --bar-color: hsla(0, 0%, 70%, 1);
+  --bar-bg: hsla(0, 0%, 0%, 1);
+
+  background-image:
+    repeating-linear-gradient(
+      110deg,
+      var(--violet), var(--blue), var(--green), var(--yellow), var(--red),
+      var(--violet), var(--blue), var(--green), var(--yellow), var(--red),
+      var(--violet), var(--blue), var(--green), var(--yellow), var(--red)
+    ),
+    repeating-linear-gradient(
+      90deg,
+      var(--scanlines-dark) calc(var(--scanlines-space) * 0),
+      var(--scanlines-dark) calc(var(--scanlines-space) * 2),
+      var(--scanlines-light) calc(var(--scanlines-space) * 2),
+      var(--scanlines-light) calc(var(--scanlines-space) * 4)
+    );
+
+  background-position:
+    calc(((50% - var(--background-x)) * 2.6) + 50%)
+      calc(((50% - var(--background-y)) * 3.5) + 50%),
+    center center;
+
+  background-size: 400% 400%, cover;
+  background-blend-mode: overlay;
+
+  filter: brightness(1.1) contrast(1.1) saturate(1.2);
+  mix-blend-mode: color-dodge;
+}
+
+.hc__shine[data-foil='holo']:before {
+  content: '';
+
+  background-image:
+    repeating-linear-gradient(
+      90deg,
+      var(--bar-bg) calc(var(--bars) * 2),
+      var(--bar-color) calc(var(--bars) * 3),
+      var(--bar-bg) calc(var(--bars) * 3.5),
+      var(--bar-color) calc(var(--bars) * 4),
+      var(--bar-bg) calc(var(--bars) * 5),
+      var(--bar-bg) calc(var(--bars) * 14)
+    ),
+    repeating-linear-gradient(
+      90deg,
+      var(--bar-bg) calc(var(--bars) * 2),
+      var(--bar-color) calc(var(--bars) * 3),
+      var(--bar-bg) calc(var(--bars) * 3.5),
+      var(--bar-color) calc(var(--bars) * 4),
+      var(--bar-bg) calc(var(--bars) * 5),
+      var(--bar-bg) calc(var(--bars) * 10)
+    );
+
+  background-position:
+    calc((((50% - var(--background-x)) * 1.65) + 50%) + (var(--background-y) * 0.5))
+      var(--background-x),
+    calc((((50% - var(--background-x)) * -0.9) + 50%) - (var(--background-y) * 0.75))
+      var(--background-y);
+
+  background-size: 200% 200%, 200% 200%;
+  background-blend-mode: screen;
+
+  filter: brightness(1.15) contrast(1.1);
+  mix-blend-mode: hard-light;
+}
+
+.hc__shine[data-foil='holo']:after {
+  content: '';
+
+  background-image: radial-gradient(
+    farthest-corner circle at var(--pointer-x) var(--pointer-y),
+    hsla(0, 0%, 90%, 0.8) 0%,
+    hsla(0, 0%, 78%, 0.1) 25%,
+    hsl(0, 0%, 0%) 90%
+  );
+
+  background-position: center center;
+  background-size: cover;
+
+  mix-blend-mode: luminosity;
+  filter: brightness(0.6) contrast(4);
+}
+
+@media screen and (max-width: 900px) {
+  .hc__shine[data-foil='holo'] {
+    --scanlines-space: 0.5px;
+  }
+}
+
+/* ---------- sunpillar：V 卡日柱（v-regular.css / rare holo v） ---------- */
+
+.hc__shine[data-foil='sunpillar'],
+.hc__shine[data-foil='sunpillar']:after {
+  --space: 5%;
+  --angle: 133deg;
+  --imgsize: 500px;
+
+  background-image:
+    var(--grain),
+    repeating-linear-gradient(
+      0deg,
+      var(--sunpillar-clr-1) calc(var(--space) * 1),
+      var(--sunpillar-clr-2) calc(var(--space) * 2),
+      var(--sunpillar-clr-3) calc(var(--space) * 3),
+      var(--sunpillar-clr-4) calc(var(--space) * 4),
+      var(--sunpillar-clr-5) calc(var(--space) * 5),
+      var(--sunpillar-clr-6) calc(var(--space) * 6),
+      var(--sunpillar-clr-1) calc(var(--space) * 7)
+    ),
+    repeating-linear-gradient(
+      var(--angle),
+      #0e152e 0%,
+      hsl(180, 10%, 60%) 3.8%,
+      hsl(180, 29%, 66%) 4.5%,
+      hsl(180, 10%, 60%) 5.2%,
+      #0e152e 10%,
+      #0e152e 12%
+    ),
+    radial-gradient(
+      farthest-corner circle at var(--pointer-x) var(--pointer-y),
+      hsla(0, 0%, 0%, 0.1) 12%,
+      hsla(0, 0%, 0%, 0.15) 20%,
+      hsla(0, 0%, 0%, 0.25) 120%
+    );
+
+  background-blend-mode: screen, hue, hard-light;
+  background-size: var(--imgsize) 100%, 200% 700%, 300% 100%, 200% 100%;
+  background-position:
+    center,
+    0% var(--background-y),
+    var(--background-x) var(--background-y),
+    var(--background-x) var(--background-y);
+
+  filter: brightness(0.8) contrast(2.95) saturate(0.65);
+}
+
+.hc__shine[data-foil='sunpillar']:after {
+  content: '';
+
+  background-position:
+    center,
+    0% var(--background-y),
+    calc(var(--background-x) * -1) calc(var(--background-y) * -1),
+    var(--background-x) var(--background-y);
+  background-size: var(--imgsize) 100%, 200% 400%, 195% 100%, 200% 100%;
+
+  filter: brightness(1) contrast(2.5) saturate(1.75);
+  mix-blend-mode: soft-light;
+}
+
+/* ---------- rainbow：彩虹稀有（rainbow-holo.css / rare rainbow） ---------- */
+
+.hc__shine[data-foil='rainbow'] {
+  --r-clr-1: hsl(0, 57%, 37%);
+  --r-clr-2: hsl(40, 53%, 39%);
+  --r-clr-3: hsl(90, 60%, 35%);
+  --r-clr-4: hsl(180, 60%, 35%);
+  --r-clr-5: hsl(180, 60%, 35%);
+  --r-clr-6: hsl(210, 57%, 39%);
+  --r-clr-7: hsl(280, 55%, 31%);
+
+  background-image:
+    linear-gradient(-45deg, var(--r-clr-1), var(--r-clr-5)),
+    var(--glitter),
+    linear-gradient(
+      -30deg,
+      var(--r-clr-1), var(--r-clr-2), var(--r-clr-3), var(--r-clr-4), var(--r-clr-5), var(--r-clr-6), var(--r-clr-7),
+      var(--r-clr-1), var(--r-clr-2), var(--r-clr-3), var(--r-clr-4), var(--r-clr-5), var(--r-clr-6), var(--r-clr-7),
+      var(--r-clr-1), var(--r-clr-2), var(--r-clr-3), var(--r-clr-4), var(--r-clr-5), var(--r-clr-6), var(--r-clr-7),
+      var(--r-clr-1)
+    );
+
+  background-blend-mode: luminosity, soft-light;
+
+  background-size:
+    200% 200%,
+    var(--glittersize) var(--glittersize),
+    400% 400%;
+
+  background-position:
+    calc(25% + (50% * var(--pointer-from-left))) calc(25% + (50% * var(--pointer-from-top))),
+    center center,
+    calc(25% + (var(--pointer-x) / 2)) calc(25% + (var(--pointer-y) / 2));
+
+  filter: brightness(calc((var(--pointer-from-center) * 0.25) + 0.6)) contrast(2.2) saturate(0.75);
+}
+
+.hc__shine[data-foil='rainbow']:after {
+  content: '';
+
+  background-image:
+    var(--glitter),
+    linear-gradient(
+      -60deg,
+      var(--r-clr-1), var(--r-clr-2), var(--r-clr-3), var(--r-clr-4), var(--r-clr-5), var(--r-clr-6), var(--r-clr-7),
+      var(--r-clr-1), var(--r-clr-2), var(--r-clr-3), var(--r-clr-4), var(--r-clr-5), var(--r-clr-6), var(--r-clr-7),
+      var(--r-clr-1), var(--r-clr-2), var(--r-clr-3), var(--r-clr-4), var(--r-clr-5), var(--r-clr-6), var(--r-clr-7),
+      var(--r-clr-1)
+    );
+
+  background-blend-mode: soft-light;
+  background-size: var(--glittersize) var(--glittersize), 400% 400%;
+  background-position: center center, var(--pointer-x) var(--pointer-y);
+
+  filter: brightness(calc((var(--pointer-from-center) * 0.3) + 0.55)) contrast(2) saturate(1);
+  mix-blend-mode: color-dodge;
+}
+
+/* ---------- 整卡高光（base.css 的 .card__glare） ---------- */
+
+.hc__glare {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  pointer-events: none;
+  border-radius: inherit;
+
+  background-image: radial-gradient(
+    farthest-corner circle at var(--pointer-x) var(--pointer-y),
+    hsla(0, 0%, 100%, 0.8) 10%,
+    hsla(0, 0%, 100%, 0.65) 20%,
+    hsla(0, 0%, 0%, 0.5) 90%
+  );
+
+  opacity: var(--card-opacity);
+  mix-blend-mode: overlay;
+  will-change: opacity, background-image;
+}
