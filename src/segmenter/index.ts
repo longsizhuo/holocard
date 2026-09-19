@@ -122,8 +122,8 @@ export async function segmentToLayerSet(
     depth: stat.depth,
     parallax: parallax[i] ?? 0,
     bbox: stat.bbox,
-    // 只有最底层做了补洞；其余层的空缺由底层顶上
-    inpainted: i === 0,
+    // 除最前层外，每一层都向遮挡它的层身后做了补全
+    inpainted: i < stats.length - 1,
     // 按真实闪卡的印法给默认箔面：最远层上箔，最近层（主体）哑光
     foil: defaultFoilFor(i, stats.length),
   }));

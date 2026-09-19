@@ -1,14 +1,22 @@
 /**
  * 深度图 + 层分界 → 每层的 PNG
  *
- * 两个关键处理：
- * 1. 羽化：层边界用 smoothstep 过渡而不是硬阈值。深度图在物体边缘本来就是糊的，
- *    硬切会留下锯齿，而且一做视差位移那圈脏边就跟着飘，非常刺眼。
- * 2. 补洞：最底层做 push-pull 金字塔填充。前景一移开，后面露出的如果是原图，
- *    那就是前景自己的像素，会看到「重影」；填充成周围背景的延伸才对。
+ * 每一层同时承担两个角色：带视差的画面，以及这一层箔面的遮罩。
+ * 所以这里不只是「按深度把像素分堆」，还要保证层与层错开之后露出来的东西是对的：
+ *
+ * 1. 深度边缘吸附：单目深度图在物体边缘是斜坡，斜坡中段会被误分进中间层，
+ *    在物体轮廓外形成一圈细环，一动起来就和物体分离成鬼影。先把陡坡压成台阶。
+ * 2. 羽化：平缓的深度变化（地面这类延展面）仍然用 smoothstep 在层间平滑过渡，
+ *    硬切会在没有语义边界的地方撕开。
+ * 3. 逐层补全：每个非最前层都要向「遮挡它的层」身后延伸——alpha 和颜色一起补。
+ *    否则前景挪开后，露出来的不是紧挨着它的那一层，而是直接透到最远层，
+ *    画面和箔面都会在前景的原始轮廓处断掉。
+ * 4. 镜像纹理填充：补进去的颜色用边界外的真实纹理镜像而来，而不是抹成平滑色块。
+ *    箔面靠 color-dodge 点亮底图里的亮像素，平滑色块上箔面是点不亮的。
  */
 
 import type { BBox } from '../format/types';
+import { blurAlpha, dilateMask, growForeground, nearestSource, snapDepthEdges } from './morph';
 import type { DepthMap } from './slice';
 
 export interface ExtractOptions {
@@ -16,18 +24,33 @@ export interface ExtractOptions {
   feather: number;
   /** 输出最大边长，超过就等比缩小。卡片尺寸下 1400 足够，再大只是浪费 */
   maxDimension: number;
-  /** 判定「这个像素属于更近的层」的 alpha 阈值，用于决定底层哪些地方要补洞 */
-  occlusionThreshold: number;
+  /** 深度边缘吸附的窗口半径，相对图宽。要盖得住深度图边缘斜坡宽度的一半 */
+  snapRadius: number;
+  /** 邻域内深度落差超过它才算遮挡边界；低于它视为平缓延展面，不吸附 */
+  snapThreshold: number;
+  /** 前景膨胀的宽度（相对图宽）。保证物体的边缘跟着物体走，而不是留在后面的层里 */
+  foregroundGrow: number;
+  /**
+   * 被更近层盖住的区域再向外多吃这么宽（相对图宽）。
+   * 紧贴前景的那几个像素是前景和背景的混色，拿它们当填充源会把前景的颜色抹进背景。
+   */
+  fringe: number;
+  /** 镜像纹理填充最多深入遮挡区多远（相对图宽），再往里退化成平滑填充 */
+  mirrorReach: number;
 }
 
 export const DEFAULT_EXTRACT_OPTIONS: ExtractOptions = {
   feather: 0.035,
   maxDimension: 1400,
-  occlusionThreshold: 0.5,
+  snapRadius: 0.01,
+  snapThreshold: 0.12,
+  foregroundGrow: 0.004,
+  fringe: 0.003,
+  mirrorReach: 0.12,
 };
 
 export interface LayerStat {
-  /** 该层 alpha 覆盖区域内的深度中位数 */
+  /** 该层「看得见的部分」的深度中位数 */
   depth: number;
   bbox: BBox;
 }
@@ -38,6 +61,11 @@ export interface ExtractResult {
   width: number;
   height: number;
 }
+
+/** 上方的层盖到这个程度，就认为下面的像素看不见，层归属判断以它为界 */
+const COVERED = 0.5;
+/** 盖到这个程度才认为下面像素的颜色完全不可信，需要重新填 */
+const FULLY_COVERED = 0.98;
 
 function smoothstep(edge0: number, edge1: number, x: number): number {
   if (edge1 <= edge0) return x < edge0 ? 0 : 1;
@@ -161,7 +189,7 @@ function upsampleInto(fine: Pyramid, coarse: Pyramid): void {
 /**
  * push-pull 金字塔填充。
  * 先一路降采样把已知颜色「推」到粗层，再一路升采样把颜色「拉」回空洞。
- * 对视差露出的细条空洞效果很好，而且不需要任何模型。
+ * 产出的是平滑底色，没有纹理——单独用不够，这里只拿它给镜像填充兜底。
  */
 function pushPullFill(
   rgba: Uint8ClampedArray,
@@ -212,6 +240,56 @@ function pushPullFill(
   }
 }
 
+/**
+ * 给某一层补颜色：先用 push-pull 铺一层平滑底色兜底，再在靠近边界的范围内
+ * 换成镜像过来的真实纹理。只改 unknown 标出的像素，其余保持原图。
+ */
+function fillColors(
+  out: Uint8ClampedArray,
+  src: Uint8ClampedArray,
+  sources: Uint8Array,
+  unknown: Uint8Array,
+  width: number,
+  height: number,
+  reach: number,
+): void {
+  const pixelCount = width * height;
+
+  const smooth = new Uint8ClampedArray(src);
+  const known = new Float32Array(pixelCount);
+  for (let p = 0; p < pixelCount; p++) known[p] = sources[p] ? 1 : 0;
+  pushPullFill(smooth, known, width, height);
+
+  const { dx, dy } = nearestSource(sources, width, height);
+
+  for (let y = 0; y < height; y++) {
+    for (let x = 0; x < width; x++) {
+      const p = y * width + x;
+      if (!unknown[p]) continue;
+
+      const ox = dx[p] ?? 0;
+      const oy = dy[p] ?? 0;
+      const dist = Math.hypot(ox, oy);
+
+      // 以最近的源像素为镜面，把边界另一侧等距处的真实像素搬过来
+      const sx = x + ox * 2;
+      const sy = y + oy * 2;
+      let weight = 0;
+      let s = 0;
+      if (sx >= 0 && sy >= 0 && sx < width && sy < height) {
+        s = sy * width + sx;
+        if (sources[s]) weight = 1 - smoothstep(reach * 0.6, reach, dist);
+      }
+
+      for (let c = 0; c < 3; c++) {
+        const base = smooth[p * 4 + c] ?? 0;
+        const mirrored = src[s * 4 + c] ?? 0;
+        out[p * 4 + c] = base + (mirrored - base) * weight;
+      }
+    }
+  }
+}
+
 /** 把源图解码并按 maxDimension 等比缩放，取出像素 */
 async function decodeScaled(
   image: Blob,
@@ -254,18 +332,32 @@ export async function extractLayers(
   const layerCount = cuts.length + 1;
   const f = opts.feather;
 
-  // 先把每个像素的深度采样出来，后面多处复用
-  const sampled = new Float32Array(pixelCount);
+  // 把每个像素的深度采样出来，再把物体边缘的斜坡吸附成台阶
+  const raw = new Float32Array(pixelCount);
   for (let y = 0; y < height; y++) {
     const v = height > 1 ? y / (height - 1) : 0;
     for (let x = 0; x < width; x++) {
       const u = width > 1 ? x / (width - 1) : 0;
-      sampled[y * width + x] = sampleDepth(depth, u, v);
+      raw[y * width + x] = sampleDepth(depth, u, v);
     }
   }
+  const snapped = snapDepthEdges(
+    raw,
+    width,
+    height,
+    Math.max(2, Math.round(width * opts.snapRadius)),
+    opts.snapThreshold,
+  );
+  const sampled = growForeground(
+    snapped,
+    width,
+    height,
+    Math.round(width * opts.foregroundGrow),
+  );
 
-  // 每层的 alpha：落在本层深度带内为 1，跨越分界时 smoothstep 过渡
-  const alphas: Float32Array[] = [];
+  // 每层「看得见的部分」的 alpha：落在本层深度带内为 1，跨越分界时 smoothstep 过渡。
+  // 吸附后的边缘是硬台阶，轻轻糊一下补回抗锯齿。
+  const visibleAlphas: Float32Array[] = [];
   for (let i = 0; i < layerCount; i++) {
     const lo = i === 0 ? Number.NEGATIVE_INFINITY : (cuts[i - 1] ?? 0);
     const hi = i === layerCount - 1 ? Number.POSITIVE_INFINITY : (cuts[i] ?? 1);
@@ -276,44 +368,102 @@ export async function extractLayers(
       const upper = Number.isFinite(hi) ? 1 - smoothstep(hi - f, hi + f, d) : 1;
       a[p] = lower * upper;
     }
-    alphas.push(a);
+    visibleAlphas.push(i === 0 ? a : blurAlpha(a, width, height));
   }
+
+  const fringePx = Math.max(1, Math.round(width * opts.fringe));
+  const reachPx = Math.max(8, width * opts.mirrorReach);
 
   const images: Blob[] = [];
   const stats: LayerStat[] = [];
 
   for (let i = 0; i < layerCount; i++) {
-    const alpha = alphas[i];
-    if (!alpha) continue;
+    const own = visibleAlphas[i];
+    if (!own) continue;
 
-    const out = new Uint8ClampedArray(pixelCount * 4);
-    out.set(src);
+    const out = new Uint8ClampedArray(src);
+    let finalAlpha = own;
 
-    if (i === 0) {
-      /*
-       * 最底层铺满整张卡，alpha 恒为 1——这样前景移开时不会露出透明空洞。
-       * 但底层在前景位置上的像素本来就是前景自己，直接用会看到重影，
-       * 所以先把被更近层遮住的区域标成未知，再 push-pull 填充成背景的延伸。
-       */
-      const known = new Float32Array(pixelCount);
-      for (let p = 0; p < pixelCount; p++) {
-        let occluded = 0;
-        for (let j = 1; j < layerCount; j++) {
-          occluded = Math.max(occluded, alphas[j]?.[p] ?? 0);
+    if (i < layerCount - 1) {
+      // 更近的层在每个像素上盖了多少
+      const above = new Float32Array(pixelCount);
+      for (let j = i + 1; j < layerCount; j++) {
+        const other = visibleAlphas[j];
+        if (!other) continue;
+        for (let p = 0; p < pixelCount; p++) {
+          const v = other[p] ?? 0;
+          if (v > (above[p] ?? 0)) above[p] = v;
         }
-        known[p] = occluded >= opts.occlusionThreshold ? 0 : 1;
       }
-      pushPullFill(out, known, width, height);
+
+      // 颜色不可信的区域：被完全盖住的部分，再向外吃掉一圈混色边缘
+      const fullyCovered = new Uint8Array(pixelCount);
       for (let p = 0; p < pixelCount; p++) {
-        out[p * 4 + 3] = 255;
+        fullyCovered[p] = (above[p] ?? 0) >= FULLY_COVERED ? 1 : 0;
       }
-    } else {
-      for (let p = 0; p < pixelCount; p++) {
-        out[p * 4 + 3] = Math.round((alpha[p] ?? 0) * 255);
+      const unknown = dilateMask(fullyCovered, width, height, fringePx);
+
+      const sources = new Uint8Array(pixelCount);
+
+      if (i === 0) {
+        /*
+         * 最底层铺满整张卡，alpha 恒为 1——前景移开时不会露出透明空洞。
+         * 填充源是所有没被盖住的像素。
+         */
+        finalAlpha = new Float32Array(pixelCount).fill(1);
+        for (let p = 0; p < pixelCount; p++) sources[p] = unknown[p] ? 0 : 1;
+      } else {
+        /*
+         * 中间层要判断「被挡住的地方，后面接着的是不是我」。
+         * 做法：对每个被挡住的像素，找离它最近的可见像素，那个像素属于哪一层，
+         * 就认为哪一层延伸到了这里。属于本层就把 alpha 补上。
+         */
+        const visible = new Uint8Array(pixelCount);
+        for (let p = 0; p < pixelCount; p++) visible[p] = (above[p] ?? 0) < COVERED ? 1 : 0;
+        const { dx, dy } = nearestSource(visible, width, height);
+
+        /*
+         * 「原本看得见的部分」和「补进来的延伸部分」要先并成一张掩码，再统一做抗锯齿。
+         * 分开各糊各的话，两边在接缝处的 alpha 都只有 0.6 左右、拼不成 1，
+         * 更远的层会从这条缝里透出来，前景一挪开就是一道贴着原始轮廓的细线。
+         */
+        const footprint = new Float32Array(pixelCount);
+        for (let y = 0; y < height; y++) {
+          for (let x = 0; x < width; x++) {
+            const p = y * width + x;
+            if (visible[p]) {
+              footprint[p] = (own[p] ?? 0) >= COVERED ? 1 : 0;
+              continue;
+            }
+            const qx = x + (dx[p] ?? 0);
+            const qy = y + (dy[p] ?? 0);
+            if (qx < 0 || qy < 0 || qx >= width || qy >= height) continue;
+            if ((own[qy * width + qx] ?? 0) >= COVERED) footprint[p] = 1;
+          }
+        }
+        const softFootprint = blurAlpha(footprint, width, height);
+
+        // 取 max 是为了保住平缓过渡区里原有的羽化：那里 own 是缓慢变化的，不该被掩码的硬边顶掉
+        finalAlpha = new Float32Array(pixelCount);
+        for (let p = 0; p < pixelCount; p++) {
+          finalAlpha[p] = Math.max(own[p] ?? 0, softFootprint[p] ?? 0);
+        }
+        for (let p = 0; p < pixelCount; p++) {
+          sources[p] = !unknown[p] && (own[p] ?? 0) >= COVERED ? 1 : 0;
+        }
+      }
+
+      // 本层一个可用的源像素都没有就别填了，保持原图
+      if (sources.includes(1)) {
+        fillColors(out, src, sources, unknown, width, height, reachPx);
       }
     }
 
-    // 统计该层的深度中位数和包围盒
+    for (let p = 0; p < pixelCount; p++) {
+      out[p * 4 + 3] = Math.round((finalAlpha[p] ?? 0) * 255);
+    }
+
+    // 深度中位数只看「看得见的部分」；包围盒要用补全之后的范围
     const samplesInLayer: number[] = [];
     let minX = width;
     let minY = height;
@@ -322,8 +472,8 @@ export async function extractLayers(
     for (let y = 0; y < height; y++) {
       for (let x = 0; x < width; x++) {
         const p = y * width + x;
-        if ((alpha[p] ?? 0) < 0.5) continue;
-        samplesInLayer.push(sampled[p] ?? 0);
+        if ((own[p] ?? 0) >= COVERED) samplesInLayer.push(sampled[p] ?? 0);
+        if ((finalAlpha[p] ?? 0) < COVERED) continue;
         if (x < minX) minX = x;
         if (y < minY) minY = y;
         if (x > maxX) maxX = x;
@@ -335,10 +485,6 @@ export async function extractLayers(
       ? (samplesInLayer[samplesInLayer.length >> 1] ?? 0)
       : i / Math.max(1, layerCount - 1);
 
-    /*
-     * 最底层的 alpha 被强制拉满了整张图，它的有效区域就是全幅，
-     * 不能用深度带算出来的包围盒——否则下游按 bbox 裁剪会把底层裁缺一块。
-     */
     const bbox: BBox =
       i === 0 || maxX < 0
         ? [0, 0, width, height]
