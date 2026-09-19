@@ -12,3 +12,6 @@ Thumbs.db
 # 模型缓存与用户产物
 .models/
 out/
+
+# 本地测试用的临时素材
+public/__test*

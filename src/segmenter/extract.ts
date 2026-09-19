@@ -335,8 +335,14 @@ export async function extractLayers(
       ? (samplesInLayer[samplesInLayer.length >> 1] ?? 0)
       : i / Math.max(1, layerCount - 1);
 
+    /*
+     * 最底层的 alpha 被强制拉满了整张图，它的有效区域就是全幅，
+     * 不能用深度带算出来的包围盒——否则下游按 bbox 裁剪会把底层裁缺一块。
+     */
     const bbox: BBox =
-      maxX < 0 ? [0, 0, width, height] : [minX, minY, maxX - minX + 1, maxY - minY + 1];
+      i === 0 || maxX < 0
+        ? [0, 0, width, height]
+        : [minX, minY, maxX - minX + 1, maxY - minY + 1];
 
     images.push(await encodePng(new ImageData(out, width, height), width, height));
     stats.push({ depth: median, bbox });
