@@ -1,0 +1,221 @@
+/*
+ * HoloCard 渲染器样式
+ *
+ * 由 JS 注入的 CSS 变量驱动，渲染器本身不碰 style 属性之外的东西：
+ *   --hc-nx / --hc-ny     指针相对卡片中心的归一化偏移，范围 -1..1
+ *   --hc-mx / --hc-my     指针在卡片内的百分比位置，范围 0..100，用于定位渐变
+ *   --hc-active           效果强度，0 = 静止，1 = 完全激活（用于淡入淡出）
+ *   --hc-parallax         每层各自的视差系数
+ *   --hc-scale            每层各自的缩放补偿（见下方说明）
+ */
+
+.hc {
+  /* perspective 放在外层容器上，内层才能真正产生 3D 透视 */
+  perspective: 1200px;
+  display: inline-block;
+  /* 卡片自身的宽高比由 JS 按原图尺寸写入 */
+  aspect-ratio: var(--hc-aspect, 5 / 7);
+  width: 100%;
+  max-width: 420px;
+
+  --hc-nx: 0;
+  --hc-ny: 0;
+  --hc-mx: 50;
+  --hc-my: 50;
+  --hc-active: 0;
+  --hc-tilt: 14deg;
+  /* 视差振幅：位移量相对卡片宽度的比例。百分比位移天然分辨率无关 */
+  --hc-amp: 6%;
+  --hc-radius: 4.5% / 3.2%;
+}
+
+.hc__inner {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  border-radius: var(--hc-radius);
+  transform-style: preserve-3d;
+
+  /*
+   * 注意这里只做旋转，不做 translateZ。
+   * translateZ 会引入透视缩放，每层大小对不上，需要额外 scale 补偿且很难调；
+   * 分层视差改由每层各自的 2D 位移实现（见 .hc__layer），完全可控。
+   */
+  transform:
+    rotateX(calc(var(--hc-ny) * var(--hc-tilt)))
+    rotateY(calc(var(--hc-nx) * var(--hc-tilt)));
+
+  transition: transform 0.35s cubic-bezier(0.23, 1, 0.32, 1);
+  box-shadow:
+    0 0.5rem 1.5rem rgba(0, 0, 0, 0.35),
+    0 0 0 1px rgba(255, 255, 255, 0.08) inset;
+}
+
+.hc.is-interacting .hc__inner {
+  /* 跟手时去掉过渡，否则会有拖影 */
+  transition: none;
+}
+
+.hc__stack {
+  position: absolute;
+  inset: 0;
+  overflow: hidden; /* 裁掉被视差推出边界的部分 */
+  border-radius: inherit;
+  isolation: isolate; /* 把 mix-blend-mode 的作用范围关在卡片内 */
+  background: #0b0d16;
+}
+
+.hc__layer {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+  pointer-events: none;
+
+  --hc-parallax: 0;
+  --hc-scale: 1;
+
+  /*
+   * 放大一点点是必须的：某一层向右移动 d 像素后，它的左边缘会露出空白。
+   * 缩放系数由渲染器按 1 + 2d/宽度 算出来写进 --hc-scale。
+   */
+  transform:
+    translate3d(
+      calc(var(--hc-nx) * var(--hc-parallax) * var(--hc-amp)),
+      calc(var(--hc-ny) * var(--hc-parallax) * var(--hc-amp)),
+      0
+    )
+    scale(var(--hc-scale));
+
+  transition: transform 0.35s cubic-bezier(0.23, 1, 0.32, 1);
+  will-change: transform;
+}
+
+.hc.is-interacting .hc__layer {
+  transition: none;
+}
+
+/* ---------- 光泽 ---------- */
+
+.hc__foil {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  --hc-parallax: 0;
+  --hc-foil-intensity: 1;
+
+  /* 光泽层要跟着它所属的那一层一起动，否则会和图案错位 */
+  transform: translate3d(
+    calc(var(--hc-nx) * var(--hc-parallax) * var(--hc-amp)),
+    calc(var(--hc-ny) * var(--hc-parallax) * var(--hc-amp)),
+    0
+  );
+  transition:
+    transform 0.35s cubic-bezier(0.23, 1, 0.32, 1),
+    opacity 0.35s ease;
+  opacity: calc(var(--hc-active) * var(--hc-foil-intensity));
+}
+
+.hc.is-interacting .hc__foil {
+  transition: none;
+}
+
+/*
+ * 这是本项目相对 pokemon-cards-css 的关键差异：
+ * 光泽可以只作用在某一层的 alpha 形状内（比如只有人物闪、背景不闪）。
+ * mask 用的就是那一层自己的图片，所以形状天然对齐。
+ */
+.hc__foil[data-masked='true'] {
+  -webkit-mask-image: var(--hc-foil-mask);
+  mask-image: var(--hc-foil-mask);
+  -webkit-mask-size: 100% 100%;
+  mask-size: 100% 100%;
+  -webkit-mask-repeat: no-repeat;
+  mask-repeat: no-repeat;
+}
+
+.hc__foil[data-type='rainbow'] {
+  background-image:
+    repeating-linear-gradient(
+      100deg,
+      #ff7773 0%, #ffed5f 11%, #6cff78 22%,
+      #5fd6ff 33%, #a97bff 44%, #ff7773 55%
+    ),
+    repeating-linear-gradient(-32deg, #0e152e 0%, #7d8fb3 9%, #0e152e 18%);
+  background-size: 220% 220%, 160% 160%;
+  background-position:
+    calc(var(--hc-mx) * 1%) calc(var(--hc-my) * 1%),
+    calc(100% - var(--hc-mx) * 1%) calc(100% - var(--hc-my) * 1%);
+  background-blend-mode: hard-light;
+  mix-blend-mode: color-dodge;
+  filter: brightness(0.85) contrast(1.9) saturate(1.5);
+}
+
+.hc__foil[data-type='linear'] {
+  background-image: linear-gradient(
+    calc(var(--hc-nx) * 40deg + 110deg),
+    transparent 30%,
+    rgba(255, 255, 255, 0.55) 48%,
+    rgba(255, 255, 255, 0.85) 50%,
+    rgba(255, 255, 255, 0.55) 52%,
+    transparent 70%
+  );
+  mix-blend-mode: overlay;
+}
+
+.hc__foil[data-type='galaxy'] {
+  background-image:
+    radial-gradient(
+      circle at calc(var(--hc-mx) * 1%) calc(var(--hc-my) * 1%),
+      rgba(255, 255, 255, 0.9) 0%,
+      rgba(150, 190, 255, 0.35) 12%,
+      transparent 45%
+    ),
+    conic-gradient(
+      from calc(var(--hc-nx) * 60deg),
+      #3a1c71, #d76d77, #ffaf7b, #3a1c71
+    );
+  background-blend-mode: screen;
+  mix-blend-mode: color-dodge;
+  filter: contrast(1.4) saturate(1.3);
+}
+
+.hc__foil[data-type='none'] {
+  display: none;
+}
+
+/* ---------- 跟随指针的高光 ---------- */
+
+.hc__glare {
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  pointer-events: none;
+  mix-blend-mode: overlay;
+  opacity: var(--hc-active);
+  background: radial-gradient(
+    farthest-corner circle at calc(var(--hc-mx) * 1%) calc(var(--hc-my) * 1%),
+    rgba(255, 255, 255, 0.85) 4%,
+    rgba(255, 255, 255, 0.3) 18%,
+    rgba(120, 120, 140, 0.1) 42%,
+    rgba(0, 0, 0, 0.6) 100%
+  );
+  transition: opacity 0.35s ease;
+}
+
+/* ---------- 无障碍 ---------- */
+
+@media (prefers-reduced-motion: reduce) {
+  .hc__inner,
+  .hc__layer,
+  .hc__foil {
+    transition: none;
+    transform: none;
+  }
+  .hc__glare,
+  .hc__foil {
+    opacity: 0;
+  }
+}

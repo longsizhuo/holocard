@@ -1,0 +1,22 @@
+{
+  "name": "holocard",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "把任意照片自动切成前中后景，渲染成可交互的分层视差闪卡",
+  "license": "MIT",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc --noEmit && vite build",
+    "preview": "vite preview",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@huggingface/transformers": "^4.3.0"
+  },
+  "devDependencies": {
+    "typescript": "^7.0.2",
+    "vite": "^8.3.0"
+  },
+  "packageManager": "pnpm@10.7.0"
+}

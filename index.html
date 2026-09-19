@@ -1,0 +1,73 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>HoloCard — 把任意照片变成分层视差闪卡</title>
+    <meta name="description" content="自动切分前中后景，渲染成可交互的分层视差闪卡。全部在浏览器本地完成。" />
+  </head>
+  <body>
+    <main class="page">
+      <header class="page__head">
+        <h1>HoloCard</h1>
+        <p class="page__sub">
+          把任意照片自动切成前中后景，渲染成分层视差闪卡。全部在浏览器本地完成，图片不上传。
+        </p>
+      </header>
+
+      <section class="page__body">
+        <div class="stage" id="stage"></div>
+
+        <aside class="panel">
+          <h2 class="panel__title">调参</h2>
+
+          <label class="field">
+            <span class="field__label">倾斜角 <output id="out-tilt">14°</output></span>
+            <input id="ctl-tilt" type="range" min="0" max="30" step="1" value="14" />
+          </label>
+
+          <label class="field">
+            <span class="field__label">视差振幅 <output id="out-amp">6%</output></span>
+            <input id="ctl-amp" type="range" min="0" max="16" step="0.5" value="6" />
+            <small class="field__hint">调大更爽，但也更容易暴露补洞质量</small>
+          </label>
+
+          <label class="field">
+            <span class="field__label">光泽类型</span>
+            <select id="ctl-foil">
+              <option value="rainbow">彩虹箔 rainbow</option>
+              <option value="linear">线性扫光 linear</option>
+              <option value="galaxy">星河 galaxy</option>
+              <option value="none">关闭 none</option>
+            </select>
+          </label>
+
+          <label class="field field--row">
+            <input id="ctl-foil-subject" type="checkbox" checked />
+            <span>光泽只作用于主体层</span>
+          </label>
+          <small class="field__hint">
+            关掉就退化成整卡一层光泽，也就是 pokemon-cards-css 的做法。对比一下层次差别。
+          </small>
+
+          <hr class="panel__sep" />
+
+          <div class="drop" id="drop">
+            <input type="file" id="file" accept="image/*" hidden />
+            <strong>拖一张照片进来</strong>
+            <span>或点击选择。首次会下载约 50MB 深度模型，之后走浏览器缓存</span>
+          </div>
+
+          <div class="progress" id="progress" hidden>
+            <div class="progress__bar"><i id="progress-fill"></i></div>
+            <span id="progress-text">准备中</span>
+          </div>
+
+          <p class="panel__note" id="status">已加载手工素材 <code>samples/forest</code></p>
+        </aside>
+      </section>
+    </main>
+
+    <script type="module" src="/src/demo/main.ts"></script>
+  </body>
+</html>

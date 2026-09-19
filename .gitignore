@@ -1,0 +1,14 @@
+node_modules/
+dist/
+.vite/
+*.local
+
+# 编辑器
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# 模型缓存与用户产物
+.models/
+out/
