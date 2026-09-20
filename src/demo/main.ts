@@ -368,8 +368,10 @@ async function boot(): Promise<void> {
      * 会把「分享后有多少人真的点开」这个最关心的数字打歪。
      */
     initTracking();
-    // /c/<uuid> 归一成 /c，具体是哪张卡放事件数据里，别让页面列表被 uuid 撑爆
-    pageView(route.mode === 'card' ? '/c' : '/', route.id ? { card: route.id } : undefined);
+    // /c/<uuid> 归一成 /c，否则页面列表会被几千个 uuid 撑爆
+    pageView(route.mode === 'card' ? '/c' : '/');
+    // 哪张卡带来的流量另走一个事件——pageview 的 payload 塞不下自定义字段
+    if (route.mode === 'card' && route.id) track('card-view', { card: route.id });
   }
 
   if (route.id) {

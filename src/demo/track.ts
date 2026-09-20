@@ -16,15 +16,31 @@ const SCRIPT_URL = 'https://umami.involutionhell.com/script.js';
 /** umami 的站点 id，构建时注入。留空表示不启用统计 */
 const WEBSITE_ID = import.meta.env.VITE_UMAMI_ID ?? '';
 
+/** umami 的 track()：可以传事件名，也可以传一个改写默认属性的函数 */
+type TrackPayload = Record<string, unknown>;
+type TrackFn = {
+  (event: string, data?: TrackPayload): void;
+  (update: (props: TrackPayload) => TrackPayload): void;
+};
+
 declare global {
   interface Window {
-    umami?: {
-      track: (event: string, data?: Record<string, unknown>) => void;
-    };
+    umami?: { track: TrackFn };
   }
 }
 
-let enabled = false;
+/*
+ * 脚本是 async 注入的，而首屏的页面浏览紧接着就要上报——那一刻 window.umami
+ * 还不存在，直接调用会被静默丢掉（第一版就是这么丢的：线上只收到了用户手动触发
+ * 的事件，一条 pageview 都没有）。所以先排队，脚本 load 之后再回放。
+ */
+type Queued = () => void;
+let queue: Queued[] | null = [];
+
+function run(fn: Queued): void {
+  if (queue) queue.push(fn);
+  else fn();
+}
 
 /** 注入统计脚本。render 模式下不要调用 */
 export function initTracking(): void {
@@ -36,30 +52,44 @@ export function initTracking(): void {
   script.src = SCRIPT_URL;
   script.dataset['websiteId'] = WEBSITE_ID;
   /*
-   * 关掉自动路由追踪：这个站只有 /、/c/<id> 两种页面，而每张卡的 id 都不一样，
+   * 关掉自动追踪：这个站只有 /、/c/<id> 两种页面，而每张卡的 id 都不一样，
    * 让 umami 把它们当成几千个独立页面没有意义，反而把页面列表冲垮。
-   * 页面浏览由下面的 pageView() 手动上报，把 /c/<uuid> 归一成一条。
+   * 页面浏览由下面的 pageView() 手动上报，把 /c/<uuid> 归一成 /c。
    */
   script.dataset['autoTrack'] = 'false';
-  script.addEventListener('error', () => {
-    enabled = false;
+
+  script.addEventListener('load', () => {
+    const pendingCalls = queue ?? [];
+    queue = null;
+    for (const fn of pendingCalls) fn();
   });
+  script.addEventListener('error', () => {
+    // 连不上就把队列丢掉，别让它一直攒着
+    queue = null;
+  });
+
   document.head.append(script);
-  enabled = true;
 }
 
 /**
- * 上报一次页面浏览。
- * url 传归一化之后的路径（/c/<uuid> → /c），卡片 id 作为事件数据带上，
- * 这样既能看某张卡的热度，页面列表又不会被 uuid 撑爆。
+ * 上报一次页面浏览，把地址栏里的路径改写成 path。
+ *
+ * 必须用这个「改写默认属性」的函数形式：track('/c') 会被当成一个**名叫 /c 的事件**，
+ * 而 url_path 仍然记成浏览器地址栏里那个带 uuid 的原始路径，两头都不对。
+ *
+ * 这里只改 url，不塞别的字段——pageview 的 payload 只认固定的那几个键，
+ * 多出来的会被服务端静默丢掉（试过塞卡片 id，落库之后是空的）。
+ * 要带数据就走下面的 track()。
  */
-export function pageView(path: string, data?: Record<string, unknown>): void {
-  if (!enabled) return;
-  window.umami?.track(path, data);
+export function pageView(path: string): void {
+  run(() => {
+    window.umami?.track((props) => ({ ...props, url: path }));
+  });
 }
 
 /** 上报一个自定义事件 */
-export function track(event: string, data?: Record<string, unknown>): void {
-  if (!enabled) return;
-  window.umami?.track(event, data);
+export function track(event: string, data?: TrackPayload): void {
+  run(() => {
+    window.umami?.track(event, data);
+  });
 }
