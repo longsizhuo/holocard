@@ -16,7 +16,7 @@
 set -euo pipefail
 
 HOST="${HOLOCARD_HOST:-oracle}"
-WEB_DIR="/srv/holocard"
+WEB_ROOT="/srv/holocard-web"
 APP_DIR="/opt/holocard"
 
 cd "$(dirname "$0")/.."
@@ -39,17 +39,21 @@ mkdir -p dist/source
 git archive --format=tar.gz --prefix="holocard-${COMMIT}/" -o dist/source/holocard-src.tar.gz HEAD
 echo "${COMMIT}" > dist/source/COMMIT
 
-echo "==> 上传前端到 ${HOST}:${WEB_DIR}"
-# 先传进一个临时目录再原子换名，切换瞬间不会有请求读到半截站点
-ssh -o BatchMode=yes "${HOST}" "rm -rf ${WEB_DIR}.new && mkdir -p ${WEB_DIR}.new"
-tar -C dist -cf - . | ssh -o BatchMode=yes "${HOST}" "tar -xf - -C ${WEB_DIR}.new"
+RELEASE="$(date +%Y%m%d-%H%M%S)-${COMMIT}"
+
+echo "==> 上传前端到 ${HOST}:${WEB_ROOT}/releases/${RELEASE}"
+# /srv 是 root 的，所以切换发生在我们自己拥有的 ${WEB_ROOT} 里：
+# 先建好新的软链再 mv 覆盖，mv 是原子的，切换瞬间不会有请求读到半截站点
+ssh -o BatchMode=yes "${HOST}" "mkdir -p '${WEB_ROOT}/releases/${RELEASE}'"
+tar -C dist -cf - . | ssh -o BatchMode=yes "${HOST}" "tar -xf - -C '${WEB_ROOT}/releases/${RELEASE}'"
 ssh -o BatchMode=yes "${HOST}" "
   set -e
-  chmod -R a+rX ${WEB_DIR}.new
-  rm -rf ${WEB_DIR}.old
-  [ -d ${WEB_DIR} ] && mv ${WEB_DIR} ${WEB_DIR}.old || true
-  mv ${WEB_DIR}.new ${WEB_DIR}
-  rm -rf ${WEB_DIR}.old
+  chmod -R a+rX '${WEB_ROOT}/releases/${RELEASE}'
+  ln -sfn 'releases/${RELEASE}' '${WEB_ROOT}/current.new'
+  mv -T '${WEB_ROOT}/current.new' '${WEB_ROOT}/current'
+  # 只留最近 5 个版本，回滚够用，也不会把盘撑满
+  ls -1dt '${WEB_ROOT}'/releases/*/ | tail -n +6 | xargs -r rm -rf
+  echo '当前版本:' \$(readlink '${WEB_ROOT}/current')
 "
 
 echo "==> 上传服务到 ${HOST}:${APP_DIR}"
