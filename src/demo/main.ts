@@ -282,6 +282,34 @@ shareCopy.addEventListener('click', () => {
   setTimeout(() => (shareCopy.textContent = '复制'), 1500);
 });
 
+/**
+ * 给 OG 图铺一层模糊底。
+ *
+ * 1200×630 的横图配竖卡片，直接居中会剩两大片空白。用这张卡自己的画面
+ * 放大模糊后填满，每张分享图的基调就都来自用户的照片。
+ * 复用已经加载好的层图片，不额外发请求。
+ */
+function buildRenderBackdrop(): void {
+  // 底色复用已经加载好的层图片，不额外发请求
+  const bg = document.createElement('div');
+  bg.className = 'render-bg';
+  for (const img of document.querySelectorAll<HTMLImageElement>('.hc__art')) {
+    const clone = document.createElement('img');
+    clone.src = img.src;
+    clone.alt = '';
+    bg.append(clone);
+  }
+  document.body.append(bg);
+
+  const copy = document.createElement('div');
+  copy.className = 'render-copy';
+  copy.innerHTML =
+    '<h2>会发光的<br />分层闪卡</h2>' +
+    '<p>前中后景自动分层，每层各上各的箔面。<br />转动它，箔面会跟着角度变。</p>' +
+    '<span class="render-url">holocard.longsizhuo.com</span>';
+  document.querySelector('.page__body')?.append(copy);
+}
+
 /** 按路由决定首屏加载什么 */
 async function boot(): Promise<void> {
   if (route.mode === 'render') {
@@ -296,6 +324,7 @@ async function boot(): Promise<void> {
       status.textContent = `${set.manifest.layers.length} 层`;
 
       if (route.mode === 'render') {
+        buildRenderBackdrop();
         // 等所有层真正解码完再摆姿态，否则截图可能截到半成品
         await Promise.all(
           [...document.querySelectorAll('img.hc__art')].map((img) =>

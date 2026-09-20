@@ -197,24 +197,106 @@ select {
   cursor: pointer;
 }
 
-/* ---------- 渲染模式：只留卡片，给服务端截图用 ---------- */
+/* ---------- 渲染模式：给服务端截 OG 预览图用 ---------- */
 
+/*
+ * OG 图是 1200×630 的横图，卡片是竖的。直接居中会剩两大片空白；
+ * 试过用照片自己的模糊放大版铺满，但照片里只要有大片浅色（比如人脸），
+ * 糊完就是一坨灰，对不同输入太不稳定。
+ * 最终版面：卡片居左，右边放标题和说明，照片只留一层很淡的底色。
+ */
 body.is-render {
-  background: radial-gradient(900px 600px at 30% 10%, #241a4d 0%, transparent 60%),
-    radial-gradient(700px 500px at 110% 90%, #123049 0%, transparent 55%), #0a0b12;
-  display: grid;
-  place-items: center;
+  background: #07080e;
   margin: 0;
+  overflow: hidden;
+  display: block;
 }
 body.is-render .page { padding: 0; max-width: none; }
 body.is-render .page__head,
 body.is-render .panel,
 body.is-render .page__foot { display: none; }
-body.is-render .page__body { display: block; }
-body.is-render .stage { padding: 0; }
+body.is-render .page__body {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 64px;
+  width: 100vw;
+  height: 100vh;
+  position: relative;
+  z-index: 2;
+}
+body.is-render .stage { padding: 0; flex: none; }
+
 /*
- * 必须给确定宽度。.hc 本身是 width:100%，而渲染模式下 body 用 place-items:center，
- * 祖先链全按内容收缩 —— 二者互相依赖，结果是塌成 0×0，截出来只有背景。
- * 400 宽配最常见的竖图约 536 高，在 1200×630 里上下各留 47px，倾斜后的边角也不会被裁。
+ * 必须给确定宽度。.hc 本身是 width:100%，祖先链按内容收缩时二者互相依赖，
+ * 会塌成 0×0、截出来只有背景。390 宽的卡连 3D 投影在内实测占 y=26..570，
+ * 在 630 高的画布里上下都留得住。
  */
-body.is-render .hc { width: 400px; max-width: none; }
+body.is-render .hc {
+  width: 390px;
+  max-width: none;
+  filter: drop-shadow(0 24px 60px rgba(0, 0, 0, 0.8));
+}
+
+/*
+ * 底色分两层：
+ *   1. 固定的深靛渐变打底——照片再暗、再灰，也有一个设计好的底
+ *   2. 照片糊开之后用 screen 叠上去，只加光不减光
+ * screen 的好处是两头都不塌：暗照片叠上去几乎无痕，退回渐变；
+ * 彩色照片则在渐变上晕出一圈自己的颜色。
+ */
+.render-bg {
+  position: fixed;
+  inset: 0;
+  z-index: 0;
+  background: radial-gradient(125% 115% at 20% 34%, #1d1547 0%, #0b0c1a 56%, #06070d 100%);
+  overflow: hidden;
+}
+.render-bg img {
+  position: absolute;
+  inset: -22%;
+  width: 144%;
+  height: 144%;
+  object-fit: cover;
+  filter: blur(90px) saturate(2.4) brightness(0.62);
+  opacity: 0.55;
+  mix-blend-mode: screen;
+}
+/* 卡片背后的一团光，让它看起来是被照亮的而不是贴上去的 */
+.render-bg::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background:
+    radial-gradient(38% 62% at 33% 50%, rgba(150, 130, 255, 0.2) 0%, transparent 70%),
+    radial-gradient(85% 95% at 33% 50%, transparent 30%, rgba(4, 5, 10, 0.72) 100%);
+}
+
+.render-copy {
+  flex: none;
+  width: 400px;
+  color: #fff;
+}
+.render-copy h2 {
+  margin: 0 0 18px;
+  font-size: 56px;
+  line-height: 1.05;
+  letter-spacing: -0.02em;
+  text-shadow: 0 4px 24px rgba(0, 0, 0, 0.7);
+}
+.render-copy p {
+  margin: 0 0 28px;
+  font-size: 22px;
+  line-height: 1.55;
+  color: rgba(255, 255, 255, 0.74);
+}
+.render-copy .render-url {
+  display: inline-block;
+  padding: 10px 18px;
+  border-radius: 999px;
+  border: 1px solid rgba(255, 255, 255, 0.22);
+  background: rgba(255, 255, 255, 0.07);
+  font-size: 18px;
+  letter-spacing: 0.02em;
+  color: rgba(255, 255, 255, 0.92);
+}
