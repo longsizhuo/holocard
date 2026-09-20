@@ -43,19 +43,26 @@ ssh oracle 'cd /srv/holocard-web && ln -sfn releases/<版本> current.new && mv 
 | `/opt/holocard/node_modules/` | transformers.js + onnxruntime-node + sharp，约 483MB |
 | `/srv/holocard-models/` | Depth Anything V2-Small 权重（q8，27MB） |
 | `/srv/holocard-web/` | 前端 releases + current 软链 |
-| `/srv/holocard-layers/` | 用户产出的层文件，6 小时后自动清理 |
+| `/srv/holocard-layers/` | 用户产出的层文件。普通一周清理，分享过的（目录里有 `.shared`）永久保留 |
+| `/opt/holocard/browsers/` | Playwright 的 arm64 Chromium，渲染 OG 预览图用，662MB |
 
 ## 资源限制
 
 `/etc/systemd/system/holocard.service` 里：
 
 ```
-MemoryMax=2G      # 单并发实测峰值约 780MB
+MemoryMax=3G      # 推理峰值约 780MB，再加常驻 Chromium 约 400MB
 CPUQuota=200%     # 4 核里最多占 2 核，留给 Minecraft 和数据库
+Environment=PLAYWRIGHT_BROWSERS_PATH=/opt/holocard/browsers
 ```
+
+渲染 OG 预览图的 Chromium 常驻复用，空闲 5 分钟自动关掉。
+那台 ARM 机器没有显卡，启动参数里必须带 `--disable-gpu --use-gl=swiftshader --in-process-gpu`，
+否则 headless shell 截图直接报 `Unable to capture screenshot`。
 
 服务侧：单并发（`HOLOCARD_CONCURRENCY=1`），队列上限 12，满了直接返回 503 而不是让人排十分钟。
 上传上限 16MB，按魔数校验图片格式，拒绝解压炸弹。
+按 IP 限流：10 分钟 10 次，取 `cf-connecting-ip`。
 
 ## 一次性配置
 
@@ -87,6 +94,16 @@ curl -sL $B/onnx/model_quantized.onnx -o $D/onnx/model_quantized.onnx
 ```
 
 用 q8 而不是 fp16：在 ARM CPU 上实测快一倍（2.7s 对 5s+）、内存省三成，而深度图差别在切层这一步看不出来。
+
+**2.5 渲染 OG 预览图的浏览器**
+
+```bash
+cd /opt/holocard
+PLAYWRIGHT_BROWSERS_PATH=/opt/holocard/browsers npx --yes playwright@latest install chromium
+```
+
+注意别用 `npm install --save` 在这个目录里装东西——它会重写 package.json 并把
+transformers.js、onnxruntime-node、sharp 全 prune 掉（我踩过）。要加依赖先改 package.json 再 `npm install`。
 
 **3. systemd**：见 `/etc/systemd/system/holocard.service`，内容如上「资源限制」一节。
 
