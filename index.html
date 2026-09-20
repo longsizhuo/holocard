@@ -79,7 +79,15 @@
               <button type="button" id="share-copy">复制</button>
             </div>
             <small class="field__hint" id="share-hint">
-              分享后这张卡会永久保留；不分享的话一周后自动清理
+              不分享的话一周后自动清理；分享出去之后，每有人打开一次就续期，
+              越常被看的留得越久
+            </small>
+          </div>
+
+          <div class="danger" id="owner" hidden>
+            <button type="button" class="danger__btn" id="delete-btn">删除这张卡</button>
+            <small class="field__hint" id="delete-hint">
+              删除口令只存在这台设备的浏览器里，清了浏览器数据就没法再删了
             </small>
           </div>
 

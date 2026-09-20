@@ -58,8 +58,11 @@ export async function loadDepthModel(
 export async function estimateDepth(
   image: Blob,
   onProgress?: (p: LoadProgress) => void,
+  /** 权重就绪、即将开始推理时回调一次。推理本身没有进度事件，只能给个阶段切换 */
+  onModelReady?: () => void,
 ): Promise<DepthMap> {
   const estimator = await loadDepthModel(onProgress);
+  onModelReady?.();
   const input = await RawImage.fromBlob(image);
 
   const result = await estimator(input);
@@ -86,14 +89,23 @@ export async function estimateDepth(
     if (v > max) max = v;
   }
 
+  /*
+   * 归一化前要先判断这个跨度是不是「真的」。
+   *
+   * 模型输出的是视差，量级在几十上下。正对着一堵墙拍出来的图，各像素可能是
+   * 12.3400、12.3401 这种——跨度相对量级只有 1e-5，全是量化噪声。
+   * 无条件按 span 拉满会把这点噪声放大到 0..1，下游看到的是一张满量程的
+   * 「深度图」，于是照着噪声切层，切出来的分界毫无意义。
+   * 所以用相对阈值：跨度不到量级的千分之一就当作没有深度，全 0 交给下游出一层。
+   */
   const span = max - min;
+  const scale = Math.max(Math.abs(min), Math.abs(max), 1e-6);
   const normalized = new Float32Array(data.length);
-  if (span > 0) {
+  if (span > scale * 1e-3) {
     for (let i = 0; i < data.length; i++) {
       normalized[i] = ((data[i] ?? 0) - min) / span;
     }
   }
-  // span 为 0 说明整图深度一致（纯色图之类），全 0 即可，后续会走等质量兜底
 
   return { data: normalized, width, height };
 }

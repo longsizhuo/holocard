@@ -43,7 +43,7 @@ ssh oracle 'cd /srv/holocard-web && ln -sfn releases/<版本> current.new && mv 
 | `/opt/holocard/node_modules/` | transformers.js + onnxruntime-node + sharp，约 483MB |
 | `/srv/holocard-models/` | Depth Anything V2-Small 权重（q8，27MB） |
 | `/srv/holocard-web/` | 前端 releases + current 软链 |
-| `/srv/holocard-layers/` | 用户产出的层文件。普通一周清理，分享过的（目录里有 `.shared`）永久保留 |
+| `/srv/holocard-layers/` | 用户产出的层文件。每张卡一个 `meta.json`，保留策略见下 |
 | `/opt/holocard/browsers/` | Playwright 的 arm64 Chromium，渲染 OG 预览图用，662MB |
 
 ## 资源限制
@@ -63,6 +63,46 @@ Environment=PLAYWRIGHT_BROWSERS_PATH=/opt/holocard/browsers
 服务侧：单并发（`HOLOCARD_CONCURRENCY=1`），队列上限 12，满了直接返回 503 而不是让人排十分钟。
 上传上限 16MB，按魔数校验图片格式，拒绝解压炸弹。
 按 IP 限流：10 分钟 10 次，取 `cf-connecting-ip`。
+
+## 保留与删除
+
+每张卡的目录里有一份 `meta.json`（产出时间、是否分享过、被访问几次、最后一次访问、删除口令）。
+清理只看它，不看目录 mtime——mtime 会被任何一次写入刷新，拿它当依据等于永不过期。
+
+| | 窗口从哪算 | 多长 |
+|---|---|---|
+| 没分享过 | 产出时间 | 7 天 |
+| 分享过 | **最后一次被打开** | 7 天起，访问量每翻一番延一档，封顶 112 天 |
+
+档位：1 次 → 7 天，2-3 次 → 14 天，4-7 次 → 28 天，8-15 次 → 56 天，16 次以上 → 112 天。
+关键是分享过的卡从「最后一次访问」起算：一直有人看就不断续期，等于长期保留；
+彻底没人看了才开始倒计时。热门的留得久、冷的自然退场，磁盘占用有上界。
+
+访问计数按 IP 做一小时去重（自己反复刷不会把保留期刷上去），`HEAD` 不计
+（那多半是抓取工具和监控）。计数在内存里累计、每分钟合并写盘一次，
+退出前（`SIGTERM`）也会落一次，所以发版重启不会丢掉一分钟的数据。
+
+删除：产出时服务端生成一个删除口令，**只在 `POST /api/jobs` 的响应里给一次**，
+前端存进 `localStorage`。`DELETE /api/cards/{id}` 带 `x-holocard-token` 头才能删。
+口令不放在 `GET /api/jobs/{id}` 里——那个接口任何知道 id 的人都能打，而卡一分享出去
+id 就是公开的。这个站没有账号，「所有者」就是「手上有口令的人」；用户清了浏览器数据
+就等于放弃删除权，页面上写明了这一点。
+
+## 埋点
+
+自建 umami，站点 `HoloCard` / `holocard.longsizhuo.com`，
+website id `a67a8797-af1a-41a9-8278-279c05b60c9c`，看板在 https://umami.involutionhell.com 。
+
+id 通过 `.env.production` 里的 `VITE_UMAMI_ID` 在构建时注入。
+**这个文件不进仓库**（见 `.gitignore`）：提交了的话，别人 clone 下来自托管会被动把数据上报到我们这。
+所以每台发版机都要自己有一份；`deploy.sh` 开头会打印当前用的是哪个 id，缺了会警告。
+
+上报的内容：页面浏览（`/c/<uuid>` 归一成 `/c`，具体哪张卡放在事件数据里，
+否则页面列表会被几千个 uuid 撑爆）、`upload`（只带体积档位）、`segment-ok`、
+`segment-fail`（只带错误信息前 120 字）、`share`、`delete`。不带文件名。
+
+`/render/<id>`（无头浏览器截 OG 图的页面）不加载统计脚本——否则每生成一张预览图
+就多一条假访问，而且刚好落在分享这个动作上，会把「分享后有多少人真的点开」打歪。
 
 ## 一次性配置
 

@@ -13,6 +13,11 @@ Thumbs.db
 .models/
 out/
 
+# 本地环境配置。.env.example 是提交的模板，实际值不进仓库——
+# 其中 VITE_UMAMI_ID 指向我们自己的统计服务，提交了的话别人自托管会被动上报过来
+.env
+.env.production
+
 # 本地测试用的临时素材
 public/__test*
 

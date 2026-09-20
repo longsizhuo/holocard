@@ -103,6 +103,13 @@ export function ensureTextures(): Promise<FoilTextures> {
   cache ??= (async () => {
     const [grain, glitter] = await Promise.all([makeGrain(500), makeGlitter(640)]);
     return { grain, glitter };
-  })();
+  })().catch((error: unknown) => {
+    // 失败就把缓存清掉，下一张卡还能再试一次。
+    // 不清的话一个 rejected promise 会被永久记住，此后每张卡都直接落进调用方的
+    // catch，只有刷新页面才能恢复——而失败原因往往是暂时的（内存紧张时
+    // convertToBlob 会抛）。depth.ts 和 matte.ts 的同类缓存也是这么处理的。
+    cache = null;
+    throw error;
+  });
   return cache;
 }

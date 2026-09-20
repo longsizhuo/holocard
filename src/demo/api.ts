@@ -58,14 +58,23 @@ function sleep(ms: number, signal?: AbortSignal): Promise<void> {
   });
 }
 
+export interface SegmentResult {
+  /** .layers 目录的 URL，可直接喂给 loadLayerSet */
+  layers: string;
+  /** 这张卡的 id */
+  id: string;
+  /** 删除口令。服务端只在提交响应里给这一次，丢了就再也拿不到 */
+  deleteToken: string;
+}
+
 /**
- * 把图片交给服务端分层，返回 .layers 目录的 URL（可直接喂给 loadLayerSet）。
+ * 把图片交给服务端分层。
  */
 export async function segmentOnServer(
   file: Blob,
   onProgress?: (p: ServerProgress) => void,
   signal?: AbortSignal,
-): Promise<string> {
+): Promise<SegmentResult> {
   const base = import.meta.env.BASE_URL;
 
   onProgress?.({ detail: '正在上传' });
@@ -94,7 +103,7 @@ export async function segmentOnServer(
     throw new Error(body.error ?? `上传失败（HTTP ${created.status}）`);
   }
 
-  const { id } = (await created.json()) as { id: string };
+  const { id, deleteToken } = (await created.json()) as { id: string; deleteToken: string };
   const deadline = Date.now() + TIMEOUT_MS;
 
   while (Date.now() < deadline) {
@@ -121,11 +130,74 @@ export async function segmentOnServer(
     } else if (status.state === 'done' && status.layers) {
       onProgress?.({ detail: '正在取回分层结果', ratio: 0.95 });
       // 服务端返回的是绝对路径，base 已经包含在里面
-      return status.layers;
+      return { layers: status.layers, id, deleteToken };
     } else if (status.state === 'error') {
       throw new Error(status.error ?? '服务端处理失败');
     }
   }
 
   throw new ServerUnavailableError('服务端处理超时');
+}
+
+/*
+ * 删除口令存在 localStorage 里。
+ *
+ * 这个站没有账号，一张卡的「所有者」就是「手上有口令的人」。口令由服务端在
+ * 提交响应里给一次，别处再也拿不到，所以这里必须存下来——否则用户想删自己
+ * 上传的东西时无从下手。清了浏览器数据就等于放弃了删除权，这一点在页面上写明。
+ */
+const OWNED_KEY = 'holocard:owned';
+
+type OwnedMap = Record<string, string>;
+
+function readOwned(): OwnedMap {
+  try {
+    const raw = localStorage.getItem(OWNED_KEY);
+    const parsed: unknown = raw ? JSON.parse(raw) : {};
+    return typeof parsed === 'object' && parsed !== null ? (parsed as OwnedMap) : {};
+  } catch {
+    // 隐私模式下 localStorage 可能直接抛
+    return {};
+  }
+}
+
+export function rememberOwned(id: string, token: string): void {
+  try {
+    const owned = readOwned();
+    owned[id] = token;
+    localStorage.setItem(OWNED_KEY, JSON.stringify(owned));
+  } catch {
+    // 存不下就算了，只是这台设备上没有删除入口
+  }
+}
+
+export function ownedToken(id: string): string | null {
+  return readOwned()[id] ?? null;
+}
+
+export function forgetOwned(id: string): void {
+  try {
+    const owned = readOwned();
+    delete owned[id];
+    localStorage.setItem(OWNED_KEY, JSON.stringify(owned));
+  } catch {
+    // 同上
+  }
+}
+
+/** 删除一张自己的卡。口令不对或卡不存在时抛错 */
+export async function deleteCard(id: string): Promise<void> {
+  const token = ownedToken(id);
+  if (!token) throw new Error('这台设备上没有这张卡的删除口令');
+
+  const res = await fetch(`${import.meta.env.BASE_URL}api/cards/${id}`, {
+    method: 'DELETE',
+    headers: { 'x-holocard-token': token },
+  });
+  if (!res.ok && res.status !== 404) {
+    const body = (await res.json().catch(() => ({}))) as { error?: string };
+    throw new Error(body.error ?? `删除失败（HTTP ${res.status}）`);
+  }
+  // 404 说明已经被清理过了，对用户来说结果一样
+  forgetOwned(id);
 }

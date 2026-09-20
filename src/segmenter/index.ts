@@ -102,7 +102,13 @@ export async function segmentToLayerSet(
     });
   };
 
-  const depth = await estimateDepth(image, onModelProgress);
+  /*
+   * 推理这一步本身没有进度事件，但它在服务端的 ARM CPU 上要两三秒，
+   * 不切阶段的话界面会一直停在「正在加载模型」。
+   * 第二次上传时更明显：loadDepthModel 命中缓存直接返回，onModelProgress
+   * 一次都不会触发，进度条会卡在调用方给的占位值上不动。
+   */
+  const depth = await estimateDepth(image, onModelProgress, () => report('estimating-depth'));
 
   report('analyzing');
   const { cuts, prominences } = analyzeDepth(depth, options.slice ?? {});

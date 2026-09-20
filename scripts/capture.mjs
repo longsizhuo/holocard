@@ -8,10 +8,12 @@
  * 用法（先 pnpm dev 把开发服务跑起来）：
  *   node scripts/capture.mjs --image 照片路径                 录一张 GIF 到 out/demo.gif
  *   node scripts/capture.mjs --image 照片路径 --dump          额外把每一层导出成 PNG，排查分层问题用
+ *   node scripts/capture.mjs --image 照片路径 --dump --no-gif  只导出层，不录 GIF（快得多）
  *   node scripts/capture.mjs                                   不传图片则录手工素材
  *
  * 可选参数：--out 输出路径  --fps 帧率  --seconds 时长  --width GIF 宽度
- *           --url 开发服务地址  --pose x,y 只截一张指定姿态的静帧（配合 --dump）
+ *           --url 开发服务地址  --pose x,y 诊断静帧用的姿态（配合 --dump）
+ *           --no-gif 跳过录制
  */
 
 import { spawnSync } from 'node:child_process';
@@ -140,7 +142,8 @@ try {
     console.log(`诊断图已写到 ${dumpDir}（${layers.length} 层 + posed.png）`);
   }
 
-  if (!args.dump || args.record) {
+  // --dump 是「额外」导层，默认仍然录 GIF；只导层不录的话显式传 --no-gif
+  if (!args['no-gif']) {
     rmSync(framesDir, { recursive: true, force: true });
     mkdirSync(framesDir, { recursive: true });
 

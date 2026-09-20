@@ -176,6 +176,38 @@ function equalMassCuts(hist: Float32Array, count: number): number[] {
   return cuts;
 }
 
+/**
+ * 深度分布的「有效跨度」：去掉两端各 1% 质量之后还剩多宽。
+ * 用分位数而不是 min/max，是因为单个离群像素就能把 max-min 撑满。
+ */
+function effectiveSpread(hist: Float32Array): number {
+  let total = 0;
+  for (let i = 0; i < hist.length; i++) total += hist[i] ?? 0;
+  if (total === 0) return 0;
+
+  const last = hist.length - 1;
+  const quantile = (q: number): number => {
+    let acc = 0;
+    for (let i = 0; i < hist.length; i++) {
+      acc += hist[i] ?? 0;
+      if (acc >= total * q) return i / last;
+    }
+    return 1;
+  };
+  return quantile(0.99) - quantile(0.01);
+}
+
+/**
+ * 深度跨度小于这个值就不切层了。
+ *
+ * 纯色图、正对着的一堵墙之类，模型给出的深度几乎处处相同。硬切的后果很具体：
+ * 等质量兜底会把切点落在极低的桶上（cut ≈ 0.01），而 extract 用
+ * smoothstep(cut ± 0.035) 取遮罩，于是整幅图都落在过渡带里拿到约 0.3 的 alpha
+ * ——渲染出来是一整张半透明的照片副本压在原图上来回滑，也就是整幅重影。
+ * 这种图本来就没有层次，老老实实出一层。
+ */
+const MIN_DEPTH_SPREAD = 0.06;
+
 /** 分析深度图，算出该切几层、切在哪 */
 export function analyzeDepth(depth: DepthMap, options: Partial<SliceOptions> = {}): SliceResult {
   const opts: SliceOptions = { ...DEFAULT_SLICE_OPTIONS, ...options };
@@ -183,6 +215,11 @@ export function analyzeDepth(depth: DepthMap, options: Partial<SliceOptions> = {
   const raw = buildHistogram(depth.data, opts.bins);
   const histogram = smoothHistogram(raw, opts.smoothSigma);
   const last = opts.bins - 1;
+
+  // 深度几乎是平的，切不出层次，也不能硬切——见 MIN_DEPTH_SPREAD
+  if (effectiveSpread(histogram) < MIN_DEPTH_SPREAD) {
+    return { cuts: [], histogram, prominences: [] };
+  }
 
   const valleys = findValleys(histogram);
   const picked = pickCuts(

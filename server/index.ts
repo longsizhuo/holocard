@@ -19,13 +19,24 @@
  */
 
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
-import { mkdir, rm, writeFile, readFile, readdir, stat } from 'node:fs/promises';
-import { randomUUID } from 'node:crypto';
+import { mkdir, rm, writeFile, readFile, stat } from 'node:fs/promises';
+import { randomUUID, timingSafeEqual } from 'node:crypto';
 import { extname, join, resolve, sep } from 'node:path';
 import { env } from '@huggingface/transformers';
 import { segmentToLayerSet, type SegmentStage } from '../src/segmenter';
 import { sharpImages } from './images';
 import { renderPreview, PREVIEW_HEIGHT, PREVIEW_WIDTH } from './preview';
+import {
+  newMeta,
+  readMeta,
+  writeMeta,
+  ensureMeta,
+  recordHit,
+  flushHits,
+  sweepCards,
+  expiresAt,
+  type CardMeta,
+} from './cards';
 
 const PORT = Number(process.env.HOLOCARD_PORT ?? 8791);
 const OUT_DIR = process.env.HOLOCARD_OUT_DIR ?? '/srv/holocard-layers';
@@ -36,8 +47,23 @@ const MAX_UPLOAD = Number(process.env.HOLOCARD_MAX_UPLOAD ?? 16 * 1024 * 1024);
 const CONCURRENCY = Number(process.env.HOLOCARD_CONCURRENCY ?? 1);
 /** 队列排到这么长就直接拒绝，让用户立刻知道，而不是排十分钟 */
 const MAX_QUEUE = Number(process.env.HOLOCARD_MAX_QUEUE ?? 12);
-/** 没被分享的产物保留多久（毫秒）。分享过的永久保留 */
+/**
+ * 保留策略。
+ *
+ * 没分享过的：从生成算起 7 天，到点就删——多半是试一下就走了。
+ * 分享过的：从**最后一次被访问**算起，窗口长度随访问量翻倍地涨。
+ *   访问 1 次   → 7 天      （第一次分享出去、有人点开，就再留 7 天）
+ *   访问 2-3 次 → 14 天
+ *   访问 4-7 次 → 28 天
+ *   ……每翻一番加一档，封顶 112 天（7 × 2^4，KEEP_DOUBLINGS_CAP = 5 档）
+ *
+ * 「从最后一次访问算起」是关键：一直有人看的卡窗口不断续期，等于永久保留；
+ * 彻底没人看了才开始倒计时。这样热门内容留得久、冷内容自然退场，
+ * 磁盘占用有上界，不需要人工清理。
+ */
 const TTL_MS = Number(process.env.HOLOCARD_TTL_MS ?? 7 * 24 * 60 * 60 * 1000);
+/** 分享过的卡每翻一番访问量多留一档，最多翻几番 */
+const KEEP_DOUBLINGS_CAP = 5;
 /** 每个 IP 在窗口内最多提交几次，挡住把这里当图床刷的人 */
 const RATE_LIMIT = Number(process.env.HOLOCARD_RATE_LIMIT ?? 10);
 const RATE_WINDOW_MS = Number(process.env.HOLOCARD_RATE_WINDOW_MS ?? 10 * 60 * 1000);
@@ -64,12 +90,11 @@ interface Job {
   state: JobState;
   stage: SegmentStage | null;
   createdAt: number;
+  /** 这张卡的元信息，跑完写进 meta.json。删除口令在这里生成 */
+  meta: CardMeta;
   error?: string;
   layerCount?: number;
 }
-
-/** 分享过的卡片在目录里放一个空标记文件，清理时据此跳过 */
-const SHARED_MARKER = '.shared';
 
 /** 简单的滑动窗口限流。单进程、内存态，够用；真被大规模刷再上 Cloudflare 的规则 */
 const hits = new Map<string, number[]>();
@@ -86,6 +111,20 @@ function rateLimited(ip: string): boolean {
     }
   }
   return recent.length > RATE_LIMIT;
+}
+
+/**
+ * 定长字符串比较。长度不同时先比一个等长的占位串，让耗时与输入无关，
+ * 不给「试出口令有多长」留侧信道。
+ */
+function timingSafeEqualStr(a: string, b: string): boolean {
+  const left = Buffer.from(a, 'utf8');
+  const right = Buffer.from(b, 'utf8');
+  if (left.length !== right.length) {
+    timingSafeEqual(right, right);
+    return false;
+  }
+  return timingSafeEqual(left, right);
 }
 
 /** 取真实来源 IP。前面隔着 Cloudflare 和 Caddy，socket 地址永远是 127.0.0.1 */
@@ -173,6 +212,7 @@ async function runJob(job: Job, bytes: Buffer): Promise<void> {
       }),
     );
     await writeFile(join(dir, 'manifest.json'), JSON.stringify(set.manifest));
+    await writeMeta(dir, job.meta);
 
     job.layerCount = set.manifest.layers.length;
     job.state = 'done';
@@ -228,10 +268,14 @@ function escapeAttr(value: string): string {
  *
  * 这是分享能不能扩散的关键：链接在微信、Twitter 里有没有大图预览，
  * 直接决定别人点不点。标签里的 URL 必须是绝对地址。
+ *
+ * previewVersion 是预览图文件的 mtime，null 表示还没渲染出来。
+ * 带上它是因为预览图在 CDN 上按 immutable 缓存了 4 小时，
+ * 改了渲染逻辑重新出图之后，不换 URL 的话抓取方和边缘都还拿着旧图。
  */
-function injectShareMeta(html: string, id: string, hasPreview: boolean): string {
+function injectShareMeta(html: string, id: string, previewVersion: number | null): string {
   const pageUrl = escapeAttr(`${PUBLIC_ORIGIN}/c/${id}`);
-  const image = escapeAttr(`${PUBLIC_ORIGIN}/api/layers/${id}/preview.jpg`);
+  const image = escapeAttr(`${PUBLIC_ORIGIN}/api/layers/${id}/preview.jpg?v=${previewVersion ?? 0}`);
   const title = 'HoloCard — 一张会发光的分层闪卡';
   const desc = '前中后景自动分层，每层各上各的箔面。上传你自己的照片试试。';
 
@@ -241,7 +285,7 @@ function injectShareMeta(html: string, id: string, hasPreview: boolean): string 
     `<meta property="og:title" content="${title}" />`,
     `<meta property="og:description" content="${desc}" />`,
     // 预览图还没渲染好时不给 og:image，免得抓取方缓存一个 404
-    ...(hasPreview
+    ...(previewVersion !== null
       ? [
           `<meta property="og:image" content="${image}" />`,
           `<meta property="og:image:width" content="${PREVIEW_WIDTH}" />`,
@@ -259,8 +303,18 @@ function injectShareMeta(html: string, id: string, hasPreview: boolean): string 
   return html.replace('</head>', `  ${tags}\n  </head>`);
 }
 
-/** 发前端静态文件。找不到就回 index.html，交给前端路由 */
-async function serveStatic(pathname: string, res: ServerResponse): Promise<void> {
+/**
+ * 发前端静态文件。找不到就回 index.html，交给前端路由。
+ *
+ * HEAD 和 GET 走同一条路径，只是不写 body——健康检查、链接预览抓取工具、
+ * 各种监控都会先发 HEAD，之前只认 GET，它们一律拿到 404。
+ */
+async function serveStatic(
+  pathname: string,
+  res: ServerResponse,
+  method: string,
+  ip: string,
+): Promise<void> {
   // /c/<id> 要带上这张卡自己的 OG 标签
   const cardPath = /^\/c\/([0-9a-f-]{36})\/?$/.exec(pathname);
   if (!WEB_DIR) {
@@ -293,8 +347,18 @@ async function serveStatic(pathname: string, res: ServerResponse): Promise<void>
 
       if (cardPath?.[1] && ext === '.html') {
         const id = cardPath[1];
-        const hasPreview = Boolean(await stat(join(OUT_DIR, id, 'preview.jpg')).catch(() => null));
-        body = Buffer.from(injectShareMeta(body.toString('utf8'), id, hasPreview), 'utf8');
+        const previewStat = await stat(join(OUT_DIR, id, 'preview.jpg')).catch(() => null);
+        const previewVersion = previewStat ? Math.floor(previewStat.mtimeMs) : null;
+        body = Buffer.from(injectShareMeta(body.toString('utf8'), id, previewVersion), 'utf8');
+
+        /*
+         * 一次页面访问给这张卡的保留窗口续期。
+         *
+         * 只在 GET 上计：HEAD 多半是抓取工具和监控，不是真的有人在看。
+         * 计数在 cards.ts 里按 IP 做一小时去重，自己反复刷不会把保留期刷上去。
+         * 这条路径不会被 CDN 挡掉——/c/<id> 的 cache-control 是 no-cache，每次都回源。
+         */
+        if (method === 'GET') recordHit(id, ip);
       }
 
       res.writeHead(200, {
@@ -304,7 +368,8 @@ async function serveStatic(pathname: string, res: ServerResponse): Promise<void>
         'cache-control': isHashed ? 'public, max-age=31536000, immutable' : 'no-cache',
         'x-content-type-options': 'nosniff',
       });
-      res.end(body);
+      if (method === 'HEAD') res.end();
+      else res.end(body);
       return;
     } catch {
       // 试下一个候选
@@ -319,25 +384,17 @@ async function sweep(): Promise<void> {
   for (const [id, job] of jobs) {
     if (now - job.createdAt > TTL_MS) jobs.delete(id);
   }
-  try {
-    for (const name of await readdir(OUT_DIR)) {
-      const path = join(OUT_DIR, name);
-      const info = await stat(path).catch(() => null);
-      if (!info || now - info.mtimeMs <= TTL_MS) continue;
-      // 分享过的永久保留
-      if (await stat(join(path, SHARED_MARKER)).catch(() => null)) continue;
-      await rm(path, { recursive: true, force: true }).catch(() => undefined);
-    }
-  } catch {
-    // 目录还不存在，忽略
-  }
+  // 先把内存里攒的访问量落盘，否则刚被看过的卡可能按旧的 lastHitAt 判成过期
+  await flushHits(OUT_DIR);
+  const removed = await sweepCards(OUT_DIR, TTL_MS, KEEP_DOUBLINGS_CAP);
+  if (removed > 0) console.log(`[sweep] 清理了 ${removed} 张过期卡片`);
 }
 
 const server = createServer((req, res) => {
   void (async () => {
     const url = new URL(req.url ?? '/', 'http://localhost');
 
-    if (req.method === 'GET' && url.pathname === '/api/health') {
+    if ((req.method === 'GET' || req.method === 'HEAD') && url.pathname === '/api/health') {
       json(res, 200, { ok: true, running, queued: queue.length, concurrency: CONCURRENCY });
       return;
     }
@@ -373,12 +430,20 @@ const server = createServer((req, res) => {
         state: 'queued',
         stage: null,
         createdAt: Date.now(),
+        meta: newMeta(),
       };
       jobs.set(job.id, job);
       queue.push({ job, bytes });
       pump();
 
-      json(res, 202, { id: job.id, position: queue.length });
+      /*
+       * 删除口令只在这里给一次。
+       *
+       * 不放在 GET /api/jobs/{id} 里：那个接口任何知道 id 的人都能打，
+       * 而卡一旦分享出去，id 就是公开的——口令跟着泄漏，删除入口就等于没有。
+       * 提交请求的响应只有上传者自己看得到。
+       */
+      json(res, 202, { id: job.id, position: queue.length, deleteToken: job.meta.deleteToken });
       return;
     }
 
@@ -391,8 +456,19 @@ const server = createServer((req, res) => {
         json(res, 404, { error: '这张卡不存在或已过期' });
         return;
       }
-      await writeFile(join(dir, SHARED_MARKER), '');
-      json(res, 200, { url: `${PUBLIC_ORIGIN}/c/${id}` });
+      const meta = (await ensureMeta(dir)) ?? newMeta();
+      if (!meta.shared) {
+        meta.shared = true;
+        meta.sharedAt = Date.now();
+      }
+      // 分享动作本身按一次访问算，保留窗口从此刻起算
+      meta.lastHitAt = Date.now();
+      await writeMeta(dir, meta);
+
+      json(res, 200, {
+        url: `${PUBLIC_ORIGIN}/c/${id}`,
+        expiresAt: expiresAt(meta, TTL_MS, KEEP_DOUBLINGS_CAP),
+      });
 
       // 预览图慢（要起浏览器渲染），不让用户等；失败也不影响分享本身
       if (!previewJobs.has(id)) {
@@ -406,6 +482,36 @@ const server = createServer((req, res) => {
     }
 
     /*
+     * 删除自己的卡。
+     *
+     * 口令是产出时随 202 响应给上传者的，只有他们手上有（前端存在 localStorage）。
+     * 不做账号体系：这个站没有登录，一张卡的「所有者」就是「拿着口令的人」。
+     * 比较用定长循环而不是 ===，避免把口令的正确前缀长度泄漏出去。
+     */
+    const deleteMatch = /^\/api\/cards\/([0-9a-f-]{36})$/.exec(url.pathname);
+    if (req.method === 'DELETE' && deleteMatch) {
+      const id = deleteMatch[1] ?? '';
+      const dir = join(OUT_DIR, id);
+      const header = req.headers['x-holocard-token'];
+      const token = typeof header === 'string' ? header : '';
+
+      const meta = await readMeta(dir);
+      if (!meta) {
+        json(res, 404, { error: '这张卡不存在或已过期' });
+        return;
+      }
+      if (!timingSafeEqualStr(token, meta.deleteToken)) {
+        json(res, 403, { error: '口令不对，只有生成这张卡的人能删除它' });
+        return;
+      }
+
+      await rm(dir, { recursive: true, force: true });
+      console.log(`[delete] ${id} 已被创建者删除`);
+      json(res, 200, { deleted: true });
+      return;
+    }
+
+    /*
      * 层文件。本来想交给 Caddy 直接发静态文件，但那样开发环境（没有 Caddy）就跑不通，
      * 而且服务自己能发才算自包含——别人拿去单跑一个 Node 进程就够了。
      * 路径两段都严格匹配，不给目录穿越留口子。
@@ -413,7 +519,7 @@ const server = createServer((req, res) => {
     const fileMatch = /^\/api\/layers\/([0-9a-f-]{36})\/(manifest\.json|layer-\d{1,2}\.png|preview\.jpg)$/.exec(
       url.pathname,
     );
-    if (req.method === 'GET' && fileMatch) {
+    if ((req.method === 'GET' || req.method === 'HEAD') && fileMatch) {
       const [, id, name] = fileMatch;
       try {
         const body = await readFile(join(OUT_DIR, id ?? '', name ?? ''));
@@ -427,7 +533,8 @@ const server = createServer((req, res) => {
           // id 是一次性的 UUID，内容永不改变
           'cache-control': 'public, max-age=3600, immutable',
         });
-        res.end(body);
+        if (req.method === 'HEAD') res.end();
+        else res.end(body);
       } catch {
         json(res, 404, { error: '层文件不存在或已过期' });
       }
@@ -435,8 +542,12 @@ const server = createServer((req, res) => {
     }
 
     const jobMatch = /^\/api\/jobs\/([0-9a-f-]{36})$/.exec(url.pathname);
-    if (req.method === 'GET' && !jobMatch && !url.pathname.startsWith('/api/')) {
-      await serveStatic(url.pathname, res);
+    if (
+      (req.method === 'GET' || req.method === 'HEAD') &&
+      !jobMatch &&
+      !url.pathname.startsWith('/api/')
+    ) {
+      await serveStatic(url.pathname, res, req.method, clientIp(req));
       return;
     }
 
@@ -462,11 +573,25 @@ const server = createServer((req, res) => {
 
 await mkdir(OUT_DIR, { recursive: true });
 setInterval(() => void sweep(), 15 * 60 * 1000).unref();
+// 访问量在内存里累计，一分钟合并写一次盘。丢几条只影响保留时长，不影响正确性
+setInterval(() => void flushHits(OUT_DIR), 60 * 1000).unref();
+
+// 发版重启很频繁，退出前把攒着的访问量落盘，别每次都丢掉一分钟的计数
+for (const signal of ['SIGTERM', 'SIGINT'] as const) {
+  process.once(signal, () => {
+    void flushHits(OUT_DIR).finally(() => process.exit(0));
+  });
+}
 
 server.listen(PORT, '127.0.0.1', () => {
   console.log(`holocard 分层服务已启动 127.0.0.1:${PORT}`);
   console.log(`  产物目录 ${OUT_DIR}`);
   console.log(`  模型目录 ${MODEL_DIR}`);
   console.log(`  静态目录 ${WEB_DIR || '(未配置，由前端开发服务器负责)'}`);
-  console.log(`  并发 ${CONCURRENCY}，队列上限 ${MAX_QUEUE}，产物保留 ${Math.round(TTL_MS / 3600000)} 小时`);
+  const days = Math.round(TTL_MS / 86400000);
+  console.log(`  并发 ${CONCURRENCY}，队列上限 ${MAX_QUEUE}`);
+  console.log(
+    `  保留：未分享 ${days} 天；分享过的从最后一次访问起 ${days} 天，` +
+      `访问量每翻一番延一档，最长 ${days * Math.pow(2, KEEP_DOUBLINGS_CAP - 1)} 天`,
+  );
 });

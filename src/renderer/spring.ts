@@ -58,12 +58,22 @@ export class Spring<T extends Record<string, number>> {
     return this.#value as T;
   }
 
+  /** 当前目标值。「减少动态效果」时持有者据此直接把弹簧推到位 */
+  get target(): T {
+    return this.#target as T;
+  }
+
   set(target: T, options: SpringSetOptions = {}): void {
     this.#target = { ...target };
 
     if (options.hard) {
       this.#value = { ...target };
       this.#last = { ...target };
+      // 必须把 soft 留下的质量系数复位。松手回正用的是 { soft: 1 }，会把
+      // #invMass 压到 0 再每帧恢复；如果回正途中被 setPose / 换卡打断，
+      // 这里不复位就会把一个接近 0 的系数冻住，下次交互的头一秒卡片不跟手。
+      this.#invMass = 1;
+      this.#invMassRecoveryPerFrame = 0;
       return;
     }
 
@@ -81,7 +91,10 @@ export class Spring<T extends Record<string, number>> {
   tick(dt: number): boolean {
     this.#invMass = Math.min(this.#invMass + this.#invMassRecoveryPerFrame, 1);
 
-    const step = dt || 1 / 60;
+    // 只有正的 dt 才算数。dt 可能是 0（同一帧重复 tick），也可能是负的——
+    // 指针事件里记的 performance.now() 会晚于 rAF 回调拿到的帧起始时间戳。
+    // 写成 `dt || 1/60` 的话负数是真值，会原样用上，弹簧朝远离目标的方向走。
+    const step = dt > 0 ? dt : 1 / 60;
     const next: Record<string, number> = {};
     let settled = true;
 

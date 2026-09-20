@@ -196,9 +196,24 @@
 
 /* ---------- 无障碍 ---------- */
 
+/*
+ * 「减少动态效果」下保留箔面、去掉几何运动。
+ *
+ * 会引起不适的是位移和 3D 旋转，不是颜色变化；把箔面整个关掉（早先的版本是
+ * opacity: 0）等于把这张卡变回一张普通照片，代价太大。所以这里只锁住 transform：
+ *   .hc__rotator  整卡的 3D 倾角
+ *   .hc__plane    逐层视差位移
+ *   .hc          松手回正时的整体缩放
+ * 箔面的 background-position 仍然跟指针走，表现为原地换色的微光，不产生位移。
+ *
+ * 另外 card.ts 里 #ensureLoop 也会在这个偏好下停掉弹簧循环，指针一停就直接落位，
+ * 不做「弹一下再回来」的过冲——那同样是运动。
+ */
 @media (prefers-reduced-motion: reduce) {
+  .hc,
   .hc__rotator,
   .hc__plane {
-    transform: none;
+    transform: none !important;
+    transition: none !important;
   }
 }

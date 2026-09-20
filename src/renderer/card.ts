@@ -50,6 +50,20 @@ const round = (value: number, precision = 3): number => parseFloat(value.toFixed
 
 const clamp = (value: number, min = 0, max = 100): number => Math.min(Math.max(value, min), max);
 
+/**
+ * 用户是否要求「减少动态效果」。
+ *
+ * card.css 里同名的媒体查询锁掉了 transform，但弹簧循环仍在跑——
+ * 箔面会在松手后继续晃两下（欠阻尼过冲），那也是运动。
+ * 这里让弹簧直接落位：指针停了就是停了。
+ * 每次读实时值，用户在系统设置里改了偏好不用刷新页面。
+ */
+function prefersReducedMotion(): boolean {
+  return (
+    typeof matchMedia === 'function' && matchMedia('(prefers-reduced-motion: reduce)').matches
+  );
+}
+
 /** 把 value 从 [fromMin, fromMax] 线性映射到 [toMin, toMax] */
 const adjust = (
   value: number,
@@ -154,14 +168,16 @@ export class HoloCard {
 
   /** 挂载（或替换）一组层。重复调用会先清掉上一组的资源 */
   setLayerSet(set: LayerSet): void {
-    this.#teardownDom();
-
     const { manifest, images } = set;
+    // 校验要在拆掉旧卡之前做。反过来的话，一组坏数据会先把当前这张卡拆干净、
+    // object URL 也 revoke 了，然后才抛错——用户看到的是一片空白且无法恢复。
     if (images.length !== manifest.layers.length) {
       throw new Error(
         `层数对不上：manifest 声明 ${manifest.layers.length} 层，实际给了 ${images.length} 张图`,
       );
     }
+
+    this.#teardownDom();
 
     const root = document.createElement('div');
     root.className = 'hc';
@@ -211,7 +227,10 @@ export class HoloCard {
     haloEl.className = 'hc__halo';
     stack.append(haloEl);
     this.#haloEl = haloEl;
-    this.#halo = manifest.effects.halo;
+    // 拷一份，不持有调用方的对象。共用引用的话，外面对 manifest 的原地修改
+    // 会不经 setHalo 就影响下一帧的炫光计算，而 --hc-halo-intensity 还停在旧值，
+    // 强度和角度两条线对不上。
+    this.#halo = { ...manifest.effects.halo, light: { ...manifest.effects.halo.light } };
     haloEl.style.setProperty('--hc-halo-intensity', String(manifest.effects.halo.intensity));
 
     if (manifest.effects.glare) {
@@ -249,7 +268,7 @@ export class HoloCard {
 
   /** 改整卡炫光，立即生效 */
   setHalo(halo: HaloEffect): void {
-    this.#halo = halo;
+    this.#halo = { ...halo, light: { ...halo.light } };
     this.#haloEl?.style.setProperty('--hc-halo-intensity', String(halo.intensity));
     this.#writeVars();
   }
@@ -390,12 +409,22 @@ export class HoloCard {
 
   /** 三根弹簧共用一个 rAF 循环，全部静止后自动停掉 */
   #ensureLoop(): void {
+    if (prefersReducedMotion()) {
+      // 不进循环，直接把三根弹簧推到目标值再写一次变量
+      this.#rotate.set(this.#rotate.target, { hard: true });
+      this.#glare.set(this.#glare.target, { hard: true });
+      this.#background.set(this.#background.target, { hard: true });
+      this.#writeVars();
+      return;
+    }
     if (this.#rafId !== 0) return;
     this.#lastTime = performance.now();
 
     const frame = (now: number): void => {
-      // 以 1/60 秒为单位；封顶 3 帧，避免卡顿后一步迈太大把弹簧甩飞
-      const dt = Math.min(3, ((now - this.#lastTime) * 60) / 1000);
+      // 以 1/60 秒为单位；上界封顶 3 帧，避免卡顿后一步迈太大把弹簧甩飞。
+      // 下界也要钳：#lastTime 是在 pointermove 事件里记的，同一帧内输入事件先于
+      // rAF 回调派发，所以首帧的 now 可能早于它，算出来是负的。
+      const dt = Math.max(0, Math.min(3, ((now - this.#lastTime) * 60) / 1000));
       this.#lastTime = now;
 
       const settledRotate = this.#rotate.tick(dt);
@@ -436,9 +465,11 @@ export class HoloCard {
     style.setProperty('--background-x', `${round(background.x)}%`);
     style.setProperty('--background-y', `${round(background.y)}%`);
 
-    // 视差吃的是过了弹簧的指针位置，所以层的滑动和转卡是同一种手感
-    style.setProperty('--hc-nx', String(round((glare.x - 50) / 50, 4)));
-    style.setProperty('--hc-ny', String(round((glare.y - 50) / 50, 4)));
+    // 视差吃的是过了弹簧的指针位置，所以层的滑动和转卡是同一种手感。
+    // 必须钳到 [-1, 1]：glare 弹簧是欠阻尼的，快速划过时会过冲出界，
+    // 而 #scaleFor 的缩放补偿是按 |n| ≤ 1 推的，过冲时层的边缘会缩进卡面里露边。
+    style.setProperty('--hc-nx', String(round(clamp((glare.x - 50) / 50, -1, 1), 4)));
+    style.setProperty('--hc-ny', String(round(clamp((glare.y - 50) / 50, -1, 1), 4)));
 
     const halo = this.#halo;
     const haloValue =

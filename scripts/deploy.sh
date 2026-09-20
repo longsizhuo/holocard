@@ -30,6 +30,15 @@ if [ -n "$(git status --porcelain)" ]; then
 fi
 
 COMMIT="$(git rev-parse --short HEAD)"
+
+# .env.production 不进仓库（见 .gitignore），所以每台发版机都要自己有一份。
+# 少了它站点照常工作，只是没有埋点——静默发生的话很难发现，这里说明白。
+if [ -f .env.production ]; then
+  echo "==> 埋点：$(grep -o 'VITE_UMAMI_ID=.*' .env.production || echo '未配置')"
+else
+  echo "==> 埋点：没有 .env.production，本次发版不带统计" >&2
+fi
+
 echo "==> 构建 ${COMMIT}"
 pnpm build
 pnpm exec vite build --config vite.server.config.ts

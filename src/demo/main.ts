@@ -4,7 +4,8 @@ import './style.css';
 import { HoloCard } from '../renderer/card';
 import { loadLayerSet } from '../format/io';
 import { FOIL_TYPES, type FoilType, type LayerSet } from '../format/types';
-import { segmentOnServer, ServerUnavailableError } from './api';
+import { segmentOnServer, ServerUnavailableError, rememberOwned, ownedToken, deleteCard } from './api';
+import { initTracking, pageView, track } from './track';
 import { parseRoute, shareUrl } from './route';
 
 /** 取元素并断言存在，省掉一堆空判断 */
@@ -44,6 +45,9 @@ const progressText = need<HTMLSpanElement>('#progress-text');
 const shareBox = need<HTMLDivElement>('#share');
 const shareBtn = need<HTMLButtonElement>('#share-btn');
 const shareResult = need<HTMLDivElement>('#share-result');
+const ownerBox = need<HTMLDivElement>('#owner');
+const deleteBtn = need<HTMLButtonElement>('#delete-btn');
+const deleteHint = need<HTMLElement>('#delete-hint');
 const shareUrlInput = need<HTMLInputElement>('#share-url');
 const shareCopy = need<HTMLButtonElement>('#share-copy');
 const shareHint = need<HTMLElement>('#share-hint');
@@ -129,11 +133,18 @@ function show(set: LayerSet, id: string | null = null): void {
   shareResult.hidden = true;
   shareBtn.disabled = false;
   shareBtn.textContent = '生成分享链接';
-  set.manifest.effects.halo.intensity = Number(ctlIntensity.value);
-  set.manifest.effects.halo.light = {
-    ...set.manifest.effects.halo.light,
-    sharpness: Number(ctlSharp.value),
-  };
+  // 只有手上有这张卡口令的人才看得到删除入口
+  ownerBox.hidden = id === null || ownedToken(id) === null;
+  deleteBtn.disabled = false;
+  deleteBtn.textContent = '删除这张卡';
+
+  // 方向是 manifest → 面板，和下面 buildFoilControls 处理逐层箔面的方向一致。
+  // 反过来写（拿滑杆当前值去覆盖 manifest）的话，任何自带炫光参数的卡
+  // ——别人分享过来的、或本地导入的 .layers——一加载就被滑杆默认值悄悄改掉了。
+  const halo = set.manifest.effects.halo;
+  ctlIntensity.value = String(halo.intensity);
+  ctlSharp.value = String(halo.light.sharpness);
+
   card.setLayerSet(set);
   buildFoilControls(set);
 }
@@ -174,15 +185,19 @@ async function processImage(file: File): Promise<void> {
   drop.classList.remove('is-over');
   showProgress('准备中');
   status.textContent = `正在处理 ${file.name}`;
+  // 只报体积档位，不报文件名和具体大小
+  track('upload', { sizeMb: Math.round(file.size / 1024 / 1024) });
 
   try {
     let set: LayerSet;
     let serverId: string | null = null;
     try {
-      const layersUrl = await segmentOnServer(file, (p) => showProgress(p.detail, p.ratio));
-      set = await loadLayerSet(layersUrl);
-      // layersUrl 形如 /api/layers/<id>，末段就是卡片 id
-      serverId = layersUrl.split('/').filter(Boolean).pop() ?? null;
+      const result = await segmentOnServer(file, (p) => showProgress(p.detail, p.ratio));
+      set = await loadLayerSet(result.layers);
+      serverId = result.id;
+      // 删除口令服务端只给这一次，立刻存下来，否则这张卡就没法删了
+      rememberOwned(result.id, result.deleteToken);
+      track('segment-ok', { where: 'server', layers: set.manifest.layers.length });
       status.textContent = `已切成 ${set.manifest.layers.length} 层 · ${set.manifest.generator ?? ''}`;
     } catch (serverError) {
       if (!(serverError instanceof ServerUnavailableError)) throw serverError;
@@ -194,6 +209,7 @@ async function processImage(file: File): Promise<void> {
       set = await segmentToLayerSet(file, {
         onProgress: (p) => showProgress(p.detail, p.ratio),
       });
+      track('segment-ok', { where: 'browser', layers: set.manifest.layers.length });
       status.textContent = `已在本机切成 ${set.manifest.layers.length} 层 · ${set.manifest.generator ?? ''}`;
     }
 
@@ -201,7 +217,10 @@ async function processImage(file: File): Promise<void> {
     progress.hidden = true;
   } catch (error) {
     progress.hidden = true;
-    status.textContent = `处理失败：${error instanceof Error ? error.message : String(error)}`;
+    const message = error instanceof Error ? error.message : String(error);
+    // 只报错误信息，不报文件名——那是用户的东西
+    track('segment-fail', { message: message.slice(0, 120) });
+    status.textContent = `处理失败：${message}`;
   } finally {
     busy = false;
   }
@@ -264,7 +283,9 @@ async function doShare(): Promise<void> {
     shareUrlInput.value = shareUrl(currentId);
     shareResult.hidden = false;
     shareBtn.textContent = '已生成';
-    shareHint.textContent = '这张卡已转为永久保留。链接在微信、Twitter 里会显示卡片预览图';
+    track('share');
+    shareHint.textContent =
+      '链接在微信、Twitter 里会显示卡片预览图。每被打开一次保留期就续一次，没人看了才开始倒计时';
     shareUrlInput.select();
   } catch (error) {
     shareBtn.disabled = false;
@@ -273,7 +294,32 @@ async function doShare(): Promise<void> {
   }
 }
 
+/**
+ * 删掉自己的卡。
+ *
+ * 二次确认是必须的：这个操作不可撤销，而且已经分享出去的链接会立刻失效。
+ */
+async function doDelete(): Promise<void> {
+  if (!currentId) return;
+  if (!confirm('删除后无法恢复，已经分享出去的链接也会立刻失效。确定要删除吗？')) return;
+
+  deleteBtn.disabled = true;
+  deleteBtn.textContent = '正在删除…';
+  try {
+    await deleteCard(currentId);
+    track('delete');
+    ownerBox.hidden = true;
+    shareBox.hidden = true;
+    status.textContent = '这张卡已删除。服务端上的层文件和预览图都已清掉';
+  } catch (error) {
+    deleteBtn.disabled = false;
+    deleteBtn.textContent = '删除这张卡';
+    deleteHint.textContent = `删除失败：${error instanceof Error ? error.message : String(error)}`;
+  }
+}
+
 shareBtn.addEventListener('click', () => void doShare());
+deleteBtn.addEventListener('click', () => void doDelete());
 shareCopy.addEventListener('click', () => {
   shareUrlInput.select();
   // clipboard API 在非安全上下文下不可用，退回老办法
@@ -283,10 +329,10 @@ shareCopy.addEventListener('click', () => {
 });
 
 /**
- * 给 OG 图铺一层模糊底。
+ * 给 OG 图补上背景和右侧文案。
  *
- * 1200×630 的横图配竖卡片，直接居中会剩两大片空白。用这张卡自己的画面
- * 放大模糊后填满，每张分享图的基调就都来自用户的照片。
+ * 1200×630 的横图配竖卡片，直接居中会剩两大片空白，所以排成左卡片右文案。
+ * 背景用这张卡自己的画面糊开当色调（具体叠法见 style.css 里 .render-bg 的注释），
  * 复用已经加载好的层图片，不额外发请求。
  */
 function buildRenderBackdrop(): void {
@@ -315,6 +361,15 @@ async function boot(): Promise<void> {
   if (route.mode === 'render') {
     // 给服务端截 OG 图用：只留卡片，固定在炫光峰值姿态，不带任何 UI
     document.body.classList.add('is-render');
+  } else {
+    /*
+     * 统计只在真人访问的页面上加载，render 模式（无头浏览器截 OG 图）跳过——
+     * 否则每生成一张预览图就多一条假访问，而且刚好都落在分享这个动作上，
+     * 会把「分享后有多少人真的点开」这个最关心的数字打歪。
+     */
+    initTracking();
+    // /c/<uuid> 归一成 /c，具体是哪张卡放事件数据里，别让页面列表被 uuid 撑爆
+    pageView(route.mode === 'card' ? '/c' : '/', route.id ? { card: route.id } : undefined);
   }
 
   if (route.id) {

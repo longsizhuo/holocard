@@ -39,6 +39,14 @@
   --sunpillar-clr-6: var(--sunpillar-6);
 
   --glittersize: 25%;
+
+  /*
+   * --grain / --glitter 是 card.ts 里 ensureTextures() 异步算好之后写进来的 url()。
+   * 引用时必须带 none 兜底：CSS 自定义属性没定义又没 fallback 时，整条声明会被判为
+   * 「invalid at computed-value time」，background-image 直接回落到 none——
+   * 不是少一层纹理，而是整个箔面配方都不显示。
+   * 没有 OffscreenCanvas 的浏览器、以及纹理算好之前的那几帧，走的都是这个兜底。
+   */
   --space: 5%;
   --angle: 133deg;
   --imgsize: cover;
@@ -200,7 +208,7 @@
   --imgsize: 500px;
 
   background-image:
-    var(--grain),
+    var(--grain, none),
     repeating-linear-gradient(
       0deg,
       var(--sunpillar-clr-1) calc(var(--space) * 1),
@@ -265,7 +273,7 @@
 
   background-image:
     linear-gradient(-45deg, var(--r-clr-1), var(--r-clr-5)),
-    var(--glitter),
+    var(--glitter, none),
     linear-gradient(
       -30deg,
       var(--r-clr-1), var(--r-clr-2), var(--r-clr-3), var(--r-clr-4), var(--r-clr-5), var(--r-clr-6), var(--r-clr-7),
@@ -293,7 +301,7 @@
   content: '';
 
   background-image:
-    var(--glitter),
+    var(--glitter, none),
     linear-gradient(
       -60deg,
       var(--r-clr-1), var(--r-clr-2), var(--r-clr-3), var(--r-clr-4), var(--r-clr-5), var(--r-clr-6), var(--r-clr-7),
