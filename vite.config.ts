@@ -2,6 +2,16 @@ import { defineConfig } from 'vite';
 
 export default defineConfig({
   server: {
+    // 固定端口：录制/验证脚本和 README 都按这个来，用默认的 5173 会对不上
+    port: 5273,
+    strictPort: true,
+    // 开发时把 /api 转给本地跑着的分层服务（pnpm dev:server）
+    proxy: {
+      '/api': {
+        target: process.env.HOLOCARD_API ?? 'http://127.0.0.1:8791',
+        changeOrigin: true,
+      },
+    },
     headers: {
       // onnxruntime-web 的多线程 WASM 需要 SharedArrayBuffer，
       // 而 SharedArrayBuffer 要求页面处于跨源隔离状态。

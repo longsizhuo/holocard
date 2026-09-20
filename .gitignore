@@ -18,3 +18,6 @@ public/__test*
 
 # 录制脚本的浏览器缓存（含已下载的模型）
 .cache/
+
+# 服务端构建产物
+dist-server/

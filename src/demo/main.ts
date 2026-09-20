@@ -4,6 +4,7 @@ import './style.css';
 import { HoloCard } from '../renderer/card';
 import { loadLayerSet } from '../format/io';
 import { FOIL_TYPES, type FoilType, type LayerSet } from '../format/types';
+import { segmentOnServer, ServerUnavailableError } from './api';
 
 /** 取元素并断言存在，省掉一堆空判断 */
 function need<T extends Element>(selector: string): T {
@@ -145,7 +146,10 @@ function showProgress(text: string, ratio?: number): void {
   progressFill.style.width = `${Math.round((ratio ?? 0.05) * 100)}%`;
 }
 
-/** 走完整条流水线：图片 → 深度 → 切层 → 补洞 → 渲染 */
+/**
+ * 分层：优先让服务端做，浏览器一个字节的模型都不用下。
+ * 服务端没部署或忙不过来时回退到浏览器端流水线——自托管的纯静态部署走的就是这条路。
+ */
 async function processImage(file: File): Promise<void> {
   if (busy) return;
   busy = true;
@@ -154,16 +158,26 @@ async function processImage(file: File): Promise<void> {
   status.textContent = `正在处理 ${file.name}`;
 
   try {
-    // 动态引入，把 transformers.js 挡在首屏之外
-    const { segmentToLayerSet } = await import('../segmenter');
+    let set: LayerSet;
+    try {
+      const layersUrl = await segmentOnServer(file, (p) => showProgress(p.detail, p.ratio));
+      set = await loadLayerSet(layersUrl);
+      status.textContent = `已切成 ${set.manifest.layers.length} 层 · ${set.manifest.generator ?? ''}`;
+    } catch (serverError) {
+      if (!(serverError instanceof ServerUnavailableError)) throw serverError;
 
-    const set = await segmentToLayerSet(file, {
-      onProgress: (p) => showProgress(p.detail, p.ratio),
-    });
+      // 回退：在浏览器里跑。首次要下约 50MB 权重，所以只在服务端指望不上时才走
+      console.info('[holocard] 服务端不可用，回退到浏览器端：', serverError.message);
+      showProgress('服务端不可用，改在本机处理');
+      const { segmentToLayerSet } = await import('../segmenter');
+      set = await segmentToLayerSet(file, {
+        onProgress: (p) => showProgress(p.detail, p.ratio),
+      });
+      status.textContent = `已在本机切成 ${set.manifest.layers.length} 层 · ${set.manifest.generator ?? ''}`;
+    }
 
     show(set);
     progress.hidden = true;
-    status.textContent = `已切成 ${set.manifest.layers.length} 层 · ${set.manifest.generator ?? ''}`;
   } catch (error) {
     progress.hidden = true;
     status.textContent = `处理失败：${error instanceof Error ? error.message : String(error)}`;

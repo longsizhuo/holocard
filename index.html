@@ -4,14 +4,14 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>HoloCard — 把任意照片变成分层闪卡</title>
-    <meta name="description" content="自动切分前中后景，每层各上各的箔面，渲染成可交互的闪卡。全部在浏览器本地完成。" />
+    <meta name="description" content="上传一张照片，自动切分前中后景，每层各上各的箔面，渲染成可交互的闪卡。" />
   </head>
   <body>
     <main class="page">
       <header class="page__head">
         <h1>HoloCard</h1>
         <p class="page__sub">
-          把任意照片自动切成前中后景，每层各上各的箔面，渲染成闪卡。全部在浏览器本地完成，图片不上传。
+          上传一张照片，自动切成前中后景，每层各上各的箔面，渲染成闪卡。
         </p>
       </header>
 
@@ -64,7 +64,7 @@
           <div class="drop" id="drop">
             <input type="file" id="file" accept="image/*" hidden />
             <strong>拖一张照片进来</strong>
-            <span>或点击选择。首次会下载约 50MB 深度模型，之后走浏览器缓存</span>
+            <span>或点击选择。照片会上传到服务器处理，产出的分层结果保留 6 小时后自动删除</span>
           </div>
 
           <div class="progress" id="progress" hidden>

@@ -26,9 +26,12 @@ export async function loadDepthModel(
     configureModelSource();
     const device = await pickDevice();
 
-    // WebGPU 下用 fp16，约 50MB；WASM 上 fp16 没有加速，不如 q8。
-    // 想进一步压下载量可以在构建期强制 q8，代价是深度图细节略糊。
-    const dtype = import.meta.env.VITE_MODEL_DTYPE ?? (device === 'webgpu' ? 'fp16' : 'q8');
+    /*
+     * WebGPU 下用 fp16，约 50MB。CPU（Node）和 WASM 上 fp16 都没有加速，
+     * 实测 q8 在服务端的 ARM CPU 上既快一倍又省三成内存，所以非 WebGPU 一律 q8。
+     * 用 || 而不是 ?? ：环境变量留空时 Vite 注入的是空字符串，?? 拦不住。
+     */
+    const dtype = import.meta.env.VITE_MODEL_DTYPE || (device === 'webgpu' ? 'fp16' : 'q8');
 
     return pipeline('depth-estimation', MODEL_ID, {
       device,

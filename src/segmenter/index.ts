@@ -147,4 +147,6 @@ export async function segmentToLayerSet(
 /** 导出给调试面板看的切层诊断信息 */
 export { analyzeDepth, type SliceOptions } from './slice';
 export { estimateDepth } from './depth';
+export { browserImages, type ImageBackend, type RgbaImage } from './image-io';
+export type { ExtractOptions } from './extract';
 export type { DepthMap } from './slice';

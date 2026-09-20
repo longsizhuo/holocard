@@ -10,10 +10,14 @@
     "build": "tsc --noEmit && vite build",
     "preview": "vite preview",
     "typecheck": "tsc --noEmit",
-    "capture": "node scripts/capture.mjs"
+    "capture": "node scripts/capture.mjs",
+    "build:server": "tsc --noEmit && vite build --config vite.server.config.ts",
+    "start:server": "node dist-server/holocard-server.mjs",
+    "dev:server": "vite build --config vite.server.config.ts && node dist-server/holocard-server.mjs"
   },
   "dependencies": {
-    "@huggingface/transformers": "^4.3.0"
+    "@huggingface/transformers": "^4.3.0",
+    "sharp": "^0.35.4"
   },
   "devDependencies": {
     "playwright-core": "^1.63.0",

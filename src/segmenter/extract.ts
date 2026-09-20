@@ -16,6 +16,7 @@
  */
 
 import type { BBox } from '../format/types';
+import { browserImages, type ImageBackend } from './image-io';
 import { blurAlpha, dilateMask, growForeground, nearestSource, snapDepthEdges } from './morph';
 import { createRefiner, guideFromImage, type Guide, type RefineOptions } from './refine';
 import type { DepthMap } from './slice';
@@ -38,6 +39,8 @@ export interface ExtractOptions {
   fringe: number;
   /** 镜像纹理填充最多深入遮挡区多远（相对图宽），再往里退化成平滑填充 */
   mirrorReach: number;
+  /** 图片解码/编码后端。浏览器用 OffscreenCanvas，服务端注入 sharp 实现 */
+  images: ImageBackend;
   /** 是否用引导滤波把层边界吸附到真实的物体边缘上。关掉则边界完全来自深度图 */
   refineEdges: boolean;
   refine: Partial<RefineOptions>;
@@ -56,6 +59,7 @@ export const DEFAULT_EXTRACT_OPTIONS: ExtractOptions = {
   foregroundGrow: 0.004,
   fringe: 0.005,
   mirrorReach: 0.12,
+  images: browserImages,
   refineEdges: true,
   refine: {},
   extraGuide: null,
@@ -309,34 +313,6 @@ function fillColors(
   }
 }
 
-/** 把源图解码并按 maxDimension 等比缩放，取出像素 */
-async function decodeScaled(
-  image: Blob,
-  maxDimension: number,
-): Promise<{ pixels: ImageData; width: number; height: number }> {
-  const bitmap = await createImageBitmap(image);
-  const scale = Math.min(1, maxDimension / Math.max(bitmap.width, bitmap.height));
-  const width = Math.max(1, Math.round(bitmap.width * scale));
-  const height = Math.max(1, Math.round(bitmap.height * scale));
-
-  const canvas = new OffscreenCanvas(width, height);
-  const ctx = canvas.getContext('2d');
-  if (!ctx) throw new Error('拿不到 2D 上下文');
-  ctx.drawImage(bitmap, 0, 0, width, height);
-  bitmap.close();
-
-  return { pixels: ctx.getImageData(0, 0, width, height), width, height };
-}
-
-/** 把一块 RGBA 像素编码成 PNG */
-async function encodePng(pixels: ImageData, width: number, height: number): Promise<Blob> {
-  const canvas = new OffscreenCanvas(width, height);
-  const ctx = canvas.getContext('2d');
-  if (!ctx) throw new Error('拿不到 2D 上下文');
-  ctx.putImageData(pixels, 0, 0);
-  return canvas.convertToBlob({ type: 'image/png' });
-}
-
 export async function extractLayers(
   image: Blob,
   depth: DepthMap,
@@ -344,8 +320,9 @@ export async function extractLayers(
   options: Partial<ExtractOptions> = {},
 ): Promise<ExtractResult> {
   const opts: ExtractOptions = { ...DEFAULT_EXTRACT_OPTIONS, ...options };
-  const { pixels, width, height } = await decodeScaled(image, opts.maxDimension);
-  const src = pixels.data;
+  const decoded = await opts.images.decodeScaled(image, opts.maxDimension);
+  const { width, height } = decoded;
+  const src = decoded.data;
   const pixelCount = width * height;
 
   const layerCount = cuts.length + 1;
@@ -584,7 +561,7 @@ export async function extractLayers(
         ? [0, 0, width, height]
         : [minX, minY, maxX - minX + 1, maxY - minY + 1];
 
-    images.push(await encodePng(new ImageData(out, width, height), width, height));
+    images.push(await opts.images.encodePng({ data: out, width, height }));
     stats.push({ depth: median, bbox });
   }
 

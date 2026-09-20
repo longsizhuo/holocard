@@ -11,7 +11,18 @@ export interface LoadProgress {
   total?: number;
 }
 
-export type Device = 'webgpu' | 'wasm';
+/**
+ * onnxruntime 的执行后端。
+ *   webgpu  浏览器里有可用显卡时
+ *   wasm    浏览器里没有显卡时
+ *   cpu     Node（onnxruntime-node 不认 wasm，只有 cpu / dml / webgpu）
+ */
+export type Device = 'webgpu' | 'wasm' | 'cpu';
+
+/** 当前是不是跑在 Node 里 */
+function isNode(): boolean {
+  return typeof process !== 'undefined' && process.versions?.node !== undefined;
+}
 
 let configured = false;
 
@@ -41,6 +52,9 @@ let devicePromise: Promise<Device> | null = null;
 /** 探测 WebGPU 是否可用。不可用就退回 WASM，慢很多但至少能跑 */
 export function pickDevice(): Promise<Device> {
   devicePromise ??= (async () => {
+    // Node 侧没有 WebGPU，也不支持 wasm 后端，直接用 cpu
+    if (isNode()) return 'cpu';
+
     const gpu = (navigator as Navigator & { gpu?: { requestAdapter(): Promise<unknown> } }).gpu;
     if (!gpu) return 'wasm';
     try {
