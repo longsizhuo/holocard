@@ -9,15 +9,19 @@
  *
  * 接口是「提交 + 轮询」而不是一个长请求：处理要几秒到几十秒，
  * 长连接容易被中间的 Caddy / Cloudflare 掐断，排队时更是如此。
- *   POST /api/jobs        请求体是图片字节 → 202 {id}
- *   GET  /api/jobs/{id}   → {state, stage, position, layers?, error?}
- *   层文件本身由 Caddy 直接当静态文件发，不经过 Node。
+ *   POST /api/jobs             请求体是图片字节 → 202 {id}
+ *   GET  /api/jobs/{id}        → {state, stage, position, layers?, error?}
+ *   GET  /api/layers/{id}/...  产出的层文件与 manifest
+ *   GET  其余路径               前端静态文件（HOLOCARD_WEB_DIR）
+ *
+ * 静态文件也由这个服务自己发，所以它是自包含的：上游只要一条反代就够，
+ * 别人拿去单跑一个 Node 进程就是完整的站点。
  */
 
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
 import { mkdir, rm, writeFile, readFile, readdir, stat } from 'node:fs/promises';
 import { randomUUID } from 'node:crypto';
-import { join } from 'node:path';
+import { extname, join, resolve, sep } from 'node:path';
 import { env } from '@huggingface/transformers';
 import { segmentToLayerSet, type SegmentStage } from '../src/segmenter';
 import { sharpImages } from './images';
@@ -33,6 +37,14 @@ const CONCURRENCY = Number(process.env.HOLOCARD_CONCURRENCY ?? 1);
 const MAX_QUEUE = Number(process.env.HOLOCARD_MAX_QUEUE ?? 12);
 /** 产物保留多久（毫秒），到期清理 */
 const TTL_MS = Number(process.env.HOLOCARD_TTL_MS ?? 6 * 60 * 60 * 1000);
+/**
+ * 前端静态文件目录。留空则不发静态文件（开发时由 vite dev 发）。
+ *
+ * 由这个服务自己发而不是交给上游的 Caddy，有两个原因：
+ * 一是那台机器的 Caddy 跑在容器里，加一个目录挂载要重建容器、会让同机的其他站点瞬断；
+ * 二是自己能发才算自包含，别人拿去单跑一个 Node 进程就是完整的站点。
+ */
+const WEB_DIR = process.env.HOLOCARD_WEB_DIR ?? '';
 
 // 权重随服务一起部署，不在运行时去 Hugging Face 拉——这台机器未必连得上，
 // 而且首个用户不该为下载权重等着
@@ -147,6 +159,68 @@ function pump(): void {
   }
 }
 
+const MIME: Record<string, string> = {
+  '.html': 'text/html; charset=utf-8',
+  '.js': 'text/javascript; charset=utf-8',
+  '.mjs': 'text/javascript; charset=utf-8',
+  '.css': 'text/css; charset=utf-8',
+  '.json': 'application/json; charset=utf-8',
+  '.png': 'image/png',
+  '.jpg': 'image/jpeg',
+  '.webp': 'image/webp',
+  '.svg': 'image/svg+xml',
+  '.woff2': 'font/woff2',
+  '.woff': 'font/woff',
+  '.wasm': 'application/wasm',
+  '.gz': 'application/gzip',
+  '.map': 'application/json; charset=utf-8',
+};
+
+/** 发前端静态文件。找不到就回 index.html，交给前端路由 */
+async function serveStatic(pathname: string, res: ServerResponse): Promise<void> {
+  if (!WEB_DIR) {
+    json(res, 404, { error: 'not found' });
+    return;
+  }
+
+  // 路径可能是畸形的百分号编码，decodeURIComponent 会抛；含 NUL 的路径直接拒绝
+  let clean: string;
+  try {
+    clean = decodeURIComponent(pathname);
+  } catch {
+    json(res, 400, { error: '非法路径' });
+    return;
+  }
+  if (clean.includes(String.fromCharCode(0))) {
+    json(res, 400, { error: '非法路径' });
+    return;
+  }
+  // 规范化之后必须仍在 WEB_DIR 之内，挡住 ../ 之类
+  const target = resolve(WEB_DIR, '.' + (clean.endsWith('/') ? clean + 'index.html' : clean));
+  const root = resolve(WEB_DIR);
+  const safe = target === root || target.startsWith(root + sep);
+
+  for (const candidate of safe ? [target, join(root, 'index.html')] : [join(root, 'index.html')]) {
+    try {
+      const body = await readFile(candidate);
+      const ext = extname(candidate);
+      const isHashed = candidate.includes(`${sep}assets${sep}`);
+      res.writeHead(200, {
+        'content-type': MIME[ext] ?? 'application/octet-stream',
+        'content-length': body.byteLength,
+        // assets 下的文件名带内容 hash，可以永久缓存；其余不缓存，保证发版即时生效
+        'cache-control': isHashed ? 'public, max-age=31536000, immutable' : 'no-cache',
+        'x-content-type-options': 'nosniff',
+      });
+      res.end(body);
+      return;
+    } catch {
+      // 试下一个候选
+    }
+  }
+  json(res, 404, { error: 'not found' });
+}
+
 /** 定期清理过期产物和任务记录 */
 async function sweep(): Promise<void> {
   const now = Date.now();
@@ -235,6 +309,11 @@ const server = createServer((req, res) => {
     }
 
     const jobMatch = /^\/api\/jobs\/([0-9a-f-]{36})$/.exec(url.pathname);
+    if (req.method === 'GET' && !jobMatch && !url.pathname.startsWith('/api/')) {
+      await serveStatic(url.pathname, res);
+      return;
+    }
+
     if (req.method === 'GET' && jobMatch) {
       const job = jobs.get(jobMatch[1] ?? '');
       if (!job) {
@@ -262,5 +341,6 @@ server.listen(PORT, '127.0.0.1', () => {
   console.log(`holocard 分层服务已启动 127.0.0.1:${PORT}`);
   console.log(`  产物目录 ${OUT_DIR}`);
   console.log(`  模型目录 ${MODEL_DIR}`);
+  console.log(`  静态目录 ${WEB_DIR || '(未配置，由前端开发服务器负责)'}`);
   console.log(`  并发 ${CONCURRENCY}，队列上限 ${MAX_QUEUE}，产物保留 ${Math.round(TTL_MS / 3600000)} 小时`);
 });
