@@ -1,12 +1,12 @@
 # HoloCard
 
-把任意照片自动切成前中后景，每层各上各的箔面，渲染成可交互的闪卡。全部在浏览器本地完成，图片不上传。
+上传一张照片，自动切成前中后景，每层各上各的箔面，渲染成可交互的闪卡。
 
 箔面效果和交互手感移植自 [pokemon-cards-css](https://github.com/simeydotme/pokemon-cards-css)
 （Simon Goellner，GPL-3.0）。那个项目的每张卡都要作者手工准备一张遮罩图，标出「箔面从哪里透出来」；
 HoloCard 做的事情是**用分层算法自动生成这张遮罩**，于是任意一张照片都能变成闪卡。
 
-> 状态：早期。渲染器、分层流水线、边缘精修都已跑通并上线：https://holocard.longsizhuo.com
+> 状态：早期。渲染器、分层流水线、边缘精修、服务端处理都已跑通并上线：https://holocard.longsizhuo.com
 
 ## 一张卡由什么叠成
 
@@ -183,10 +183,24 @@ mycard.layers/
 
 ```bash
 pnpm install
-pnpm dev
+pnpm dev           # 前端，固定在 5273
+pnpm dev:server    # 另开一个终端：分层服务，监听 8791
 ```
 
 演示页默认加载手工 SVG 素材（`public/samples/forest`），拖一张照片进去会走完整流水线。
+`pnpm dev` 会把 `/api` 代理到 8791；不起服务端也能用，会自动回退到浏览器端流水线。
+
+服务端首次运行需要本地有权重：
+
+```bash
+D=.models/onnx-community/depth-anything-v2-small
+mkdir -p $D/onnx
+B=https://huggingface.co/onnx-community/depth-anything-v2-small/resolve/main
+curl -sL $B/config.json -o $D/config.json
+curl -sL $B/preprocessor_config.json -o $D/preprocessor_config.json
+curl -sL $B/onnx/model_quantized.onnx -o $D/onnx/model_quantized.onnx
+HOLOCARD_MODEL_DIR=$PWD/.models pnpm dev:server
+```
 
 录演示 GIF（需要本机有 Edge 和 ffmpeg，开发服务要先跑着）：
 
@@ -197,38 +211,42 @@ pnpm capture --image 照片路径 --out out/demo.gif
 脚本用无头 Edge 走真实的上传路径，再用 `setPose` 逐帧摆姿态截图，每一帧都是确定性的。
 加 `--dump` 会额外把每一层导出成 PNG，排查分层问题时很有用。
 
-## 部署：模型托管
+## 部署与运行位置
 
-**不需要自己托管模型。** transformers.js 默认从 Hugging Face 官方 CDN 拉权重，
-整个站是纯静态的，GitHub Pages / Cloudflare Pages 直接部署。
+分层跑在服务端，**浏览器不下载任何模型**。
+
+```
+浏览器 → Cloudflare → Caddy → holocard 服务（Node）
+                                 ├── 前端静态文件
+                                 ├── POST /api/jobs      提交照片
+                                 ├── GET  /api/jobs/{id} 轮询进度
+                                 └── GET  /api/layers/…  取层文件
+```
 
 | | 来源 | 体积 |
 |---|---|---|
-| 浏览演示页 | 本站 | 约 27KB（transformers.js 被动态 import 挡在首屏之外） |
-| 首次处理照片：推理代码 | 本站 | 约 160KB |
-| 首次处理照片：onnxruntime 的 wasm | jsDelivr CDN | 约 5.3MB |
-| 首次处理照片：深度模型权重 | Hugging Face CDN | 约 47MB |
-| 缓存后再处理 | — | 0 额外下载，单张几秒（WebGPU） |
+| 页面 + 渲染器 | 本服务 | 约 27KB |
+| 产出的层文件 | 本服务 | 约 6MB（3 张 PNG） |
 
-以上是用无缓存的浏览器对线上站点实测的结果（`node scripts/verify-live.mjs`）。
-大头都走公共 CDN，自己的服务器对每个新访客只出约 200KB。
+改造前是纯浏览器端：每个新访客首次使用要下 47MB 权重 + 5.3MB 推理运行时，约 20 秒。
+现在是上传 + 服务端处理，实测约 10 秒，且没有任何模型下载。
 
-**huggingface.co 在中国大陆访问困难**，需要镜像时改环境变量即可，见 `.env.example`：
+接口是「提交 + 轮询」而不是一个长请求：处理要几秒到几十秒，长连接容易被中间层掐断，排队时更是如此。
 
-```bash
-VITE_MODEL_HOST=https://hf-mirror.com/
-```
+**浏览器端流水线仍然保留**，在服务端不可用时自动回退——自托管成纯静态站（GitHub Pages 之类）时走的就是这条路，
+那时才会按需下载模型，并可用 `VITE_MODEL_HOST` 换成国内镜像，见 `.env.example`。
 
-也可以指向自建的 R2 / OSS / jsDelivr 镜像，或用 `VITE_MODEL_DTYPE=q8` 把权重压到约 25MB。
-`cdn.jsdelivr.net` 在大陆同样不稳定，面向大陆用户的话 wasm 也需要换源，这一项目前还没做成配置。
+同一份流水线代码两边复用：图片解码/编码抽成了 `ImageBackend` 接口
+（`src/segmenter/image-io.ts`），浏览器用 OffscreenCanvas，服务端注入 sharp；
+切层、形态学、引导滤波、补全全是纯 typed-array 运算，原样共用。
 
-**为什么不放服务端推理？** 「图片不出设备」这个卖点会没，而且推理成本随用户数线性增长。
+服务端的资源上限、目录布局、一次性配置见 [deploy/README.md](deploy/README.md)。
 
 ## 模型选型与许可证
 
 | 部件 | 选型 | 许可证 | 体积 |
 |---|---|---|---|
-| 深度估计 | [Depth Anything V2-Small](https://huggingface.co/onnx-community/depth-anything-v2-small) | Apache 2.0 | ~50MB (fp16) |
+| 深度估计 | [Depth Anything V2-Small](https://huggingface.co/onnx-community/depth-anything-v2-small) | Apache 2.0 | 服务端 q8 27MB / 浏览器回退 fp16 50MB |
 | 边缘精修 | 引导滤波，原图当向导 | 本项目 | 0 |
 | 补洞 | 镜像纹理填充，push-pull 金字塔兜底 | 本项目 | 0 |
 
@@ -255,7 +273,7 @@ ORT 的 WebGPU 后端本身就跑在这个 wasm 运行时上，开着 WebGPU 也
 - [x] 录制脚本：确定性逐帧截图 + 调色板两遍编码
 - [x] 可配置的模型来源（支持国内镜像 / 自建 CDN）
 - [x] 边缘精修：引导滤波，原图当向导，零下载
-- [x] 部署：自有服务器 + Cloudflare Tunnel，见 [deploy/README.md](deploy/README.md)
+- [x] 服务端分层：浏览器不下载任何模型，见 [deploy/README.md](deploy/README.md)
 - [ ] 抠图模型当向导：重新导出 BiRefNet（拆开宽 Concat / 放开输入尺寸），或接入别的能在 WebGPU 上跑的模型
 - [ ] 更多箔面配方：cosmos、radiant、secret rare、reverse holo
 - [ ] 点击弹出放大（上游的 popover + 首次 360° 翻转）、首屏自动展示动画

@@ -3,11 +3,18 @@
 线上地址：https://holocard.longsizhuo.com
 
 ```
-浏览器 → Cloudflare → cloudflared 隧道 → nginx（127.0.0.1:8377）→ /var/www/holocard/current
+浏览器 → Cloudflare → Caddy(:80) → holocard 服务 (127.0.0.1:8791)
+                                      ├── /           前端静态文件 /srv/holocard-web/current
+                                      ├── /api/jobs   提交与轮询
+                                      └── /api/layers 产出的层文件
 ```
 
-服务器在内网，没有公网入口，完全靠 Cloudflare Tunnel 接出去，和 `ssh.longsizhuo.com` 走同一条隧道。
-nginx 只监听回环地址，不对外开任何端口；TLS 在 Cloudflare 边缘终结。
+跑在 Oracle（`<源站 IP>`，Ampere ARM64，4 核 / 23G 内存）。
+那台机器同时跑着 involutionhell.com 的一整套服务和 Minecraft，所以分层服务有资源上限，见下。
+
+**静态文件为什么也由 Node 发，而不是 Caddy 的 `file_server`**：那台机器的 Caddy 跑在 Docker 容器里，
+给它加一个目录挂载要重建容器，会让同机所有站点瞬断。让服务自己发更安全，
+副作用是它变得自包含——别人 clone 下来跑一个 Node 进程就是完整的站点，不需要任何反向代理。
 
 ## 日常发版
 
@@ -15,96 +22,120 @@ nginx 只监听回环地址，不对外开任何端口；TLS 在 Cloudflare 边�
 bash scripts/deploy.sh
 ```
 
-脚本做的事：构建 → 从 HEAD 打源码包 → 预压缩 → 上传到 `releases/<时间>-<commit>` → 原子切换 `current` 软链。
-工作区有未提交改动时会拒绝发版——源码包是从 HEAD 打的，不干净的话线上代码和提供下载的源码就对不上。
+构建前端与服务 → 从 HEAD 打源码包 → 上传到 `releases/<时间>-<commit>` → 原子切软链 → 重启服务并等健康检查通过。
+工作区有未提交改动时会拒绝发版：源码包是从 HEAD 打的，不干净的话线上代码和提供下载的源码就对不上。
 
-旧版本全部保留，回滚就是把软链指回去：
+前端保留最近 5 个版本，回滚就是把软链指回去：
 
 ```bash
-ssh mail 'ls /var/www/holocard/releases'
-ssh mail 'cd /var/www/holocard && ln -sfn releases/<要回滚到的版本> current.new && mv -T current.new current'
+ssh oracle 'ls /srv/holocard-web/releases'
+ssh oracle 'cd /srv/holocard-web && ln -sfn releases/<版本> current.new && mv -T current.new current'
 ```
 
-## 为什么必须自己配 nginx，而不是丢到 GitHub Pages
+服务端回滚需要重新发一次对应的 commit（`dist-server` 是覆盖式上传，不留历史）。
 
-两个响应头和一个 MIME 类型，GitHub Pages 都给不了：
+## 服务器上的布局
 
-- `Cross-Origin-Opener-Policy` / `Cross-Origin-Embedder-Policy`：页面要处于跨源隔离状态，
-  onnxruntime-web 的多线程 WASM 才能用 `SharedArrayBuffer`。
-- `application/wasm`：nginx 1.18 自带的 `mime.types` 里没有 wasm，
-  而浏览器的 `WebAssembly.instantiateStreaming` 对 MIME 类型是严格校验的。
+| 路径 | 内容 |
+|---|---|
+| `/opt/holocard/holocard-server.mjs` | 服务本体（单文件 ESM） |
+| `/opt/holocard/node22/` | Node 22 运行时（系统自带的是 18，sharp 要求 ≥20.9） |
+| `/opt/holocard/node_modules/` | transformers.js + onnxruntime-node + sharp，约 483MB |
+| `/srv/holocard-models/` | Depth Anything V2-Small 权重（q8，27MB） |
+| `/srv/holocard-web/` | 前端 releases + current 软链 |
+| `/srv/holocard-layers/` | 用户产出的层文件，6 小时后自动清理 |
+
+## 资源限制
+
+`/etc/systemd/system/holocard.service` 里：
+
+```
+MemoryMax=2G      # 单并发实测峰值约 780MB
+CPUQuota=200%     # 4 核里最多占 2 核，留给 Minecraft 和数据库
+```
+
+服务侧：单并发（`HOLOCARD_CONCURRENCY=1`），队列上限 12，满了直接返回 503 而不是让人排十分钟。
+上传上限 16MB，按魔数校验图片格式，拒绝解压炸弹。
 
 ## 一次性配置
 
-以下只在第一次部署时做过一遍，记录下来备查。
+以下只在第一次部署时做过一遍，记录备查。
 
-**1. 站点目录**
-
-```bash
-sudo mkdir -p /var/www/holocard/releases
-sudo chown -R longsizhuo:longsizhuo /var/www/holocard
-```
-
-**2. nginx 站点**：见 [nginx-holocard.conf](nginx-holocard.conf)，文件头有安装步骤。
-独立的一个 vhost，没有动 `default` 里已有的站点。
-
-**3. 专用隧道**
-
-服务器上原有的那条 `ssh-tunnel` 是在 Cloudflare 后台远程管理的：cloudflared 启动后会被云端下发的配置覆盖，
-本地 `config.yml` 里的 ingress 形同虚设，从命令行改不了它的入口规则。
-所以给 HoloCard 单独建了一条本地管理的隧道，和 SSH 那条完全隔离：
+**1. 目录与运行时**
 
 ```bash
-cloudflared tunnel create holocard
-# 配置：~/.cloudflared/holocard.yml
-# 服务：/etc/systemd/system/cloudflared-holocard.service（以 longsizhuo 身份运行）
-sudo systemctl enable --now cloudflared-holocard
+sudo mkdir -p /opt/holocard /srv/holocard-web/releases /srv/holocard-models /srv/holocard-layers
+sudo chown -R ubuntu:ubuntu /opt/holocard /srv/holocard-web /srv/holocard-models /srv/holocard-layers
+
+cd /opt/holocard
+curl -sL https://nodejs.org/dist/v22.14.0/node-v22.14.0-linux-arm64.tar.xz | tar -xJ
+mv node-v22.14.0-linux-arm64 node22
+
+printf '{"name":"holocard","private":true,"type":"module","dependencies":{"@huggingface/transformers":"4.3.0","sharp":"^0.35.4"}}' > package.json
+PATH=/opt/holocard/node22/bin:$PATH npm install --no-audit --no-fund
 ```
 
-```yaml
-# ~/.cloudflared/holocard.yml
-tunnel: 8517be93-9aba-4ffd-99ea-e87b6bc9db9a
-credentials-file: /home/longsizhuo/.cloudflared/8517be93-9aba-4ffd-99ea-e87b6bc9db9a.json
-
-ingress:
-  - hostname: holocard.longsizhuo.com
-    service: http://127.0.0.1:8377
-  - service: http_status:404
-```
-
-**4. DNS**
+**2. 模型权重**（服务端跑推理，浏览器不下载任何模型）
 
 ```bash
-cloudflared tunnel route dns -f 8517be93-9aba-4ffd-99ea-e87b6bc9db9a holocard.longsizhuo.com
+D=/srv/holocard-models/onnx-community/depth-anything-v2-small
+mkdir -p $D/onnx
+B=https://huggingface.co/onnx-community/depth-anything-v2-small/resolve/main
+curl -sL $B/config.json -o $D/config.json
+curl -sL $B/preprocessor_config.json -o $D/preprocessor_config.json
+curl -sL $B/onnx/model_quantized.onnx -o $D/onnx/model_quantized.onnx
 ```
 
-这台机器到 `api.cloudflare.com` 的线路时通时断，`cloudflared tunnel` 的各个子命令经常报
-`context deadline exceeded`，多试几次就好，不是权限问题。
+用 q8 而不是 fp16：在 ARM CPU 上实测快一倍（2.7s 对 5s+）、内存省三成，而深度图差别在切层这一步看不出来。
+
+**3. systemd**：见 `/etc/systemd/system/holocard.service`，内容如上「资源限制」一节。
+
+```bash
+sudo systemctl enable --now holocard
+```
+
+**4. Caddy**：在 `/home/ubuntu/caddy-gateway/Caddyfile` 末尾追加。改之前先备份，改完先 `validate` 再 `reload`——
+这个 Caddy 同时在服务 involutionhell.com 的一整套站点。
+
+```
+http://holocard.longsizhuo.com {
+    reverse_proxy 127.0.0.1:8791 {
+        # 一次分层要几秒到几十秒，别让网关提前掐断
+        transport http {
+            read_timeout 180s
+            write_timeout 180s
+        }
+    }
+}
+```
+
+```bash
+sudo docker exec global-caddy-gateway caddy validate --config /etc/caddy/Caddyfile --adapter caddyfile
+sudo docker exec global-caddy-gateway caddy reload  --config /etc/caddy/Caddyfile --adapter caddyfile
+```
+
+**5. DNS**：在 Cloudflare 上把 `holocard` 指向 `<源站 IP>`，A 记录、开橙云（proxied），
+和 `longsizhuo.com` 一样用 Flexible 模式（Caddy 只监听 80）。
+
+## 用户侧的流量
+
+| | 来源 | 体积 |
+|---|---|---|
+| 页面 + 渲染器 | 本服务 | 约 27KB |
+| 上传照片 | → 本服务 | 用户的原图 |
+| 产出的层文件 | 本服务 | 约 6MB（3 张 PNG） |
+
+**模型权重和推理运行时都不再下发给浏览器**。改造前每个新访客首次使用要下 47MB 权重 + 5.3MB wasm。
+
+浏览器端的流水线代码仍然保留，只在服务端不可用时作为回退（自托管的纯静态部署走这条路），
+那时才会按需下载模型。
 
 ## 整个撤掉
 
 ```bash
-sudo systemctl disable --now cloudflared-holocard
-sudo rm /etc/systemd/system/cloudflared-holocard.service && sudo systemctl daemon-reload
-cloudflared tunnel delete holocard
-sudo rm /etc/nginx/sites-enabled/holocard /etc/nginx/sites-available/holocard
-sudo nginx -t && sudo systemctl reload nginx
-# 最后到 Cloudflare 后台删掉 holocard 这条 CNAME
+sudo systemctl disable --now holocard
+sudo rm /etc/systemd/system/holocard.service && sudo systemctl daemon-reload
+sudo rm -rf /opt/holocard /srv/holocard-web /srv/holocard-models /srv/holocard-layers
+# 从 Caddyfile 里删掉 holocard 那个 block，再 validate + reload
+# 最后到 Cloudflare 后台删掉 holocard 这条记录
 ```
-
-## 用户侧的流量
-
-用无缓存的浏览器对线上站点实测（`node scripts/verify-live.mjs --image 照片路径`）：
-
-| | 来源 | 体积 |
-|---|---|---|
-| 页面本身 | 本服务器 | 约 27KB |
-| 推理代码 | 本服务器 | 约 160KB |
-| onnxruntime 的 wasm | jsDelivr CDN | 约 5.3MB |
-| 深度模型权重 | Hugging Face CDN | 约 47MB |
-
-后三项只在用户真的上传了照片时才会拉取，而且都是一次性的。
-大头都走公共 CDN，家里的上行带宽对每个新访客只出约 200KB。
-
-dist 里那份 26MB 的 wasm 线上没有任何请求会用到（transformers.js 默认从 jsDelivr 取），
-只是白占每个 release 约 33MB 的磁盘。
