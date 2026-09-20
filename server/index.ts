@@ -25,6 +25,7 @@ import { extname, join, resolve, sep } from 'node:path';
 import { env } from '@huggingface/transformers';
 import { segmentToLayerSet, type SegmentStage } from '../src/segmenter';
 import { sharpImages } from './images';
+import { renderPreview, PREVIEW_HEIGHT, PREVIEW_WIDTH } from './preview';
 
 const PORT = Number(process.env.HOLOCARD_PORT ?? 8791);
 const OUT_DIR = process.env.HOLOCARD_OUT_DIR ?? '/srv/holocard-layers';
@@ -35,8 +36,13 @@ const MAX_UPLOAD = Number(process.env.HOLOCARD_MAX_UPLOAD ?? 16 * 1024 * 1024);
 const CONCURRENCY = Number(process.env.HOLOCARD_CONCURRENCY ?? 1);
 /** 队列排到这么长就直接拒绝，让用户立刻知道，而不是排十分钟 */
 const MAX_QUEUE = Number(process.env.HOLOCARD_MAX_QUEUE ?? 12);
-/** 产物保留多久（毫秒），到期清理 */
-const TTL_MS = Number(process.env.HOLOCARD_TTL_MS ?? 6 * 60 * 60 * 1000);
+/** 没被分享的产物保留多久（毫秒）。分享过的永久保留 */
+const TTL_MS = Number(process.env.HOLOCARD_TTL_MS ?? 7 * 24 * 60 * 60 * 1000);
+/** 每个 IP 在窗口内最多提交几次，挡住把这里当图床刷的人 */
+const RATE_LIMIT = Number(process.env.HOLOCARD_RATE_LIMIT ?? 10);
+const RATE_WINDOW_MS = Number(process.env.HOLOCARD_RATE_WINDOW_MS ?? 10 * 60 * 1000);
+/** 站点对外的地址，用来拼分享链接里的绝对 URL（OG 标签必须是绝对地址） */
+const PUBLIC_ORIGIN = process.env.HOLOCARD_PUBLIC_ORIGIN ?? 'https://holocard.longsizhuo.com';
 /**
  * 前端静态文件目录。留空则不发静态文件（开发时由 vite dev 发）。
  *
@@ -61,6 +67,38 @@ interface Job {
   error?: string;
   layerCount?: number;
 }
+
+/** 分享过的卡片在目录里放一个空标记文件，清理时据此跳过 */
+const SHARED_MARKER = '.shared';
+
+/** 简单的滑动窗口限流。单进程、内存态，够用；真被大规模刷再上 Cloudflare 的规则 */
+const hits = new Map<string, number[]>();
+
+function rateLimited(ip: string): boolean {
+  const now = Date.now();
+  const recent = (hits.get(ip) ?? []).filter((t) => now - t < RATE_WINDOW_MS);
+  recent.push(now);
+  hits.set(ip, recent);
+  // 顺手清掉早就过期的条目，别让这个 Map 无限长
+  if (hits.size > 5000) {
+    for (const [key, times] of hits) {
+      if (times.every((t) => now - t >= RATE_WINDOW_MS)) hits.delete(key);
+    }
+  }
+  return recent.length > RATE_LIMIT;
+}
+
+/** 取真实来源 IP。前面隔着 Cloudflare 和 Caddy，socket 地址永远是 127.0.0.1 */
+function clientIp(req: IncomingMessage): string {
+  const cf = req.headers['cf-connecting-ip'];
+  if (typeof cf === 'string' && cf) return cf;
+  const fwd = req.headers['x-forwarded-for'];
+  if (typeof fwd === 'string' && fwd) return fwd.split(',')[0]?.trim() ?? 'unknown';
+  return req.socket.remoteAddress ?? 'unknown';
+}
+
+/** 正在渲染预览图的卡片，避免同一张重复排队 */
+const previewJobs = new Set<string>();
 
 const jobs = new Map<string, Job>();
 const queue: Array<{ job: Job; bytes: Buffer }> = [];
@@ -176,8 +214,55 @@ const MIME: Record<string, string> = {
   '.map': 'application/json; charset=utf-8',
 };
 
+/** HTML 属性转义。卡片 id 是我们自己生成的 UUID，但注入前仍然一律转义 */
+function escapeAttr(value: string): string {
+  return value
+    .replace(/&/g, '&amp;')
+    .replace(/"/g, '&quot;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;');
+}
+
+/**
+ * 给 /c/<id> 注入 OG / Twitter card 标签。
+ *
+ * 这是分享能不能扩散的关键：链接在微信、Twitter 里有没有大图预览，
+ * 直接决定别人点不点。标签里的 URL 必须是绝对地址。
+ */
+function injectShareMeta(html: string, id: string, hasPreview: boolean): string {
+  const pageUrl = escapeAttr(`${PUBLIC_ORIGIN}/c/${id}`);
+  const image = escapeAttr(`${PUBLIC_ORIGIN}/api/layers/${id}/preview.jpg`);
+  const title = 'HoloCard — 一张会发光的分层闪卡';
+  const desc = '前中后景自动分层，每层各上各的箔面。上传你自己的照片试试。';
+
+  const tags = [
+    `<meta property="og:type" content="website" />`,
+    `<meta property="og:url" content="${pageUrl}" />`,
+    `<meta property="og:title" content="${title}" />`,
+    `<meta property="og:description" content="${desc}" />`,
+    // 预览图还没渲染好时不给 og:image，免得抓取方缓存一个 404
+    ...(hasPreview
+      ? [
+          `<meta property="og:image" content="${image}" />`,
+          `<meta property="og:image:width" content="${PREVIEW_WIDTH}" />`,
+          `<meta property="og:image:height" content="${PREVIEW_HEIGHT}" />`,
+          `<meta name="twitter:card" content="summary_large_image" />`,
+          `<meta name="twitter:image" content="${image}" />`,
+        ]
+      : [`<meta name="twitter:card" content="summary" />`]),
+    `<meta name="twitter:title" content="${title}" />`,
+    `<meta name="twitter:description" content="${desc}" />`,
+    // 用户上传的内容，不进搜索引擎
+    `<meta name="robots" content="noindex, nofollow" />`,
+  ].join('\n    ');
+
+  return html.replace('</head>', `  ${tags}\n  </head>`);
+}
+
 /** 发前端静态文件。找不到就回 index.html，交给前端路由 */
 async function serveStatic(pathname: string, res: ServerResponse): Promise<void> {
+  // /c/<id> 要带上这张卡自己的 OG 标签
+  const cardPath = /^\/c\/([0-9a-f-]{36})\/?$/.exec(pathname);
   if (!WEB_DIR) {
     json(res, 404, { error: 'not found' });
     return;
@@ -202,9 +287,16 @@ async function serveStatic(pathname: string, res: ServerResponse): Promise<void>
 
   for (const candidate of safe ? [target, join(root, 'index.html')] : [join(root, 'index.html')]) {
     try {
-      const body = await readFile(candidate);
+      let body = await readFile(candidate);
       const ext = extname(candidate);
       const isHashed = candidate.includes(`${sep}assets${sep}`);
+
+      if (cardPath?.[1] && ext === '.html') {
+        const id = cardPath[1];
+        const hasPreview = Boolean(await stat(join(OUT_DIR, id, 'preview.jpg')).catch(() => null));
+        body = Buffer.from(injectShareMeta(body.toString('utf8'), id, hasPreview), 'utf8');
+      }
+
       res.writeHead(200, {
         'content-type': MIME[ext] ?? 'application/octet-stream',
         'content-length': body.byteLength,
@@ -231,9 +323,10 @@ async function sweep(): Promise<void> {
     for (const name of await readdir(OUT_DIR)) {
       const path = join(OUT_DIR, name);
       const info = await stat(path).catch(() => null);
-      if (info && now - info.mtimeMs > TTL_MS) {
-        await rm(path, { recursive: true, force: true }).catch(() => undefined);
-      }
+      if (!info || now - info.mtimeMs <= TTL_MS) continue;
+      // 分享过的永久保留
+      if (await stat(join(path, SHARED_MARKER)).catch(() => null)) continue;
+      await rm(path, { recursive: true, force: true }).catch(() => undefined);
     }
   } catch {
     // 目录还不存在，忽略
@@ -250,6 +343,12 @@ const server = createServer((req, res) => {
     }
 
     if (req.method === 'POST' && url.pathname === '/api/jobs') {
+      if (rateLimited(clientIp(req))) {
+        json(res, 429, {
+          error: `提交太频繁了，${Math.round(RATE_WINDOW_MS / 60000)} 分钟内最多 ${RATE_LIMIT} 次`,
+        });
+        return;
+      }
       if (queue.length >= MAX_QUEUE) {
         json(res, 503, { error: `排队的人太多（${queue.length} 个在等），稍后再试` });
         return;
@@ -283,12 +382,35 @@ const server = createServer((req, res) => {
       return;
     }
 
+    // 转永久保留，并在后台渲染一张 OG 预览图
+    const shareMatch = /^\/api\/cards\/([0-9a-f-]{36})\/share$/.exec(url.pathname);
+    if (req.method === 'POST' && shareMatch) {
+      const id = shareMatch[1] ?? '';
+      const dir = join(OUT_DIR, id);
+      if (!(await stat(join(dir, 'manifest.json')).catch(() => null))) {
+        json(res, 404, { error: '这张卡不存在或已过期' });
+        return;
+      }
+      await writeFile(join(dir, SHARED_MARKER), '');
+      json(res, 200, { url: `${PUBLIC_ORIGIN}/c/${id}` });
+
+      // 预览图慢（要起浏览器渲染），不让用户等；失败也不影响分享本身
+      if (!previewJobs.has(id)) {
+        previewJobs.add(id);
+        void renderPreview(`http://127.0.0.1:${PORT}`, id)
+          .then((buf) => writeFile(join(dir, 'preview.jpg'), buf))
+          .catch((error) => console.error(`[preview] ${id} 渲染失败:`, error.message))
+          .finally(() => previewJobs.delete(id));
+      }
+      return;
+    }
+
     /*
      * 层文件。本来想交给 Caddy 直接发静态文件，但那样开发环境（没有 Caddy）就跑不通，
      * 而且服务自己能发才算自包含——别人拿去单跑一个 Node 进程就够了。
      * 路径两段都严格匹配，不给目录穿越留口子。
      */
-    const fileMatch = /^\/api\/layers\/([0-9a-f-]{36})\/(manifest\.json|layer-\d{1,2}\.png)$/.exec(
+    const fileMatch = /^\/api\/layers\/([0-9a-f-]{36})\/(manifest\.json|layer-\d{1,2}\.png|preview\.jpg)$/.exec(
       url.pathname,
     );
     if (req.method === 'GET' && fileMatch) {
@@ -296,7 +418,11 @@ const server = createServer((req, res) => {
       try {
         const body = await readFile(join(OUT_DIR, id ?? '', name ?? ''));
         res.writeHead(200, {
-          'content-type': name?.endsWith('.png') ? 'image/png' : 'application/json; charset=utf-8',
+          'content-type': name?.endsWith('.png')
+            ? 'image/png'
+            : name?.endsWith('.jpg')
+              ? 'image/jpeg'
+              : 'application/json; charset=utf-8',
           'content-length': body.byteLength,
           // id 是一次性的 UUID，内容永不改变
           'cache-control': 'public, max-age=3600, immutable',

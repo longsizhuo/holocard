@@ -5,6 +5,7 @@ import { HoloCard } from '../renderer/card';
 import { loadLayerSet } from '../format/io';
 import { FOIL_TYPES, type FoilType, type LayerSet } from '../format/types';
 import { segmentOnServer, ServerUnavailableError } from './api';
+import { parseRoute, shareUrl } from './route';
 
 /** 取元素并断言存在，省掉一堆空判断 */
 function need<T extends Element>(selector: string): T {
@@ -40,7 +41,18 @@ const progress = need<HTMLDivElement>('#progress');
 const progressFill = need<HTMLElement>('#progress-fill');
 const progressText = need<HTMLSpanElement>('#progress-text');
 
+const shareBox = need<HTMLDivElement>('#share');
+const shareBtn = need<HTMLButtonElement>('#share-btn');
+const shareResult = need<HTMLDivElement>('#share-result');
+const shareUrlInput = need<HTMLInputElement>('#share-url');
+const shareCopy = need<HTMLButtonElement>('#share-copy');
+const shareHint = need<HTMLElement>('#share-hint');
+
+const route = parseRoute();
 const card = new HoloCard(stage, { amplitude: Number(ctlAmp.value) / 100 });
+
+/** 当前这张卡在服务端的 id。只有服务端产出的卡才有，手工素材没有 */
+let currentId: string | null = null;
 
 // 开发环境下把实例挂到 window 上，方便在控制台里 __holocard.setPose({x:25,y:25}) 摆姿态看效果
 if (import.meta.env.DEV) {
@@ -109,8 +121,14 @@ function buildFoilControls(set: LayerSet): void {
 }
 
 /** 换一组层：渲染 + 重建面板 + 让面板上的全局参数继续生效 */
-function show(set: LayerSet): void {
+function show(set: LayerSet, id: string | null = null): void {
   current = set;
+  currentId = id;
+  // 只有服务端产出的卡才能分享；换卡时把上一张的链接收起来
+  shareBox.hidden = id === null || route.mode !== 'demo';
+  shareResult.hidden = true;
+  shareBtn.disabled = false;
+  shareBtn.textContent = '生成分享链接';
   set.manifest.effects.halo.intensity = Number(ctlIntensity.value);
   set.manifest.effects.halo.light = {
     ...set.manifest.effects.halo.light,
@@ -159,9 +177,12 @@ async function processImage(file: File): Promise<void> {
 
   try {
     let set: LayerSet;
+    let serverId: string | null = null;
     try {
       const layersUrl = await segmentOnServer(file, (p) => showProgress(p.detail, p.ratio));
       set = await loadLayerSet(layersUrl);
+      // layersUrl 形如 /api/layers/<id>，末段就是卡片 id
+      serverId = layersUrl.split('/').filter(Boolean).pop() ?? null;
       status.textContent = `已切成 ${set.manifest.layers.length} 层 · ${set.manifest.generator ?? ''}`;
     } catch (serverError) {
       if (!(serverError instanceof ServerUnavailableError)) throw serverError;
@@ -176,7 +197,7 @@ async function processImage(file: File): Promise<void> {
       status.textContent = `已在本机切成 ${set.manifest.layers.length} 层 · ${set.manifest.generator ?? ''}`;
     }
 
-    show(set);
+    show(set, serverId);
     progress.hidden = true;
   } catch (error) {
     progress.hidden = true;
@@ -226,12 +247,81 @@ drop.addEventListener('drop', (event) => {
   }
 });
 
-try {
-  const sample = await loadLayerSet(`${import.meta.env.BASE_URL}samples/forest`);
-  show(sample);
-  status.textContent = `已加载 ${sample.manifest.layers.length} 层手工素材 samples/forest`;
-} catch (error) {
-  status.textContent = `素材加载失败：${error instanceof Error ? error.message : String(error)}`;
+/** 把这张卡转为永久保留，并拿到分享链接 */
+async function doShare(): Promise<void> {
+  if (!currentId) return;
+  shareBtn.disabled = true;
+  shareBtn.textContent = '正在生成…';
+
+  try {
+    const res = await fetch(`${import.meta.env.BASE_URL}api/cards/${currentId}/share`, {
+      method: 'POST',
+    });
+    if (!res.ok) {
+      const body = (await res.json().catch(() => ({}))) as { error?: string };
+      throw new Error(body.error ?? `HTTP ${res.status}`);
+    }
+    shareUrlInput.value = shareUrl(currentId);
+    shareResult.hidden = false;
+    shareBtn.textContent = '已生成';
+    shareHint.textContent = '这张卡已转为永久保留。链接在微信、Twitter 里会显示卡片预览图';
+    shareUrlInput.select();
+  } catch (error) {
+    shareBtn.disabled = false;
+    shareBtn.textContent = '生成分享链接';
+    shareHint.textContent = `生成失败：${error instanceof Error ? error.message : String(error)}`;
+  }
 }
 
+shareBtn.addEventListener('click', () => void doShare());
+shareCopy.addEventListener('click', () => {
+  shareUrlInput.select();
+  // clipboard API 在非安全上下文下不可用，退回老办法
+  navigator.clipboard?.writeText(shareUrlInput.value).catch(() => document.execCommand('copy'));
+  shareCopy.textContent = '已复制';
+  setTimeout(() => (shareCopy.textContent = '复制'), 1500);
+});
+
+/** 按路由决定首屏加载什么 */
+async function boot(): Promise<void> {
+  if (route.mode === 'render') {
+    // 给服务端截 OG 图用：只留卡片，固定在炫光峰值姿态，不带任何 UI
+    document.body.classList.add('is-render');
+  }
+
+  if (route.id) {
+    try {
+      const set = await loadLayerSet(`${import.meta.env.BASE_URL}api/layers/${route.id}`);
+      show(set, route.id);
+      status.textContent = `${set.manifest.layers.length} 层`;
+
+      if (route.mode === 'render') {
+        // 等所有层真正解码完再摆姿态，否则截图可能截到半成品
+        await Promise.all(
+          [...document.querySelectorAll('img.hc__art')].map((img) =>
+            (img as HTMLImageElement).decode().catch(() => undefined),
+          ),
+        );
+        card.setPose({ x: 78, y: 22 });
+        // 给截图脚本一个明确的信号，别靠猜时间
+        document.body.dataset['ready'] = '1';
+      }
+      return;
+    } catch (error) {
+      status.textContent = `这张卡打不开了：${error instanceof Error ? error.message : String(error)}`;
+      if (route.mode === 'render') document.body.dataset['ready'] = 'error';
+      return;
+    }
+  }
+
+  try {
+    const sample = await loadLayerSet(`${import.meta.env.BASE_URL}samples/forest`);
+    show(sample);
+    status.textContent = `已加载 ${sample.manifest.layers.length} 层手工素材 samples/forest`;
+  } catch (error) {
+    status.textContent = `素材加载失败：${error instanceof Error ? error.message : String(error)}`;
+  }
+}
+
+await boot();
 pollHalo();

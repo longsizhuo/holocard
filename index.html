@@ -72,6 +72,17 @@
             <span id="progress-text">准备中</span>
           </div>
 
+          <div class="share" id="share" hidden>
+            <button type="button" class="share__btn" id="share-btn">生成分享链接</button>
+            <div class="share__result" id="share-result" hidden>
+              <input type="text" id="share-url" readonly />
+              <button type="button" id="share-copy">复制</button>
+            </div>
+            <small class="field__hint" id="share-hint">
+              分享后这张卡会永久保留；不分享的话一周后自动清理
+            </small>
+          </div>
+
           <p class="panel__note" id="status">正在加载素材</p>
         </aside>
       </section>

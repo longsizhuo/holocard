@@ -157,3 +157,64 @@ select {
   color: var(--muted);
 }
 .page__foot a { color: var(--accent); }
+
+/* ---------- 分享 ---------- */
+
+.share { margin-top: 14px; }
+.share__btn {
+  width: 100%;
+  padding: 9px 12px;
+  border-radius: 8px;
+  border: 1px solid var(--accent);
+  background: rgba(124, 199, 255, 0.12);
+  color: var(--fg);
+  font: inherit;
+  font-size: 13px;
+  cursor: pointer;
+}
+.share__btn:hover { background: rgba(124, 199, 255, 0.22); }
+.share__btn:disabled { opacity: 0.5; cursor: default; }
+
+.share__result { display: flex; gap: 6px; margin-top: 8px; }
+.share__result input {
+  flex: 1;
+  min-width: 0;
+  padding: 7px 9px;
+  border-radius: 8px;
+  background: #15161f;
+  color: var(--fg);
+  border: 1px solid var(--line);
+  font-size: 12px;
+}
+.share__result button {
+  padding: 7px 12px;
+  border-radius: 8px;
+  border: 1px solid var(--line);
+  background: #15161f;
+  color: var(--fg);
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+/* ---------- 渲染模式：只留卡片，给服务端截图用 ---------- */
+
+body.is-render {
+  background: radial-gradient(900px 600px at 30% 10%, #241a4d 0%, transparent 60%),
+    radial-gradient(700px 500px at 110% 90%, #123049 0%, transparent 55%), #0a0b12;
+  display: grid;
+  place-items: center;
+  margin: 0;
+}
+body.is-render .page { padding: 0; max-width: none; }
+body.is-render .page__head,
+body.is-render .panel,
+body.is-render .page__foot { display: none; }
+body.is-render .page__body { display: block; }
+body.is-render .stage { padding: 0; }
+/*
+ * 必须给确定宽度。.hc 本身是 width:100%，而渲染模式下 body 用 place-items:center，
+ * 祖先链全按内容收缩 —— 二者互相依赖，结果是塌成 0×0，截出来只有背景。
+ * 400 宽配最常见的竖图约 536 高，在 1200×630 里上下各留 47px，倾斜后的边角也不会被裁。
+ */
+body.is-render .hc { width: 400px; max-width: none; }
