@@ -1,114 +1,309 @@
+/*
+ * 演示页样式
+ *
+ * 主题是珠光白：底色不是纯白，而是一层缓慢漂移的虹彩——和卡片上的箔面同一套语言，
+ * 页面本身就像一块珠贝的内壁。所有动效都只动 background-position 和 opacity，
+ * 不动布局，所以不会引起重排。
+ *
+ * 布局锁死在一屏内（见 .page 的 grid）：上传是这一页唯一的主动作，必须一眼看见，
+ * 不能让人先滚过一堆滑杆。卡片按**可用高度**缩放而不是按宽度，窗口再矮也不会被切掉。
+ *
+ * 注意：/render/<id>（服务端截 OG 图用）走文件末尾那段深色样式，不吃这里的珠光主题。
+ */
+
 :root {
-  color-scheme: dark;
-  --bg: #0a0b12;
-  --fg: #e8e6f0;
-  --muted: #8f8ba6;
-  --line: rgba(255, 255, 255, 0.1);
-  --accent: #7cc7ff;
+  color-scheme: light;
+
+  /* 珠光白：带一点暖灰的底，不是纯白——纯白会把卡片的高光压没 */
+  --bg: #efecef;
+  --surface: rgba(255, 255, 255, 0.66);
+  --surface-solid: #fbfafc;
+  --fg: #23202b;
+  --muted: #6d6879;
+  --line: rgba(35, 32, 43, 0.12);
+  --accent: #7b5fd0;
+
+  /* 珠光的五个色相。和 foils.css 里 sunpillar 的取色同源，页面和卡面才像一套东西 */
+  --p1: #ffd9ec;
+  --p2: #d8e4ff;
+  --p3: #cbf3ec;
+  --p4: #fff2cc;
+  --p5: #e9dcff;
+
+  --radius: 14px;
 }
 
 * { box-sizing: border-box; }
 
+/*
+ * hidden 属性靠浏览器默认样式的 display:none 生效，任何作者写的 display 都会盖掉它。
+ * 这一页有好几处是 display:grid 的块（分享、删除）默认带 hidden，
+ * 不写这条的话它们一上来就全露出来了。
+ */
+[hidden] { display: none !important; }
+
+html, body { height: 100%; }
+
 body {
   margin: 0;
-  min-height: 100vh;
-  background:
-    radial-gradient(900px 600px at 20% -10%, #1d1740 0%, transparent 60%),
-    radial-gradient(700px 500px at 110% 10%, #12304a 0%, transparent 55%),
-    var(--bg);
+  background: var(--bg);
   color: var(--fg);
   font: 15px/1.6 system-ui, -apple-system, 'Segoe UI', 'Microsoft YaHei', sans-serif;
+  overflow: hidden; /* 一屏内，页面本身不滚 */
 }
 
-.page { max-width: 1080px; margin: 0 auto; padding: 48px 24px 96px; }
-.page__head h1 { margin: 0 0 8px; font-size: 32px; letter-spacing: -0.02em; }
-.page__sub { margin: 0 0 40px; color: var(--muted); max-width: 52ch; }
+/* ---------- 珠光底 ---------- */
+
+/*
+ * 两层大尺度虹彩，错开速度和方向缓慢漂移，叠出「转一下角度颜色就变」的珠光感。
+ * 用 200% 的背景块配合 background-position 位移，而不是 transform——
+ * 位移 transform 会让边缘露白，还得额外放大补偿。
+ */
+.pearl {
+  position: fixed;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
+  opacity: 0.85;
+}
+.pearl::before,
+.pearl::after {
+  content: '';
+  position: absolute;
+  inset: -25%;
+  background-size: 200% 200%;
+  filter: blur(60px);
+}
+.pearl::before {
+  background-image:
+    radial-gradient(40% 45% at 22% 28%, var(--p1) 0%, transparent 70%),
+    radial-gradient(38% 42% at 78% 22%, var(--p2) 0%, transparent 70%),
+    radial-gradient(45% 40% at 62% 82%, var(--p3) 0%, transparent 70%);
+  animation: pearl-drift-a 34s ease-in-out infinite alternate;
+}
+.pearl::after {
+  background-image:
+    radial-gradient(35% 40% at 70% 60%, var(--p4) 0%, transparent 70%),
+    radial-gradient(42% 38% at 18% 70%, var(--p5) 0%, transparent 70%);
+  animation: pearl-drift-b 47s ease-in-out infinite alternate;
+  mix-blend-mode: multiply;
+  opacity: 0.75;
+}
+
+@keyframes pearl-drift-a {
+  from { background-position: 0% 0%, 100% 0%, 50% 100%; }
+  to   { background-position: 100% 60%, 0% 80%, 0% 0%; }
+}
+@keyframes pearl-drift-b {
+  from { background-position: 100% 100%, 0% 0%; }
+  to   { background-position: 20% 0%, 80% 100%; }
+}
+
+/*
+ * 掠过表面的那道光。珠光和普通渐变的区别就在这一下：
+ * 一条窄而亮的白带斜着扫过去，扫到哪哪儿亮。
+ */
+@keyframes pearl-sheen {
+  from { background-position: -140% 0; }
+  to   { background-position: 240% 0; }
+}
+
+/* ---------- 页面骨架 ---------- */
+
+.page {
+  position: relative;
+  z-index: 1;
+  height: 100%;
+  max-width: 1180px;
+  margin: 0 auto;
+  padding: 22px 24px 14px;
+
+  /* 头 / 主体 / 脚三行，主体吃掉剩下的全部高度 */
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr) auto;
+  gap: 16px;
+}
+
+.page__head { display: flex; align-items: baseline; gap: 16px; flex-wrap: wrap; }
+.page__head h1 {
+  margin: 0;
+  font-size: 26px;
+  letter-spacing: -0.02em;
+
+  /*
+   * 标题本身就是一块珠光。这里让彩色渐变**自己平移**，而不是像别处那样叠一道白色扫光：
+   * background-clip:text 下白带扫过的那几个字会变成白底白字，直接看不见。
+   * 平移色相带则始终有颜色，观感也更接近珠贝——转一下角度颜色就换一种。
+   */
+  background: linear-gradient(
+    100deg,
+    #b98ad8, #6f8fd6, #59b6a8, #c9a24e, #a97fd8, #6f8fd6, #b98ad8
+  );
+  background-size: 300% 100%;
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  animation: pearl-hue 9s linear infinite;
+}
+
+@keyframes pearl-hue {
+  from { background-position: 0% 0; }
+  to   { background-position: 300% 0; }
+}
+.page__sub { margin: 0; color: var(--muted); font-size: 13px; }
 
 .page__body {
+  min-height: 0; /* grid 子项默认 min-height:auto，不写这行内部就撑破一屏 */
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 300px;
-  gap: 48px;
-  align-items: start;
+  grid-template-columns: minmax(0, 1fr) 320px;
+  gap: 32px;
 }
 
-.stage { display: flex; justify-content: center; padding: 16px 0 40px; }
+/* 卡片按可用高度缩放：.hc 有 aspect-ratio，给了高度宽度自己会算出来 */
+.stage {
+  min-height: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.stage .hc {
+  width: auto;
+  max-width: 100%;
+  height: 100%;
+  max-height: 100%;
+}
+
+/* ---------- 面板 ---------- */
 
 .panel {
-  border: 1px solid var(--line);
-  border-radius: 14px;
-  padding: 20px;
-  background: rgba(255, 255, 255, 0.025);
-  position: sticky;
-  top: 32px;
-}
-.panel__title { margin: 0 0 18px; font-size: 13px; letter-spacing: 0.12em; text-transform: uppercase; color: var(--muted); }
-.panel__sep { border: 0; border-top: 1px solid var(--line); margin: 20px 0 14px; }
-.panel__note { margin: 0; font-size: 13px; color: var(--muted); }
-.panel__note code { color: var(--accent); }
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
 
-.field { display: block; margin-bottom: 18px; }
-.field--row { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; }
-.field__label { display: flex; justify-content: space-between; font-size: 13px; margin-bottom: 8px; }
-.field__label output { color: var(--accent); font-variant-numeric: tabular-nums; }
-.field__hint { display: block; color: var(--muted); font-size: 12px; line-height: 1.5; }
+  border: 1px solid rgba(255, 255, 255, 0.85);
+  border-radius: var(--radius);
+  padding: 16px;
+  background: var(--surface);
+  backdrop-filter: blur(20px) saturate(1.4);
+  box-shadow:
+    0 1px 0 rgba(255, 255, 255, 0.9) inset,
+    0 18px 45px -24px rgba(60, 50, 90, 0.45);
+}
+
+/*
+ * 只有下半截滚。上传、进度、分享、删除固定在面板顶部，
+ * 参数再多也不会把主动作挤出视野。
+ */
+.panel__scroll {
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding-right: 4px;
+  scrollbar-width: thin;
+}
+
+.panel__title {
+  margin: 0 0 8px;
+  font-size: 11px;
+  /* 这些标题是中文，字距给到 0.14em 会散成一个个孤字 */
+  letter-spacing: 0.06em;
+  color: var(--muted);
+}
+.panel__lead { margin: 0 0 12px; font-size: 12px; line-height: 1.55; color: var(--muted); }
+.panel__note { margin: 12px 0 0; font-size: 12px; color: var(--muted); }
+
+.field { display: block; margin-bottom: 14px; }
+.field__label { display: flex; justify-content: space-between; font-size: 12px; margin-bottom: 6px; }
+.field__label output { color: var(--accent); font-variant-numeric: tabular-nums; font-weight: 600; }
+.field__hint { display: block; color: var(--muted); font-size: 11px; line-height: 1.5; margin-top: 4px; }
 
 input[type='range'] { width: 100%; accent-color: var(--accent); }
 select {
-  width: 100%; padding: 7px 9px; border-radius: 8px;
-  background: #15161f; color: var(--fg); border: 1px solid var(--line);
+  width: 100%;
+  padding: 7px 9px;
+  border-radius: 9px;
+  background: var(--surface-solid);
+  color: var(--fg);
+  border: 1px solid var(--line);
+  font: inherit;
+  font-size: 13px;
 }
 
-@media (max-width: 860px) {
-  .page__body { grid-template-columns: minmax(0, 1fr); }
-  .panel { position: static; }
+/* 折叠的次要参数 */
+.more { border-top: 1px solid var(--line); padding-top: 10px; margin-top: 4px; }
+.more__head {
+  cursor: pointer;
+  font-size: 11px;
+  letter-spacing: 0.06em;
+  color: var(--muted);
+  list-style: none;
+  user-select: none;
 }
+.more__head::-webkit-details-marker { display: none; }
+.more__head::after { content: ' ▾'; }
+.more[open] .more__head::after { content: ' ▴'; }
+.more__head:hover { color: var(--fg); }
+.more > .field:first-of-type { margin-top: 12px; }
 
-/* ---------- 上传与进度 ---------- */
+/* ---------- 上传 ---------- */
 
 .drop {
+  position: relative;
+  overflow: hidden;
   display: flex;
   flex-direction: column;
-  gap: 6px;
+  gap: 2px;
   padding: 18px 14px;
-  border: 1px dashed var(--line);
-  border-radius: 10px;
+  border: 1px solid rgba(255, 255, 255, 0.9);
+  border-radius: 12px;
   text-align: center;
   cursor: pointer;
-  transition: border-color 0.2s, background 0.2s;
+  background: linear-gradient(135deg, var(--p2), var(--p1) 45%, var(--p4));
+  box-shadow: 0 1px 0 rgba(255, 255, 255, 0.9) inset, 0 8px 22px -14px rgba(60, 50, 90, 0.5);
+  transition: box-shadow 0.25s, transform 0.25s;
+}
+/* 扫光单独放在伪元素上，这样 hover 时改 .drop 的 transform 不会打断它 */
+.drop::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(
+    100deg,
+    transparent 40%,
+    rgba(255, 255, 255, 0.85) 50%,
+    transparent 60%
+  );
+  background-size: 220% 100%;
+  animation: pearl-sheen 4.5s linear infinite;
+  pointer-events: none;
 }
 .drop:hover,
 .drop.is-over {
-  border-color: var(--accent);
-  background: rgba(124, 199, 255, 0.07);
+  transform: translateY(-1px);
+  box-shadow: 0 1px 0 rgba(255, 255, 255, 0.9) inset, 0 14px 30px -14px rgba(60, 50, 90, 0.55);
 }
-.drop strong { font-size: 14px; font-weight: 600; }
-.drop span { font-size: 12px; color: var(--muted); line-height: 1.5; }
+.drop.is-over::after { animation-duration: 1.2s; }
+.drop strong { position: relative; z-index: 1; font-size: 14px; font-weight: 650; }
+.drop span { position: relative; z-index: 1; font-size: 12px; color: rgba(35, 32, 43, 0.62); }
 
-.progress { margin-top: 14px; font-size: 12px; color: var(--muted); }
+.progress { font-size: 12px; color: var(--muted); }
 .progress__bar {
   height: 4px;
   border-radius: 999px;
-  background: rgba(255, 255, 255, 0.08);
+  background: rgba(35, 32, 43, 0.1);
   overflow: hidden;
-  margin-bottom: 8px;
+  margin-bottom: 6px;
 }
 .progress__bar i {
   display: block;
   height: 100%;
   width: 0%;
-  background: var(--accent);
+  background: linear-gradient(90deg, var(--p2), var(--p1), var(--p4));
   transition: width 0.25s ease;
 }
 
 /* ---------- 炫光读数 ---------- */
-
-.panel__lead {
-  margin: -6px 0 16px;
-  font-size: 12px;
-  line-height: 1.6;
-  color: var(--muted);
-}
-.panel__lead strong { color: var(--fg); font-weight: 600; }
 
 .readout {
   display: flex;
@@ -116,20 +311,20 @@ select {
   gap: 10px;
   font-size: 12px;
   color: var(--muted);
-  margin: 4px 0 6px;
+  margin: 4px 0 2px;
 }
 .readout__bar {
   flex: 1;
   height: 4px;
   border-radius: 999px;
-  background: rgba(255, 255, 255, 0.08);
+  background: rgba(35, 32, 43, 0.1);
   overflow: hidden;
 }
 .readout__bar i {
   display: block;
   height: 100%;
   width: 0%;
-  background: linear-gradient(90deg, #5fd6ff, #a97bff, #ffed5f);
+  background: linear-gradient(90deg, #6fc4e0, #a97bff, #e0b84a);
 }
 .readout output {
   font-variant-numeric: tabular-nums;
@@ -140,81 +335,117 @@ select {
 
 /* ---------- 各层箔面 ---------- */
 
-.foil-row {
-  display: grid;
-  grid-template-columns: 1fr;
-  gap: 6px;
-  margin-bottom: 14px;
-}
-.foil-row__name { font-size: 12px; color: var(--muted); }
+.foil-row { display: grid; gap: 5px; margin-bottom: 11px; }
+.foil-row__name { font-size: 11px; color: var(--muted); }
 .foil-row input[type='range']:disabled { opacity: 0.3; }
 
-.page__foot {
-  margin-top: 56px;
-  padding-top: 20px;
-  border-top: 1px solid var(--line);
-  font-size: 12px;
-  color: var(--muted);
-}
-.page__foot a { color: var(--accent); }
+/* ---------- 分享与删除 ---------- */
 
-/* ---------- 分享 ---------- */
-
-.share { margin-top: 14px; }
+.share { display: grid; gap: 7px; }
 .share__btn {
+  position: relative;
+  overflow: hidden;
   width: 100%;
   padding: 9px 12px;
-  border-radius: 8px;
-  border: 1px solid var(--accent);
-  background: rgba(124, 199, 255, 0.12);
+  border-radius: 10px;
+  border: 1px solid rgba(255, 255, 255, 0.9);
+  background: linear-gradient(120deg, var(--p5), var(--p2) 50%, var(--p3));
   color: var(--fg);
   font: inherit;
   font-size: 13px;
+  font-weight: 600;
   cursor: pointer;
+  box-shadow: 0 1px 0 rgba(255, 255, 255, 0.9) inset;
 }
-.share__btn:hover { background: rgba(124, 199, 255, 0.22); }
-.share__btn:disabled { opacity: 0.5; cursor: default; }
+.share__btn::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(100deg, transparent 42%, rgba(255, 255, 255, 0.8) 50%, transparent 58%);
+  background-size: 220% 100%;
+  animation: pearl-sheen 5.5s linear infinite;
+}
+.share__btn:disabled { opacity: 0.55; cursor: default; }
+.share__btn:disabled::after { animation: none; }
 
-.share__result { display: flex; gap: 6px; margin-top: 8px; }
-.share__result input {
-  flex: 1;
-  min-width: 0;
-  padding: 7px 9px;
-  border-radius: 8px;
-  background: #15161f;
-  color: var(--fg);
-  border: 1px solid var(--line);
-  font-size: 12px;
-}
+.share__result { display: flex; gap: 6px; }
+.share__result input,
 .share__result button {
-  padding: 7px 12px;
-  border-radius: 8px;
-  border: 1px solid var(--line);
-  background: #15161f;
+  padding: 7px 9px;
+  border-radius: 9px;
+  background: var(--surface-solid);
   color: var(--fg);
+  border: 1px solid var(--line);
   font: inherit;
   font-size: 12px;
-  cursor: pointer;
 }
+.share__result input { flex: 1; min-width: 0; }
+.share__result button { cursor: pointer; }
 
 /* 删除入口。故意做得比分享按钮低调，是个不可撤销的操作但不该抢视线 */
-.danger { margin-top: 14px; }
+.danger { display: grid; gap: 6px; }
 .danger__btn {
   width: 100%;
-  padding: 9px 12px;
-  border-radius: 8px;
-  border: 1px solid rgba(255, 120, 120, 0.35);
+  padding: 8px 12px;
+  border-radius: 10px;
+  border: 1px solid rgba(190, 70, 90, 0.3);
   background: transparent;
-  color: rgba(255, 150, 150, 0.9);
+  color: #a63b53;
   font: inherit;
   font-size: 13px;
   cursor: pointer;
 }
-.danger__btn:hover {
-  background: rgba(255, 90, 90, 0.12);
-  border-color: rgba(255, 120, 120, 0.6);
-}
+.danger__btn:hover { background: rgba(190, 70, 90, 0.08); border-color: rgba(190, 70, 90, 0.5); }
 .danger__btn:disabled { opacity: 0.5; cursor: default; }
+
+/* ---------- 页脚 ---------- */
+
+.page__foot { font-size: 11px; color: var(--muted); line-height: 1.5; }
+.page__foot a { color: var(--accent); }
+
+/* ---------- 窄屏 ---------- */
+
+/*
+ * 手机上一屏塞不下卡片加面板，改成上下滚动。
+ * 「一屏内」是桌面的目标，在手机上强行压缩只会两样都看不清。
+ */
+@media (max-width: 900px) {
+  body { overflow: auto; }
+  .page {
+    height: auto;
+    min-height: 100%;
+    grid-template-rows: auto auto auto;
+  }
+  .page__body { grid-template-columns: minmax(0, 1fr); }
+  /*
+   * 卡片占 44vh 而不是更多：手机上要保证滚动之前就能看见上传区。
+   * 「一屏内」在手机上做不到（卡片加面板塞不下），但主动作不该掉到屏幕外。
+   */
+  .stage { height: 44vh; }
+  .page__head h1 { font-size: 22px; }
+  .page__sub { font-size: 12px; }
+  .panel { max-height: none; }
+  .panel__scroll { overflow: visible; }
+}
+
+/* ---------- 无障碍 ---------- */
+
+/*
+ * 「减少动态效果」下把珠光停住。渐变本身留着——静止的虹彩不会引起不适，
+ * 而去掉它这一页就只剩白底，和卡片的箔面也对不上了。
+ */
+@media (prefers-reduced-motion: reduce) {
+  .pearl::before,
+  .pearl::after,
+  .page__head h1,
+  .drop::after,
+  .share__btn::after {
+    animation: none;
+  }
+  /* 停在色相带中段，不是渐变的边缘，否则标题只剩单色 */
+  .page__head h1 { background-position: 50% 0; }
+  .drop { transition: none; }
+}
 
 /* ---------- 渲染模式：给服务端截 OG 预览图用 ---------- */
 
@@ -254,6 +485,13 @@ body.is-render .stage { padding: 0; flex: none; }
 body.is-render .hc {
   width: 390px;
   max-width: none;
+  /*
+   * 显式写死 height:auto，把演示页的 `.stage .hc { height: 100% }` 挡在外面。
+   * 那条规则在这里恰好因为父级高度是 auto 而失效，但那是巧合不是设计——
+   * 以后谁给 .stage 一个确定高度，分享图就会悄悄变形，而且没人会立刻发现。
+   */
+  height: auto;
+  max-height: none;
   filter: drop-shadow(0 24px 60px rgba(0, 0, 0, 0.8));
 }
 
