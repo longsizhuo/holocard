@@ -322,6 +322,44 @@ function injectShareMeta(html: string, id: string, previewVersion: number | null
 }
 
 /**
+ * 给首页注入 OG / Twitter card 标签。
+ *
+ * 之前只有 /c/<id> 有预览图，直接分享站点首页出去是一张白卡。
+ * 图是 public/og.jpg——用 `pnpm og` 从一张挑好的卡渲染出来的静态文件，
+ * 不直接引用某张用户卡的 preview.jpg：用户的卡会过期、会被删，首页的门面不能跟着没了。
+ *
+ * 地址带文件 mtime 当版本号，理由同分享页：CDN 和各家抓取方都按 URL 缓存。
+ * 放在服务端注入而不是写死在 index.html 里，是为了拿 PUBLIC_ORIGIN 拼绝对地址——
+ * 别人自托管时地址自然就对。
+ */
+function injectHomeMeta(html: string, imageVersion: number | null): string {
+  const pageUrl = escapeAttr(`${PUBLIC_ORIGIN}/`);
+  const title = 'HoloCard — 把任意照片变成会发光的分层闪卡';
+  const desc = '上传一张照片，自动切成前中后景，每层各上各的箔面。转动它，箔面会跟着角度变。';
+  const image = escapeAttr(`${PUBLIC_ORIGIN}/og.jpg?v=${imageVersion ?? 0}`);
+
+  const tags = [
+    `<meta property="og:type" content="website" />`,
+    `<meta property="og:url" content="${pageUrl}" />`,
+    `<meta property="og:title" content="${title}" />`,
+    `<meta property="og:description" content="${desc}" />`,
+    ...(imageVersion !== null
+      ? [
+          `<meta property="og:image" content="${image}" />`,
+          `<meta property="og:image:width" content="${PREVIEW_WIDTH}" />`,
+          `<meta property="og:image:height" content="${PREVIEW_HEIGHT}" />`,
+          `<meta name="twitter:card" content="summary_large_image" />`,
+          `<meta name="twitter:image" content="${image}" />`,
+        ]
+      : [`<meta name="twitter:card" content="summary" />`]),
+    `<meta name="twitter:title" content="${title}" />`,
+    `<meta name="twitter:description" content="${desc}" />`,
+  ].join('\n    ');
+
+  return html.replace('</head>', `  ${tags}\n  </head>`);
+}
+
+/**
  * 发前端静态文件。找不到就回 index.html，交给前端路由。
  *
  * HEAD 和 GET 走同一条路径，只是不写 body——健康检查、链接预览抓取工具、
@@ -335,6 +373,7 @@ async function serveStatic(
 ): Promise<void> {
   // /c/<id> 要带上这张卡自己的 OG 标签
   const cardPath = /^\/c\/([0-9a-f-]{36})\/?$/.exec(pathname);
+  const isHome = pathname === '/' || pathname === '/index.html';
   if (!WEB_DIR) {
     json(res, 404, { error: 'not found' });
     return;
@@ -377,6 +416,10 @@ async function serveStatic(
          * 这条路径不会被 CDN 挡掉——/c/<id> 的 cache-control 是 no-cache，每次都回源。
          */
         if (method === 'GET') recordHit(id, ip);
+      } else if (isHome && ext === '.html') {
+        const ogStat = await stat(join(root, 'og.jpg')).catch(() => null);
+        const ogVersion = ogStat ? Math.floor(ogStat.mtimeMs) : null;
+        body = Buffer.from(injectHomeMeta(body.toString('utf8'), ogVersion), 'utf8');
       }
 
       res.writeHead(200, {
