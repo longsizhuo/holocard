@@ -366,6 +366,19 @@ function buildRenderBackdrop(): void {
   document.querySelector('.page__body')?.append(copy);
 }
 
+/**
+ * 分享图里卡片摆的姿态：指针落在卡面上的百分比位置。
+ * 默认 (78, 22) 是贴着炫光峰值挑的角度，箔面和炫光都亮；
+ * 调试时可以用 ?pose=x,y 换一个角度看（scripts/og-preview.ts 的 --pose 就是走这个）。
+ */
+function renderPose(): { x: number; y: number } {
+  const m = /^(\d+(?:\.\d+)?),(\d+(?:\.\d+)?)$/.exec(
+    new URLSearchParams(location.search).get('pose') ?? '',
+  );
+  const clamp = (v: number): number => Math.min(100, Math.max(0, v));
+  return m ? { x: clamp(Number(m[1])), y: clamp(Number(m[2])) } : { x: 78, y: 22 };
+}
+
 /** 按路由决定首屏加载什么 */
 async function boot(): Promise<void> {
   if (route.mode === 'render') {
@@ -398,7 +411,7 @@ async function boot(): Promise<void> {
             (img as HTMLImageElement).decode().catch(() => undefined),
           ),
         );
-        card.setPose({ x: 78, y: 22 });
+        card.setPose(renderPose());
         // 给截图脚本一个明确的信号，别靠猜时间
         document.body.dataset['ready'] = '1';
       }

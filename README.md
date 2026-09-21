@@ -213,122 +213,15 @@ pnpm capture --image 照片路径 --out out/demo.gif
 脚本用无头 Edge 走真实的上传路径，再用 `setPose` 逐帧摆姿态截图，每一帧都是确定性的。
 加 `--dump` 会额外把每一层导出成 PNG，排查分层问题时很有用；只想要层不想等录制就再加 `--no-gif`。
 
-## 部署与运行位置
+### 调分享图
 
-分层跑在服务端，**浏览器不下载任何模型**。
-
-```
-浏览器 → Cloudflare → Caddy → holocard 服务（Node）
-                                 ├── 前端静态文件
-                                 ├── POST /api/jobs      提交照片
-                                 ├── GET  /api/jobs/{id} 轮询进度
-                                 └── GET  /api/layers/…  取层文件
+```bash
+pnpm og                    # 用 scripts/fixtures/og-test.jpg 出一张分享图，写到 out/og-preview.jpg 并打开
+pnpm og 图片路径            # 换一张图
+pnpm og --watch            # 改了 src/ 下的样式或代码，保存即重出（约 2 秒）
+pnpm og --pose 20,80       # 换个角度看箔面和炫光
+pnpm og --size 1280x640    # GitHub 仓库社交预览图的尺寸
 ```
 
-| | 来源 | 体积 |
-|---|---|---|
-| 页面 + 渲染器 | 本服务 | 约 27KB |
-| 产出的层文件 | 本服务 | 约 6MB（3 张 PNG） |
-
-改造前是纯浏览器端：每个新访客首次使用要下 47MB 权重 + 5.3MB 推理运行时，约 20 秒。
-现在是上传 + 服务端处理，实测约 10 秒，且没有任何模型下载。
-
-接口是「提交 + 轮询」而不是一个长请求：处理要几秒到几十秒，长连接容易被中间层掐断，排队时更是如此。
-
-**浏览器端流水线仍然保留**，在服务端不可用时自动回退——自托管成纯静态站（GitHub Pages 之类）时走的就是这条路，
-那时才会按需下载模型，并可用 `VITE_MODEL_HOST` 换成国内镜像，见 `.env.example`。
-
-同一份流水线代码两边复用：图片解码/编码抽成了 `ImageBackend` 接口
-（`src/segmenter/image-io.ts`），浏览器用 OffscreenCanvas，服务端注入 sharp；
-切层、形态学、引导滤波、补全全是纯 typed-array 运算，原样共用。
-
-服务端的资源上限、目录布局、一次性配置见 [deploy/README.md](deploy/README.md)。
-
-## 分享
-
-每张服务端产出的卡片都有永久链接 `https://holocard.longsizhuo.com/c/<id>`。
-
-链接在微信、Twitter、Telegram 里会显示一张 **1200×630 的卡片预览图**——这是能不能扩散的关键，
-没有大图预览的链接点击率差一个数量级。预览图是用无头 Chromium **真渲染**出来的：
-打开 `/render/<id>`（只有卡片、固定在炫光峰值姿态、无 UI 的裸页面），等所有层解码完再截图。
-跑的是和用户完全一样的那套前端代码，所以箔面、炫光、分层视差都是真的，不是另画一张近似图。
-
-| | |
-|---|---|
-| 分层耗时 | 约 4 秒 |
-| 分享后预览图 | 约 2 秒 |
-| 预览图体积 | 约 200KB |
-
-**保留策略**：随手传的卡片保留一周，点过「分享」的永久保留。
-用户上传的内容一律 `noindex`，不进搜索引擎。
-提交接口按 IP 限流（10 分钟 10 次），取 `cf-connecting-ip`——前面隔着 Cloudflare 和 Caddy，
-socket 地址永远是回环。
-
-### CDN 与数据库
-
-**CDN 不需要额外接**。Cloudflare 已经在前面，层文件和预览图的 id 是一次性 UUID、内容永不变，
-带 `immutable` 长缓存，实测边缘 `cf-cache-status: HIT`。回源压力基本为零。
-
-**没有数据库，目前也不需要**。文件系统就是存储，`manifest.json` 就是记录，
-分享状态是目录里的一个 `.shared` 标记文件。要做卡片广场、浏览量、审核队列或用户体系时再上
-（那台机器上已经有 Postgres）。
-
-按每张卡约 6MB 算，91G 可用空间能放一万五千张。真到了那一步，把层文件从 PNG 换成带 alpha 的 WebP
-能再压掉七成。
-
-## 模型选型与许可证
-
-| 部件 | 选型 | 许可证 | 体积 |
-|---|---|---|---|
-| 深度估计 | [Depth Anything V2-Small](https://huggingface.co/onnx-community/depth-anything-v2-small) | Apache 2.0 | 服务端 q8 27MB / 浏览器回退 fp16 50MB |
-| 边缘精修 | 引导滤波，原图当向导 | 本项目 | 0 |
-| 补洞 | 镜像纹理填充，push-pull 金字塔兜底 | 本项目 | 0 |
-
-避开的坑：
-
-- **RMBG-1.4 和 RMBG-2.0 都是非商用许可**。RMBG-2.0 就是 BiRefNet 架构 + Bria 的私有数据。
-- **Depth Anything V3 的 Large/Giant 是 CC-BY-NC**，只有 Small/Base 是 Apache 2.0，
-  而且 V3 目前没有官方 ONNX 导出。
-- **BiRefNet 全量 ONNX 有 973MB**，浏览器直接爆 WASM 内存，必须用 lite 版。
-- **SAM 自动 mask 生成在浏览器不现实**——要在图上撒网格点跑几百次 decoder。
-
-构建产物里有一个 26MB 的 `ort-wasm-simd-threaded.asyncify.wasm`，但线上**没有任何请求会用到它**：
-transformers.js 默认把 onnxruntime 的 wasm 路径指向 jsDelivr，Vite 只是因为源码里有一处
-`new URL(…, import.meta.url)` 引用才把它打了进来。另外要注意这个 wasm 不是「WebGPU 不可用时的退路」——
-ORT 的 WebGPU 后端本身就跑在这个 wasm 运行时上，开着 WebGPU 也照样要拉。
-
-## 路线图
-
-- [x] 渲染器：弹簧驱动的 3D 转卡、逐层箔面遮罩、分层视差、整卡炫光与高光
-- [x] 三套箔面配方：holo / sunpillar / rainbow
-- [x] `.layers` 格式与读写
-- [x] 浏览器端深度估计（WebGPU / WASM 自动降级）、直方图谷底自适应切层
-- [x] 深度边缘吸附、前景膨胀、逐层补全、镜像纹理填充
-- [x] 录制脚本：确定性逐帧截图 + 调色板两遍编码
-- [x] 可配置的模型来源（支持国内镜像 / 自建 CDN）
-- [x] 边缘精修：引导滤波，原图当向导，零下载
-- [x] 服务端分层：浏览器不下载任何模型，见 [deploy/README.md](deploy/README.md)
-- [x] 分享：`/c/<id>` 永久链接 + 无头渲染的 OG 预览图 + IP 限流
-- [ ] 抠图模型当向导：重新导出 BiRefNet（拆开宽 Concat / 放开输入尺寸），或接入别的能在 WebGPU 上跑的模型
-- [ ] 更多箔面配方：cosmos、radiant、secret rare、reverse holo
-- [ ] 点击弹出放大（上游的 popover + 首次 360° 翻转）、首屏自动展示动画
-- [ ] 陀螺仪驱动（移动端），`setPose` 已经留好了入口
-- [ ] 层文件改用带 alpha 的 WebP（体积可降约七成，移动端打开快很多）
-- [ ] 导出 `.layers` 压缩包 / 导出视频
-- [ ] Python CLI 轨：更大的模型，离线产出高质量层
-
-## 已知限制
-
-- 边缘精修靠颜色当向导：描边和背景颜色接近时分不开，发丝这类半透明细结构也不如专门的抠图模型。
-- `color-dodge` 在暗部几乎不起作用，所以背景很暗的照片箔面会不明显。上游也是同样的特性。
-- 地面、墙面这类**横跨整个深度范围的延展面**目前会被切开。
-- 深度分布过于连续的图（比如一整片斜坡）切不出有意义的层，会退化成等质量切分。
-
-## 致谢与许可
-
-箔面配方（`src/renderer/foils.css`）和交互映射（`src/renderer/card.ts` 中标注的部分）
-移植自 [pokemon-cards-css](https://github.com/simeydotme/pokemon-cards-css)，
-作者 Simon Goellner（[@simeydotme](https://github.com/simeydotme)），GPL-3.0。
-弹簧的积分语义参照 [svelte/motion](https://github.com/sveltejs/svelte)（MIT）。
-
-本项目以 **GPL-3.0** 发布，见 [LICENSE](LICENSE)。
+和线上是同一套渲染：前端现构建，截图直接调服务端的 `renderPreview`，这里看到什么，分享出去就是什么。
+分层结果按图片哈希缓存在 `.og-cache/`，调样式时不会反复跑模型。需要本地有 `.models/` 下的权重。

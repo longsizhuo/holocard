@@ -26,3 +26,6 @@ public/__test*
 
 # 服务端构建产物
 dist-server/
+
+# 分享图预览工具的缓存（分层结果、打包出的脚本）
+.og-cache/

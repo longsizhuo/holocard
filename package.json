@@ -13,7 +13,8 @@
     "capture": "node scripts/capture.mjs",
     "build:server": "tsc --noEmit && vite build --config vite.server.config.ts",
     "start:server": "node dist-server/holocard-server.mjs",
-    "dev:server": "vite build --config vite.server.config.ts && node dist-server/holocard-server.mjs"
+    "dev:server": "vite build --config vite.server.config.ts && node dist-server/holocard-server.mjs",
+    "og": "vite build --config vite.og.config.ts --logLevel error && node .og-cache/bin/og-preview.mjs"
   },
   "dependencies": {
     "@huggingface/transformers": "^4.3.0",

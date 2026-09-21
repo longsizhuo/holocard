@@ -23,17 +23,22 @@ const RENDER_TIMEOUT_MS = 45_000;
 /**
  * 用哪个浏览器。留空则用 Playwright 自带的 Chromium（服务器上就是这样）；
  * 本地开发机上没装那份 Chromium，可以设成 msedge 之类复用系统浏览器。
+ *
+ * 用到时才读，不在模块加载时定死：scripts/og-preview.ts 要在 import 之后才按平台补默认值。
  */
-const CHANNEL = process.env.HOLOCARD_BROWSER_CHANNEL ?? '';
+function browserChannel(): string {
+  return process.env.HOLOCARD_BROWSER_CHANNEL ?? '';
+}
 
 let browser: Browser | null = null;
 let idleTimer: NodeJS.Timeout | null = null;
 
 async function getBrowser(): Promise<Browser> {
   if (browser?.isConnected()) return browser;
+  const channel = browserChannel();
   browser = await chromium.launch({
     headless: true,
-    ...(CHANNEL ? { channel: CHANNEL } : {}),
+    ...(channel ? { channel } : {}),
     args: [
       '--no-sandbox',
       '--disable-dev-shm-usage',
@@ -59,19 +64,36 @@ function scheduleShutdown(): void {
   idleTimer.unref();
 }
 
+export interface PreviewOptions {
+  /** 画布尺寸。默认是 OG 标准的 1200×630；GitHub 仓库的社交预览图要 1280×640 */
+  width?: number;
+  height?: number;
+  format?: 'jpeg' | 'png';
+  /**
+   * 卡片姿态：指针落在卡面上的百分比位置。不给就用渲染页的默认姿态（和线上分享图一致）。
+   * 调分享图时用来看不同角度下箔面和炫光的样子。
+   */
+  pose?: { x: number; y: number };
+}
+
 /**
  * 渲染一张卡的预览图。
  * baseUrl 指向本服务自己（127.0.0.1:端口），渲染页走的是和用户完全一样的前端代码。
  */
-export async function renderPreview(baseUrl: string, id: string): Promise<Buffer> {
+export async function renderPreview(
+  baseUrl: string,
+  id: string,
+  options: PreviewOptions = {},
+): Promise<Buffer> {
   const page = await (await getBrowser()).newPage({
-    viewport: { width: PREVIEW_WIDTH, height: PREVIEW_HEIGHT },
+    viewport: { width: options.width ?? PREVIEW_WIDTH, height: options.height ?? PREVIEW_HEIGHT },
     // 截出来的图会被放大显示，2 倍像素密度看着才不糊
     deviceScaleFactor: 2,
   });
 
   try {
-    await page.goto(`${baseUrl}/render/${id}`, {
+    const query = options.pose ? `?pose=${options.pose.x},${options.pose.y}` : '';
+    await page.goto(`${baseUrl}/render/${id}${query}`, {
       waitUntil: 'domcontentloaded',
       timeout: RENDER_TIMEOUT_MS,
     });
@@ -87,7 +109,9 @@ export async function renderPreview(baseUrl: string, id: string): Promise<Buffer
     // 姿态是 setPose 直接写的（不走动画），但样式重算和合成还需要一两帧
     await page.waitForTimeout(250);
 
-    return await page.screenshot({ type: 'jpeg', quality: 88 });
+    return options.format === 'png'
+      ? await page.screenshot({ type: 'png' })
+      : await page.screenshot({ type: 'jpeg', quality: 88 });
   } finally {
     await page.close().catch(() => undefined);
     scheduleShutdown();
