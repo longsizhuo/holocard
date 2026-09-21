@@ -124,7 +124,7 @@ body {
   gap: 16px;
 }
 
-.page__head { display: flex; align-items: baseline; gap: 16px; flex-wrap: wrap; }
+.page__head { display: flex; align-items: baseline; gap: 12px 16px; flex-wrap: wrap; }
 .page__head h1 {
   margin: 0;
   font-size: 26px;
@@ -151,6 +151,49 @@ body {
   to   { background-position: 300% 0; }
 }
 .page__sub { margin: 0; color: var(--muted); font-size: 13px; }
+
+/*
+ * GitHub 入口。放页头右上角而不是只留在页脚——页脚那个要找两遍才看得见。
+ * 指的是仓库首页（方便直接 Star），和页脚那个指向确切 commit 的源码链接是两回事。
+ */
+.gh {
+  margin-left: auto;          /* 顶到最右，不依赖固定定位，窄屏换行也不会盖住别的 */
+  align-self: center;
+  position: relative;
+  overflow: hidden;
+  flex: none;
+
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 7px 14px;
+  border-radius: 999px;
+  border: 1px solid rgba(255, 255, 255, 0.9);
+  background: linear-gradient(120deg, var(--p5), var(--p2) 45%, var(--p3));
+  box-shadow: 0 1px 0 rgba(255, 255, 255, 0.9) inset, 0 6px 16px -10px rgba(60, 50, 90, 0.6);
+
+  color: var(--fg);
+  font-size: 12.5px;
+  font-weight: 600;
+  text-decoration: none;
+  white-space: nowrap;
+  transition: transform 0.2s, box-shadow 0.2s;
+}
+.gh svg { width: 15px; height: 15px; fill: currentColor; flex: none; position: relative; z-index: 1; }
+.gh span { position: relative; z-index: 1; }
+/* 和上传区、分享按钮同一套扫光，让它看起来是这一页的东西而不是贴上去的 */
+.gh::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(100deg, transparent 42%, rgba(255, 255, 255, 0.8) 50%, transparent 58%);
+  background-size: 220% 100%;
+  animation: pearl-sheen 5s linear infinite;
+}
+.gh:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 1px 0 rgba(255, 255, 255, 0.9) inset, 0 10px 22px -10px rgba(60, 50, 90, 0.7);
+}
 
 .page__body {
   min-height: 0; /* grid 子项默认 min-height:auto，不写这行内部就撑破一屏 */
@@ -439,7 +482,9 @@ select {
    */
   .stage { height: 44vh; }
   .page__head h1 { font-size: 22px; }
-  .page__sub { font-size: 12px; }
+  .page__sub { font-size: 12px; order: 3; }
+  /* 手机上标题和按钮一行，副标题整行放下面 */
+  .gh { font-size: 12px; padding: 6px 12px; }
   .panel { max-height: none; }
   .panel__scroll { overflow: visible; }
 }
@@ -455,7 +500,8 @@ select {
   .pearl::after,
   .page__head h1,
   .drop::after,
-  .share__btn::after {
+  .share__btn::after,
+  .gh::after {
     animation: none;
   }
   /* 停在色相带中段，不是渐变的边缘，否则标题只剩单色 */
@@ -480,7 +526,14 @@ body.is-render {
 body.is-render .page { padding: 0; max-width: none; }
 body.is-render .page__head,
 body.is-render .panel,
-body.is-render .page__foot { display: none; }
+body.is-render .page__foot,
+/*
+ * 珠光底也要显式关掉。它被 .render-bg 整个盖住、截图里看不见，
+ * 但 34 秒的漂移动画一直在跑：每次截图落在动画的不同时刻，产出的 JPEG 就差几百字节，
+ * 渲染不再可复现（之前靠「两次渲染逐字节一致」来确认改动没影响分享图，这就失灵了）。
+ * 而且那台机器没有显卡，60px 的模糊全靠 swiftshader 软算，白跑一个看不见的动画纯属浪费。
+ */
+body.is-render .pearl { display: none; }
 body.is-render .page__body {
   display: flex;
   align-items: center;
