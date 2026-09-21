@@ -3,6 +3,14 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <!--
+      网站图标：现代浏览器用 SVG；.ico 给老浏览器和只认 /favicon.ico 的爬虫；
+      iOS 主屏图标会把透明区域填成黑色，所以单独一张带底色的 PNG。
+      另外两个备选方案在 docs/favicon-options/，换的话替换 public/ 下这三个文件。
+    -->
+    <link rel="icon" href="/favicon.ico" sizes="32x32" />
+    <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
+    <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
     <title>HoloCard — 把任意照片变成分层闪卡</title>
     <meta name="description" content="上传一张照片，自动切分前中后景，每层各上各的箔面，渲染成可交互的闪卡。" />
   </head>

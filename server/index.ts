@@ -156,6 +156,55 @@ function json(res: ServerResponse, status: number, body: unknown): void {
   res.end(payload);
 }
 
+function text(res: ServerResponse, type: string, body: string, method: string): void {
+  res.writeHead(200, {
+    'content-type': type,
+    'content-length': Buffer.byteLength(body),
+    // 给爬虫的文件，一小时够了；改了之后不至于太久才生效
+    'cache-control': 'public, max-age=3600',
+  });
+  if (method === 'HEAD') res.end();
+  else res.end(body);
+}
+
+/**
+ * robots.txt。欢迎所有爬虫，包括 AI 的——站点就是想被找到、被引用。
+ * 只挡两类：服务端截分享图用的内部页面，和接口。
+ * /api/layers/ 故意不挡：分享图在那下面，挡了 Twitter 取不到图；
+ * 用户的图不进搜索结果靠的是那边的 x-robots-tag: noindex 响应头。
+ */
+function robotsTxt(): string {
+  return [
+    'User-agent: *',
+    'Allow: /',
+    'Disallow: /render/',
+    'Disallow: /api/jobs',
+    'Disallow: /api/cards',
+    '',
+    `Sitemap: ${PUBLIC_ORIGIN}/sitemap.xml`,
+    '',
+  ].join('\n');
+}
+
+/**
+ * sitemap.xml。只有首页：用户的卡片页是 noindex 的，不该出现在这里。
+ * lastmod 取 index.html 的修改时间，也就是最近一次发版。
+ */
+async function sitemapXml(): Promise<string> {
+  const index = WEB_DIR ? await stat(join(WEB_DIR, 'index.html')).catch(() => null) : null;
+  const lastmod = index ? new Date(index.mtimeMs).toISOString().slice(0, 10) : null;
+  return [
+    '<?xml version="1.0" encoding="UTF-8"?>',
+    '<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">',
+    '  <url>',
+    `    <loc>${PUBLIC_ORIGIN}/</loc>`,
+    ...(lastmod ? [`    <lastmod>${lastmod}</lastmod>`] : []),
+    '  </url>',
+    '</urlset>',
+    '',
+  ].join('\n');
+}
+
 /** 读请求体，超过上限立刻断开，不把整个大文件读进内存 */
 function readBody(req: IncomingMessage, limit: number): Promise<Buffer> {
   return new Promise((resolve, reject) => {
@@ -270,7 +319,24 @@ const MIME: Record<string, string> = {
   '.wasm': 'application/wasm',
   '.gz': 'application/gzip',
   '.map': 'application/json; charset=utf-8',
+  '.txt': 'text/plain; charset=utf-8',
+  '.xml': 'application/xml; charset=utf-8',
+  '.ico': 'image/x-icon',
 };
+
+/**
+ * 前端路由。这些路径落不到文件上，由 index.html 接手，状态码 200。
+ *
+ * 其他落不到文件的路径同样回 index.html——人打错地址还能看到站点——但状态码是 404。
+ * 以前一律回 200，/abc、/wp-admin 在搜索引擎眼里全是和首页一模一样的页面（软 404），
+ * 重复内容多了会拉低整站的评价。
+ */
+const SPA_ROUTES = [
+  /^\/$/,
+  /^\/index\.html$/,
+  /^\/c\/[0-9a-f-]{36}\/?$/,
+  /^\/render\/[0-9a-f-]{36}\/?$/,
+];
 
 /** HTML 属性转义。卡片 id 是我们自己生成的 UUID，但注入前仍然一律转义 */
 function escapeAttr(value: string): string {
@@ -354,9 +420,61 @@ function injectHomeMeta(html: string, imageVersion: number | null): string {
       : [`<meta name="twitter:card" content="summary" />`]),
     `<meta name="twitter:title" content="${title}" />`,
     `<meta name="twitter:description" content="${desc}" />`,
+    // 带参数的地址（?utm=…、?pose=…）都算同一页，别让搜索引擎当成重复页面
+    `<link rel="canonical" href="${pageUrl}" />`,
+    `<script type="application/ld+json">${structuredData(html)}</script>`,
   ].join('\n    ');
 
   return html.replace('</head>', `  ${tags}\n  </head>`);
+}
+
+/**
+ * 首页的结构化数据（JSON-LD）。
+ *
+ * 搜索引擎和 AI 靠它确认「这是个免费、开源的网页工具，谁做的，源码在哪」，
+ * 不用从一堆按钮文字里猜。描述直接取页面上的 meta description，不在这里另写一份——
+ * 改页面描述时这里自动跟着变。
+ */
+function structuredData(html: string): string {
+  const description =
+    /<meta name="description" content="([^"]*)"/.exec(html)?.[1] ?? '';
+  const repo = 'https://github.com/longsizhuo/holocard';
+  const license = 'https://www.gnu.org/licenses/gpl-3.0.html';
+  const author = { '@type': 'Person', name: 'longsizhuo', url: 'https://github.com/longsizhuo' };
+
+  const data = {
+    '@context': 'https://schema.org',
+    '@graph': [
+      {
+        '@type': 'WebApplication',
+        '@id': `${PUBLIC_ORIGIN}/#app`,
+        name: 'HoloCard',
+        url: `${PUBLIC_ORIGIN}/`,
+        description,
+        image: `${PUBLIC_ORIGIN}/og.jpg`,
+        inLanguage: 'zh-CN',
+        applicationCategory: 'MultimediaApplication',
+        operatingSystem: 'Any',
+        browserRequirements: 'Requires JavaScript',
+        isAccessibleForFree: true,
+        offers: { '@type': 'Offer', price: '0', priceCurrency: 'CNY' },
+        license,
+        author,
+        sameAs: [repo],
+      },
+      {
+        '@type': 'SoftwareSourceCode',
+        name: 'HoloCard',
+        codeRepository: repo,
+        programmingLanguage: 'TypeScript',
+        license,
+        author,
+        targetProduct: { '@id': `${PUBLIC_ORIGIN}/#app` },
+      },
+    ],
+  };
+  // 放进 <script> 里，「</script>」这类序列得转义掉，否则会提前结束标签
+  return JSON.stringify(data).replace(/</g, '\\u003c');
 }
 
 /**
@@ -396,47 +514,55 @@ async function serveStatic(
   const root = resolve(WEB_DIR);
   const safe = target === root || target.startsWith(root + sep);
 
-  for (const candidate of safe ? [target, join(root, 'index.html')] : [join(root, 'index.html')]) {
-    try {
-      let body = await readFile(candidate);
-      const ext = extname(candidate);
-      const isHashed = candidate.includes(`${sep}assets${sep}`);
-
-      if (cardPath?.[1] && ext === '.html') {
-        const id = cardPath[1];
-        const previewStat = await stat(join(OUT_DIR, id, 'preview.jpg')).catch(() => null);
-        const previewVersion = previewStat ? Math.floor(previewStat.mtimeMs) : null;
-        body = Buffer.from(injectShareMeta(body.toString('utf8'), id, previewVersion), 'utf8');
-
-        /*
-         * 一次页面访问给这张卡的保留窗口续期。
-         *
-         * 只在 GET 上计：HEAD 多半是抓取工具和监控，不是真的有人在看。
-         * 计数在 cards.ts 里按 IP 做一小时去重，自己反复刷不会把保留期刷上去。
-         * 这条路径不会被 CDN 挡掉——/c/<id> 的 cache-control 是 no-cache，每次都回源。
-         */
-        if (method === 'GET') recordHit(id, ip);
-      } else if (isHome && ext === '.html') {
-        const ogStat = await stat(join(root, 'og.jpg')).catch(() => null);
-        const ogVersion = ogStat ? Math.floor(ogStat.mtimeMs) : null;
-        body = Buffer.from(injectHomeMeta(body.toString('utf8'), ogVersion), 'utf8');
-      }
-
-      res.writeHead(200, {
-        'content-type': MIME[ext] ?? 'application/octet-stream',
-        'content-length': body.byteLength,
-        // assets 下的文件名带内容 hash，可以永久缓存；其余不缓存，保证发版即时生效
-        'cache-control': isHashed ? 'public, max-age=31536000, immutable' : 'no-cache',
-        'x-content-type-options': 'nosniff',
-      });
-      if (method === 'HEAD') res.end();
-      else res.end(body);
-      return;
-    } catch {
-      // 试下一个候选
-    }
+  // 先找真实文件；落不到文件的回 index.html，不是前端路由的话状态码给 404
+  let candidate = target;
+  let status = 200;
+  if (!safe || !(await stat(target).then((s) => s.isFile()).catch(() => false))) {
+    candidate = join(root, 'index.html');
+    if (!SPA_ROUTES.some((route) => route.test(pathname))) status = 404;
   }
-  json(res, 404, { error: 'not found' });
+
+  let body: Buffer;
+  try {
+    body = await readFile(candidate);
+  } catch {
+    // index.html 都读不到，只能是部署出了问题
+    json(res, 404, { error: 'not found' });
+    return;
+  }
+  const ext = extname(candidate);
+  const isHashed = candidate.includes(`${sep}assets${sep}`);
+
+  // 404 只是个兜底页：不注入分享标签、不计访问
+  if (status === 200 && cardPath?.[1] && ext === '.html') {
+    const id = cardPath[1];
+    const previewStat = await stat(join(OUT_DIR, id, 'preview.jpg')).catch(() => null);
+    const previewVersion = previewStat ? Math.floor(previewStat.mtimeMs) : null;
+    body = Buffer.from(injectShareMeta(body.toString('utf8'), id, previewVersion), 'utf8');
+
+    /*
+     * 一次页面访问给这张卡的保留窗口续期。
+     *
+     * 只在 GET 上计：HEAD 多半是抓取工具和监控，不是真的有人在看。
+     * 计数在 cards.ts 里按 IP 做一小时去重，自己反复刷不会把保留期刷上去。
+     * 这条路径不会被 CDN 挡掉——/c/<id> 的 cache-control 是 no-cache，每次都回源。
+     */
+    if (method === 'GET') recordHit(id, ip);
+  } else if (status === 200 && isHome && ext === '.html') {
+    const ogStat = await stat(join(root, 'og.jpg')).catch(() => null);
+    const ogVersion = ogStat ? Math.floor(ogStat.mtimeMs) : null;
+    body = Buffer.from(injectHomeMeta(body.toString('utf8'), ogVersion), 'utf8');
+  }
+
+  res.writeHead(status, {
+    'content-type': MIME[ext] ?? 'application/octet-stream',
+    'content-length': body.byteLength,
+    // assets 下的文件名带内容 hash，可以永久缓存；其余不缓存，保证发版即时生效
+    'cache-control': isHashed ? 'public, max-age=31536000, immutable' : 'no-cache',
+    'x-content-type-options': 'nosniff',
+  });
+  if (method === 'HEAD') res.end();
+  else res.end(body);
 }
 
 /** 定期清理过期产物 */
@@ -453,6 +579,16 @@ const server = createServer((req, res) => {
 
     if ((req.method === 'GET' || req.method === 'HEAD') && url.pathname === '/api/health') {
       json(res, 200, { ok: true, running, queued: queue.length, concurrency: CONCURRENCY });
+      return;
+    }
+
+    // 这两个要写完整域名，所以按 PUBLIC_ORIGIN 现生成，不放静态文件——别人自托管时地址自然就对
+    if ((req.method === 'GET' || req.method === 'HEAD') && url.pathname === '/robots.txt') {
+      text(res, 'text/plain; charset=utf-8', robotsTxt(), req.method);
+      return;
+    }
+    if ((req.method === 'GET' || req.method === 'HEAD') && url.pathname === '/sitemap.xml') {
+      text(res, 'application/xml; charset=utf-8', await sitemapXml(), req.method);
       return;
     }
 
@@ -634,6 +770,12 @@ const server = createServer((req, res) => {
             name === 'manifest.json'
               ? 'public, max-age=60'
               : 'public, max-age=3600, immutable',
+          /*
+           * 用户的照片不进搜索结果（包括图片搜索）。
+           * 用响应头而不是在 robots.txt 里挡：分享图也在这个路径下，Twitter 的爬虫遵守 robots.txt，
+           * 挡了的话分享卡片就取不到图了。noindex 只管「别收录」，不影响抓取。
+           */
+          'x-robots-tag': 'noindex',
         });
         if (req.method === 'HEAD') res.end();
         else res.end(body);

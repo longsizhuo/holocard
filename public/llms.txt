@@ -1,0 +1,28 @@
+# HoloCard
+
+> 把任意照片自动切成前中后景，每层各上各的箔面，渲染成可交互的全息闪卡。在网页上直接用，免费，无需注册，开源（GPL-3.0）。
+
+HoloCard 是一个网页工具。上传一张照片，服务端用单目深度估计把画面分成 2～4 层；每一层同时是一层带视差的画面，和这一层箔面的遮罩。前端把它渲染成宝可梦闪卡那样的全息卡片：转动卡片时，箔面和炫光随角度变化，各层之间有视差。
+
+- 在线使用：https://holocard.longsizhuo.com/
+- 做好的卡可以生成分享链接，别人打开就能转着看
+- 支持 JPG、PNG、WebP、AVIF，单张最大 16MB
+- 作者：longsizhuo（https://github.com/longsizhuo）
+
+## 原理
+
+- 深度估计：Depth Anything V2-Small（ONNX，8 位量化），在服务端运行，浏览器不用下载模型
+- 分层：在深度直方图的谷底切层，层数自适应；只在画面上看得见、且深度上确实有遮挡台阶的地方切，不会把一个物体切成两半
+- 边缘：深度边缘先吸附成台阶，再用引导滤波把层边界吸附到原图里真实的物体边缘上
+- 补全：被前景挡住的区域，以最近的可见像素为镜面，把边界另一侧的真实纹理镜像过来，不用生成式模型
+- 渲染：箔面效果和交互手感移植自 pokemon-cards-css（Simon Goellner，GPL-3.0），每一层用自己的 alpha 当箔面遮罩
+
+## 链接
+
+- [源码](https://github.com/longsizhuo/holocard)：GitHub 仓库，GPL-3.0
+- [README](https://github.com/longsizhuo/holocard#readme)：分层流水线、边缘精修、渲染器和 .layers 格式的详细说明
+- [pokemon-cards-css](https://github.com/simeydotme/pokemon-cards-css)：箔面效果的来源
+
+## English
+
+HoloCard is a free, open-source (GPL-3.0) web tool that turns any photo into an interactive holographic trading card. It estimates depth with Depth Anything V2-Small, splits the photo into 2–4 layers (foreground, midground, background), and gives each layer its own holographic foil; tilting the card shifts the foils and the layers in parallax. Foil effects are ported from pokemon-cards-css by Simon Goellner. Try it at https://holocard.longsizhuo.com/ — source code at https://github.com/longsizhuo/holocard.

@@ -106,6 +106,28 @@ ssh oracle "cd /opt/holocard && node22/bin/node db.mjs \"SELECT ...\""  # 任意
 回滚到数据库之前的版本需要注意：之后新建的卡没有 `meta.json`，旧代码会给它们生成新的删除口令，
 这些卡的上传者就删不了了。
 
+## 搜索引擎与 AI 抓取
+
+目标是被搜到、被 AI 引用，同时**用户的照片不进任何索引**。
+
+| | 做法 |
+|---|---|
+| `robots.txt` | 服务端按 `PUBLIC_ORIGIN` 现生成。允许所有爬虫（包括 AI 的），只挡 `/render/`（截分享图的内部页）和 `/api/jobs`、`/api/cards` |
+| `sitemap.xml` | 同上，只有首页；`lastmod` 取 index.html 的修改时间 |
+| `llms.txt` | 给 AI 读的说明，静态文件 `public/llms.txt`，内容摘自 README |
+| 首页 | canonical + JSON-LD（`WebApplication` + `SoftwareSourceCode`）。结构化数据里的描述直接读页面的 meta description，不另写一份 |
+| 卡片页 `/c/<id>` | `noindex, nofollow`，不进 sitemap |
+| 层文件 `/api/layers/` | 响应头 `x-robots-tag: noindex`。**不在 robots.txt 里挡**：分享图就在这下面，Twitter 的爬虫遵守 robots.txt，挡了分享卡片就没图 |
+| 不存在的路径 | 返回 404（页面照旧显示首页，人看不出区别）。以前一律 200，搜索引擎会把 `/abc` 这类当成首页的重复页 |
+| 网站图标 | `public/favicon.svg`、`favicon.ico`（16/32/48）、`apple-touch-icon.png`（180，iOS 会把透明填成黑，所以带底色）。备选方案在 `docs/favicon-options/` |
+
+**只能在各自后台做的**（需要账号）：
+
+- Cloudflare → Security → Bots：确认没开「拦截 AI 爬虫」。开着的话 AI 爬虫在边缘就被挡了，从外面用伪造 UA 测不出来
+- Google Search Console、Bing Webmaster Tools：验证站点、提交 `https://holocard.longsizhuo.com/sitemap.xml`
+- 百度搜索资源平台：同上。站点没有 ICP 备案、服务器在海外，百度会收录得慢、排得靠后
+- GitHub 仓库 Settings → Social preview：上传 `docs/social-preview.jpg`（没有 API，只能网页上传）
+
 ## 保留与删除
 
 清理只看数据库，不看目录 mtime——mtime 会被任何一次写入刷新，拿它当依据等于永不过期。
