@@ -349,9 +349,19 @@ function buildRenderBackdrop(): void {
 
   const copy = document.createElement('div');
   copy.className = 'render-copy';
+  /*
+   * 「前中后」三个字本身摆成三层：前最大最近，依次往右后方退，
+   * 每一个都被前一个盖住左边三分之一。一眼就能看懂「分层」，不用读说明。
+   * 三个字的质感也对应默认的上箔方式：最近层哑光（白），中间 holo，最远 sunpillar。
+   */
   copy.innerHTML =
     '<h2>会发光的<br />分层闪卡</h2>' +
-    '<p>前中后景自动分层，每层各上各的箔面。<br />转动它，箔面会跟着角度变。</p>' +
+    '<div class="depth" role="img" aria-label="前中后景">' +
+    '<span class="depth__g depth__g--back">后</span>' +
+    '<span class="depth__g depth__g--mid">中</span>' +
+    '<span class="depth__g depth__g--front">前</span>' +
+    '</div>' +
+    '<p>每层各上各的箔面，转动它，箔面会跟着角度变。</p>' +
     '<span class="render-url">holocard.longsizhuo.com</span>';
   document.querySelector('.page__body')?.append(copy);
 }

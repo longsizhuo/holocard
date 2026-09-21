@@ -202,18 +202,29 @@ body {
   gap: 32px;
 }
 
-/* 卡片按可用高度缩放：.hc 有 aspect-ratio，给了高度宽度自己会算出来 */
+/*
+ * 卡片按「装进舞台」缩放，保持原图比例。
+ *
+ * 之前写的是 height:100% + max-width:100%，竖图没问题，但横图会出事：
+ * 16:9 的图按高度撑满算出来的宽度超过舞台，max-width 把宽度钳住之后高度还是 100%，
+ * aspect-ratio 就失效了——卡片被压成方块，再被 object-fit:cover 一裁，
+ * 一张 1920×1080 的图横向裁掉了 43%。
+ *
+ * 现在用容器查询单位：宽取「舞台宽」和「舞台高 × 宽高比」里小的那个，高交给 aspect-ratio。
+ * 横图贴着宽度、竖图贴着高度，任何比例都完整放进去。
+ */
 .stage {
   min-height: 0;
+  container-type: size;
   display: flex;
   align-items: center;
   justify-content: center;
 }
 .stage .hc {
-  width: auto;
-  max-width: 100%;
-  height: 100%;
-  max-height: 100%;
+  width: min(100cqw, 100cqh * var(--hc-ratio, 0.718));
+  max-width: none;
+  height: auto;
+  max-height: none;
 }
 
 /* ---------- 面板 ---------- */
@@ -551,8 +562,18 @@ body.is-render .stage { padding: 0; flex: none; }
  * 会塌成 0×0、截出来只有背景。390 宽的卡连 3D 投影在内实测占 y=26..570，
  * 在 630 高的画布里上下都留得住。
  */
+/*
+ * 渲染页的舞台在弹性行里按内容定宽，不能当 size 容器——
+ * size 容器不看内容，宽高会塌成 0，卡片就溢出到文案上去了。
+ */
+body.is-render .stage { container-type: normal; }
+
 body.is-render .hc {
-  width: 390px;
+  /*
+   * 装进一个 520×543 的框：竖图（~0.72）贴着高度，约 390 宽，和改之前一样；
+   * 横图贴着宽度，16:9 是 520×293。原来写死 390 宽，横图只有 390×219，缩在角落里。
+   */
+  width: min(520px, 543px * var(--hc-ratio, 0.718));
   max-width: none;
   /*
    * 显式写死 height:auto，把演示页的 `.stage .hc { height: 100% }` 挡在外面。
@@ -610,6 +631,77 @@ body.is-render .hc {
   letter-spacing: -0.02em;
   text-shadow: 0 4px 24px rgba(0, 0, 0, 0.7);
 }
+/*
+ * 前中后三层字。
+ *
+ * 几何：CJK 字形的 em 框是方的，宽≈字号。要「后一个被前一个盖住左边 1/3」，
+ * 后一个的 left = 前一个的 right − 自己宽度 / 3。越远越小、越往上提一点（透视里远处向地平线收）。
+ * 用 CSS 变量把字号串起来，改一个大小其余位置自动跟着算，不用手算像素。
+ *
+ * 遮挡要读得出来，每个字必须是实心的（半透明的话重叠处混在一起，分不清谁在前），
+ * 再给每个字一道往右下的投影落在身后那个字上。
+ * 渐变字要用 filter: drop-shadow 而不是 text-shadow：background-clip:text 的字是透明的，
+ * text-shadow 会从字里透出来；drop-shadow 按裁出来的形状投影，不会。
+ */
+.depth {
+  /*
+   * 字号落差不能太大：一开始用 104 / 78 / 58，几何上确实各盖 1/3，
+   * 但粗白的「前」把后两个压得几乎看不见，读起来是一团。收到 1 : 0.83 : 0.69。
+   */
+  --f: 96px;   /* 前 */
+  --m: 80px;   /* 中 */
+  --b: 66px;   /* 后 */
+  position: relative;
+  height: calc(var(--f) * 1.08);
+  margin: 6px 0 22px;
+  font-weight: 900;
+  line-height: 1;
+}
+.depth__g {
+  position: absolute;
+  bottom: 0;
+}
+/*
+ * 分开前后靠两道投影叠加：
+ *   第一道 3px、不模糊——贴着字的右缘切出一条干净的暗边。汉字是方块，被盖掉三分之一
+ *     之后剩下的笔画要是和前面那个字粘在一起，就认不出是什么字了，这道边把它们切开
+ *   第二道模糊的——真正的「投影」，交代谁在谁前面
+ * 都往右下投，因为身后那个字在右边。
+ */
+.depth__g--front {
+  left: 0;
+  font-size: var(--f);
+  z-index: 3;
+  color: #fff;
+  filter: drop-shadow(3px 0 0 rgba(12, 10, 28, 0.95)) drop-shadow(6px 5px 10px rgba(8, 6, 20, 0.6));
+}
+/*
+ * 渐变全用浅色调：深底上的深色渐变会糊成一片，认不出字。
+ * 中偏冷（青→紫，像 holo）、后偏暖（粉黄绿，像 sunpillar），色相拉开，接缝处才不会粘成一块。
+ */
+.depth__g--mid {
+  left: calc(var(--f) - var(--m) / 3);
+  bottom: calc(var(--f) * 0.07);
+  font-size: var(--m);
+  z-index: 2;
+  background: linear-gradient(120deg, #9ff3ff 0%, #a5b4ff 50%, #c9a6ff 100%);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  filter: drop-shadow(3px 0 0 rgba(12, 10, 28, 0.95)) drop-shadow(6px 5px 10px rgba(8, 6, 20, 0.55));
+}
+/* 竖向的彩虹条在小字上读成条纹，改成斜向的柔和过渡 */
+.depth__g--back {
+  left: calc(var(--f) - var(--m) / 3 + var(--m) - var(--b) / 3);
+  bottom: calc(var(--f) * 0.14);
+  font-size: var(--b);
+  z-index: 1;
+  background: linear-gradient(135deg, #ffc2d9 0%, #ffe9a8 50%, #c8ffb8 100%);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
+
 .render-copy p {
   margin: 0 0 28px;
   font-size: 22px;

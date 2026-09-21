@@ -182,6 +182,9 @@ export class HoloCard {
     const root = document.createElement('div');
     root.className = 'hc';
     root.style.setProperty('--hc-aspect', `${manifest.source.width} / ${manifest.source.height}`);
+    // 同一个比例再给一份纯数字。aspect-ratio 吃「宽 / 高」的写法，但 calc 里没法拿它做乘法，
+    // 宿主页面要按「装进某个框」来算卡片尺寸时用这个
+    root.style.setProperty('--hc-ratio', String(manifest.source.width / manifest.source.height));
     root.style.setProperty('--hc-amp', `${this.#options.amplitude * 100}%`);
 
     const translater = document.createElement('div');
