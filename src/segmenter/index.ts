@@ -62,16 +62,43 @@ const STAGE_TEXT: Record<SegmentStage, string> = {
  * 用相对位置而不是深度绝对值：最远的层锚定为 0（完全不动），最近的层为 1。
  * 这样不管原图深度范围是宽是窄，视差观感都一致。
  */
-function toParallax(depths: number[]): number[] {
-  if (depths.length === 0) return [];
-  const min = Math.min(...depths);
-  const max = Math.max(...depths);
-  const span = max - min;
-  // 所有层深度几乎一样时，退化成按层序均分，至少还有层次感
-  if (span < 1e-6) {
-    return depths.map((_, i) => (depths.length > 1 ? i / (depths.length - 1) : 0));
+function toParallax(depths: number[], rigid: boolean[]): number[] {
+  const n = depths.length;
+  if (n === 0) return [];
+
+  /*
+   * 被「刚性边界」连起来的层算作一组，同组共用一个视差值——它们不会相对滑动。
+   * 刚性边界是「画面上看得见但深度上没有遮挡台阶」的分界，两侧多半是同一个物体，
+   * 让它们错开的话物体就自己断成两截（用户报过的「分尸」）。
+   */
+  const group = new Array<number>(n).fill(0);
+  for (let i = 1; i < n; i++) {
+    group[i] = (group[i - 1] ?? 0) + (rigid[i - 1] ? 0 : 1);
   }
-  return depths.map((d) => (d - min) / span);
+  const groupCount = (group[n - 1] ?? 0) + 1;
+  // 整张图连成一个刚体：分层只为箔面服务，完全不做视差
+  if (groupCount <= 1) return depths.map(() => 0);
+
+  // 每组取组内深度均值当代表，再归一化——没有刚性边界时行为和以前完全一致
+  const sum = new Array<number>(groupCount).fill(0);
+  const count = new Array<number>(groupCount).fill(0);
+  depths.forEach((d, i) => {
+    const g = group[i] ?? 0;
+    sum[g] = (sum[g] ?? 0) + d;
+    count[g] = (count[g] ?? 0) + 1;
+  });
+  const groupDepth = sum.map((v, k) => v / (count[k] || 1));
+
+  const min = Math.min(...groupDepth);
+  const max = Math.max(...groupDepth);
+  const span = max - min;
+  // 各组深度几乎一样时退化成按组序均分，至少还有层次感
+  const groupParallax =
+    span < 1e-6
+      ? groupDepth.map((_, k) => k / (groupCount - 1))
+      : groupDepth.map((d) => (d - min) / span);
+
+  return depths.map((_, i) => groupParallax[group[i] ?? 0] ?? 0);
 }
 
 /**
@@ -136,7 +163,7 @@ export async function segmentToLayerSet(
     }
   })();
 
-  const { cuts, prominences } = analyzeDepth(depth, options.slice ?? {}, evidence);
+  const { cuts, prominences, rigid } = analyzeDepth(depth, options.slice ?? {}, evidence);
 
   report('extracting');
   const { images, stats, width, height } = await extractLayers(
@@ -146,7 +173,10 @@ export async function segmentToLayerSet(
     options.extract ?? {},
   );
 
-  const parallax = toParallax(stats.map((s) => s.depth));
+  const parallax = toParallax(
+    stats.map((s) => s.depth),
+    rigid,
+  );
   const layers: LayerEntry[] = stats.map((stat, i) => ({
     file: `layer-${i}.png`,
     depth: stat.depth,

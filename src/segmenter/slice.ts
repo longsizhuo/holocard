@@ -50,6 +50,14 @@ export interface SliceResult {
   histogram: Float32Array;
   /** 每个切点的显著性，和 cuts 一一对应 */
   prominences: number[];
+  /**
+   * 每个切点是不是「刚性边界」：画面上看得见，但深度上没有遮挡台阶。
+   *
+   * 这种边界两侧多半是同一个物体（一张脸的上下半、一件外套和领口）。
+   * 分层本身没问题——每层还能各上各的箔——但两层**不能相对滑动**，
+   * 一滑物体就自己断成两截。渲染端据此把两层的视差取成同一个值。
+   */
+  rigid: boolean[];
 }
 
 /** 统计深度直方图 */
@@ -236,6 +244,66 @@ const MIN_EDGE_SUPPORT = 0.03;
  */
 const BAND_HALF_WIDTH = 0.035;
 
+/**
+ * 认为「这里有一道遮挡台阶」的深度落差。
+ *
+ * 和 extract 的 snapThreshold 是同一个量纲：邻域内深度落差超过它才算遮挡边界，
+ * 低于它是物体自身的起伏（一张脸、一片地面）。这里取得比 snap 更严，
+ * 因为判错的代价不一样：snap 判错只是边缘糊一点，这里判错会把一个完整的人切成两半。
+ */
+const STEP_DEPTH = 0.2;
+/** 邻域半径，相对图宽 */
+const STEP_RADIUS = 0.01;
+/**
+ * 过渡带里有多大比例的像素真的骑在遮挡台阶上，才认这条切点。
+ *
+ * 层的存在理由是**遮挡**：近处的东西挡住远处的东西，所以它们可以相对滑动。
+ * 一个物体内部的深度起伏不是遮挡——沿着它切开，滑动时物体就会自己断成两截。
+ * 用户报过一张翻拍的人像小卡：模型认出人脸、画了个人形的深度团，但人和背景之间
+ * 根本没有台阶（整张是平的印刷品），直方图的谷底于是落在了人的身体中间，
+ * 渲染出来头和肩膀各走各的，像分尸。
+ *
+ * 12 个切点的实测（带内像素落差 > 0.2 的占比）：
+ *   平面海报/卡通/简笔画  0.0 ~ 4.6%
+ *   那条把人切两半的       6.7%
+ *   ——— 这里有一道近 3 倍的空档，中间没有任何样本 ———
+ *   真实照片、干净的图底分离 18.7 ~ 40.7%
+ * 阈值取 12%，落在空档正中。
+ */
+const MIN_STEP_SUPPORT = 0.12;
+
+/** 这条切点是不是骑在一道真实的遮挡台阶上 */
+function hasDepthStep(cut: number, depth: DepthMap): boolean {
+  const { data, width, height } = depth;
+  const r = Math.max(2, Math.round(width * STEP_RADIUS));
+  let band = 0;
+  let onStep = 0;
+  for (let y = 0; y < height; y++) {
+    for (let x = 0; x < width; x++) {
+      const d = data[y * width + x] ?? 0;
+      if (Math.abs(d - cut) > BAND_HALF_WIDTH) continue;
+      band++;
+      // 邻域取九个点就够：要的是「这里有没有台阶」，不是精确的落差值
+      let lo = 1;
+      let hi = 0;
+      for (let dy = -r; dy <= r; dy += r) {
+        const ny = y + dy;
+        if (ny < 0 || ny >= height) continue;
+        for (let dx = -r; dx <= r; dx += r) {
+          const nx = x + dx;
+          if (nx < 0 || nx >= width) continue;
+          const v = data[ny * width + nx] ?? 0;
+          if (v < lo) lo = v;
+          if (v > hi) hi = v;
+        }
+      }
+      if (hi - lo > STEP_DEPTH) onStep++;
+    }
+  }
+  if (band === 0) return false;
+  return onStep / band >= MIN_STEP_SUPPORT;
+}
+
 /** 这条切点在原图上有没有对应的可见边界 */
 function hasVisibleEdge(cut: number, depth: DepthMap, ev: CutEvidence): boolean {
   if (ev.mean <= 0) return false;
@@ -307,15 +375,28 @@ export function analyzeDepth(
    * 但它同样会在纯色背景上硬切，那正是要挡的情况。
    */
   const verify = (cuts: number[], proms: number[]): SliceResult => {
-    if (!evidence) return { cuts, histogram, prominences: proms };
+    if (!evidence) {
+      return { cuts, histogram, prominences: proms, rigid: cuts.map(() => false) };
+    }
     const keptCuts: number[] = [];
     const keptProms: number[] = [];
+    const rigid: boolean[] = [];
     cuts.forEach((c, i) => {
+      /*
+       * 两条判据，处理方式不同：
+       *
+       * 画面上根本看不见（纯色背景里的假边）→ 直接丢掉。留着就是一道裂纹：
+       * 两侧各上各的箔，接缝处箔面突变，而原图那里什么都没有。
+       *
+       * 看得见、但深度上没有遮挡台阶 → 保留，标成刚性。两侧多半是同一个物体，
+       * 分层给箔面用没问题，但不能让它们相对滑动。
+       */
       if (!hasVisibleEdge(c, depth, evidence)) return;
       keptCuts.push(c);
       keptProms.push(proms[i] ?? 0);
+      rigid.push(!hasDepthStep(c, depth));
     });
-    return { cuts: keptCuts, histogram, prominences: keptProms };
+    return { cuts: keptCuts, histogram, prominences: keptProms, rigid };
   };
 
   const raw = buildHistogram(depth.data, opts.bins);
@@ -324,7 +405,7 @@ export function analyzeDepth(
 
   // 深度几乎是平的，切不出层次，也不能硬切——见 MIN_DEPTH_SPREAD
   if (effectiveSpread(histogram) < MIN_DEPTH_SPREAD) {
-    return { cuts: [], histogram, prominences: [] };
+    return { cuts: [], histogram, prominences: [], rigid: [] };
   }
 
   const valleys = findValleys(histogram);
