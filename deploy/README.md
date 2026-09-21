@@ -9,7 +9,11 @@
                                       └── /api/layers 产出的层文件
 ```
 
-跑在 Oracle（`<源站 IP>`，Ampere ARM64，4 核 / 23G 内存）。
+跑在一台 Oracle Ampere ARM64（4 核 / 23G 内存）。
+
+源站 IP 不写在这里：站点是 Cloudflare 橙云代理的，源站地址本来就该藏着，
+写进公开仓库等于任何人都能绕过 Cloudflare 直连——而这台机器上还跑着别的生产服务。
+下面凡是要用到主机的地方，一律用 `~/.ssh/config` 里的别名 `oracle`。
 那台机器同时跑着 involutionhell.com 的一整套服务和 Minecraft，所以分层服务有资源上限，见下。
 
 **静态文件为什么也由 Node 发，而不是 Caddy 的 `file_server`**：那台机器的 Caddy 跑在 Docker 容器里，
@@ -171,8 +175,9 @@ sudo docker exec global-caddy-gateway caddy validate --config /etc/caddy/Caddyfi
 sudo docker exec global-caddy-gateway caddy reload  --config /etc/caddy/Caddyfile --adapter caddyfile
 ```
 
-**5. DNS**：在 Cloudflare 上把 `holocard` 指向 `<源站 IP>`，A 记录、开橙云（proxied），
+**5. DNS**：在 Cloudflare 上把 `holocard` 指向源站 IP，A 记录、**必须开橙云（proxied）**，
 和 `longsizhuo.com` 一样用 Flexible 模式（Caddy 只监听 80）。
+关掉橙云会把源站 IP 直接暴露在 DNS 里，那台机器上的其他服务也跟着裸奔。
 
 ## 用户侧的流量
 

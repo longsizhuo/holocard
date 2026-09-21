@@ -400,8 +400,24 @@ select {
 
 /* ---------- 页脚 ---------- */
 
-.page__foot { font-size: 11px; color: var(--muted); line-height: 1.5; }
+/*
+ * 必须抬到卡片之上。
+ *
+ * .hc__rotator 带 3D 变换，它的**投影四边形**比卡片本身大一圈（1440×900 下实测
+ * 658×876，而卡片只有 578×774），而按 CSS 绘制顺序，带变换的元素等同于
+ * z-index:0 的定位元素，排在普通块级内容之上——于是这一圈看不见的投影盖在页脚上，
+ * 把链接的点击全吃掉了。给页脚一个更高的层级，绘制和命中测试就都归它。
+ */
+.page__foot {
+  position: relative;
+  z-index: 2;
+  font-size: 11px;
+  color: var(--muted);
+  line-height: 1.5;
+}
 .page__foot a { color: var(--accent); }
+/* 链接本来只有 11px，加大点击热区，不改版面 */
+.page__foot a { padding: 4px 0; }
 
 /* ---------- 窄屏 ---------- */
 
