@@ -20,8 +20,12 @@ import {
 } from '../format/types';
 import { estimateDepth } from './depth';
 import type { LoadProgress } from './runtime';
-import { analyzeDepth, type SliceOptions } from './slice';
+import { analyzeDepth, buildCutEvidence, type SliceOptions } from './slice';
 import { extractLayers, type ExtractOptions } from './extract';
+import { browserImages } from './image-io';
+
+/** 算梯度证据时把原图缩到多大。只用于统计，不参与出图，512 足够且便宜 */
+const EVIDENCE_SIZE = 512;
 
 export type SegmentStage =
   | 'loading-model'
@@ -111,7 +115,28 @@ export async function segmentToLayerSet(
   const depth = await estimateDepth(image, onModelProgress, () => report('estimating-depth'));
 
   report('analyzing');
-  const { cuts, prominences } = analyzeDepth(depth, options.slice ?? {});
+
+  /*
+   * 切层之前先拿一份原图的梯度，用来核对每条切点在画面上是否真有边界。
+   *
+   * 为什么需要：纯色背景的插画上，深度模型会在那片没有纹理的区域凭空给出一道平滑的
+   * 深度渐变，直方图在这道渐变里找出的「谷底」纯属噪声。照着切会把背景沿一条等深度线
+   * 劈成两层，两层各上各的箔，接缝就是一道裂纹，而原图那里什么都没有。
+   *
+   * 解码一份小图就够——这里只要统计量，不需要全分辨率；相对模型推理这点开销可以忽略。
+   */
+  const backend = options.extract?.images ?? browserImages;
+  const evidence = await (async () => {
+    try {
+      const small = await backend.decodeScaled(image, EVIDENCE_SIZE);
+      return buildCutEvidence(small.data, small.width, small.height);
+    } catch {
+      // 解不出来就退回纯按深度分布切，不因为这一步失败而整个流程挂掉
+      return null;
+    }
+  })();
+
+  const { cuts, prominences } = analyzeDepth(depth, options.slice ?? {}, evidence);
 
   report('extracting');
   const { images, stats, width, height } = await extractLayers(
