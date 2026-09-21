@@ -47,7 +47,8 @@ ssh oracle 'cd /srv/holocard-web && ln -sfn releases/<版本> current.new && mv 
 | `/opt/holocard/node_modules/` | transformers.js + onnxruntime-node + sharp，约 483MB |
 | `/srv/holocard-models/` | Depth Anything V2-Small 权重（q8，27MB） |
 | `/srv/holocard-web/` | 前端 releases + current 软链 |
-| `/srv/holocard-layers/` | 用户产出的层文件。每张卡一个 `meta.json`，保留策略见下 |
+| `/srv/holocard-layers/` | 每张卡一个目录：原图（去掉 EXIF）+ 层 PNG + manifest + 预览图 |
+| `/srv/holocard-data/holocard.db` | 卡片数据库（SQLite），每张卡的状态、原图地址、结果地址、保留期、删除口令 |
 | `/opt/holocard/browsers/` | Playwright 的 arm64 Chromium，渲染 OG 预览图用，662MB |
 
 ## 资源限制
@@ -68,10 +69,46 @@ Environment=PLAYWRIGHT_BROWSERS_PATH=/opt/holocard/browsers
 上传上限 16MB，按魔数校验图片格式，拒绝解压炸弹。
 按 IP 限流：10 分钟 10 次，取 `cf-connecting-ip`。
 
+## 数据库
+
+每张卡一行，是这张卡所有状态的唯一来源。用的是 Node 内置的 `node:sqlite`，没有任何原生依赖。
+
+| 字段 | 说明 |
+|---|---|
+| `status` | `queued` → `running` → `done` / `error`；之后可能变成 `deleted`（上传者删的）或 `expired`（过期清理） |
+| `stage` | 处理中所在阶段，前端轮询显示用 |
+| `original_url` | 原图地址（经 CDN）。存之前摆正方向、**去掉全部 EXIF**——手机照片常带拍摄地 GPS，而这个地址是公开的 |
+| `result_url` | 结果页 `/c/<id>`，也就是分享出去的地址 |
+| `source_width/height` | 原图尺寸（摆正方向之后）。迁移来的老卡没有原图，这里是分层时的尺寸 |
+| `shared` `hits` `last_hit_at` | 保留期怎么算，见下一节 |
+| `delete_token` | 删除口令 |
+
+`deleted` 和 `expired` 只删文件、不删行，留着做统计。
+
+查库（服务器上没装 sqlite3 命令行，也不打算为此装系统包，用随服务一起发上去的脚本）：
+
+```bash
+ssh oracle 'cd /opt/holocard && node22/bin/node db.mjs'                 # 各状态计数 + 最近 20 张
+ssh oracle 'cd /opt/holocard && node22/bin/node db.mjs <id>'            # 某一张的全部字段
+ssh oracle "cd /opt/holocard && node22/bin/node db.mjs \"SELECT ...\""  # 任意 SQL
+```
+
+脚本以只读方式打开，服务在跑的时候查不会互相干扰（WAL 模式）。删除口令不会被打印。
+
+**原图为什么要存**：算法会改。修「分尸」那次，存量卡没有原图，只能从层合成回近似原图再重跑，
+既有损又麻烦。现在原图在，以后改进了可以直接重跑。失败的任务也留着原图（7 天后照常清掉），排查时最需要它。
+
+**发版重启不丢排队中的任务**：原图在提交时就落盘了，队列里只放 id。服务重启时，
+上次没处理完的（`queued` / `running`）会从磁盘上的原图接着跑。
+
+**从旧格式迁移**：数据库之前每张卡目录里是一份 `meta.json`。服务启动时会把没进库的旧卡导进来，
+删除口令原样保留（那些用户浏览器里存着它）。旧卡没有原图，`original_url` 为空。
+回滚到数据库之前的版本需要注意：之后新建的卡没有 `meta.json`，旧代码会给它们生成新的删除口令，
+这些卡的上传者就删不了了。
+
 ## 保留与删除
 
-每张卡的目录里有一份 `meta.json`（产出时间、是否分享过、被访问几次、最后一次访问、删除口令）。
-清理只看它，不看目录 mtime——mtime 会被任何一次写入刷新，拿它当依据等于永不过期。
+清理只看数据库，不看目录 mtime——mtime 会被任何一次写入刷新，拿它当依据等于永不过期。
 
 | | 窗口从哪算 | 多长 |
 |---|---|---|
@@ -115,8 +152,8 @@ id 通过 `.env.production` 里的 `VITE_UMAMI_ID` 在构建时注入。
 **1. 目录与运行时**
 
 ```bash
-sudo mkdir -p /opt/holocard /srv/holocard-web/releases /srv/holocard-models /srv/holocard-layers
-sudo chown -R ubuntu:ubuntu /opt/holocard /srv/holocard-web /srv/holocard-models /srv/holocard-layers
+sudo mkdir -p /opt/holocard /srv/holocard-web/releases /srv/holocard-models /srv/holocard-layers /srv/holocard-data
+sudo chown -R ubuntu:ubuntu /opt/holocard /srv/holocard-web /srv/holocard-models /srv/holocard-layers /srv/holocard-data
 
 cd /opt/holocard
 curl -sL https://nodejs.org/dist/v22.14.0/node-v22.14.0-linux-arm64.tar.xz | tar -xJ

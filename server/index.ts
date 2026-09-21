@@ -19,28 +19,22 @@
  */
 
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
-import { mkdir, rm, writeFile, readFile, stat } from 'node:fs/promises';
+import { mkdir, rm, writeFile, readFile, readdir, stat } from 'node:fs/promises';
 import { randomUUID, timingSafeEqual } from 'node:crypto';
-import { extname, join, resolve, sep } from 'node:path';
+import { dirname, extname, join, resolve, sep } from 'node:path';
 import { env } from '@huggingface/transformers';
-import { segmentToLayerSet, type SegmentStage } from '../src/segmenter';
-import { sharpImages } from './images';
+import { segmentToLayerSet } from '../src/segmenter';
+import { sharpImages, normalizeOriginal } from './images';
 import { renderPreview, PREVIEW_HEIGHT, PREVIEW_WIDTH } from './preview';
-import {
-  newMeta,
-  readMeta,
-  writeMeta,
-  ensureMeta,
-  recordHit,
-  flushHits,
-  sweepCards,
-  expiresAt,
-  type CardMeta,
-} from './cards';
+import { recordHit, flushHits, sweepCards, expiresAt, importLegacy } from './cards';
+import { CardDb, type CardRow } from './db';
 
 const PORT = Number(process.env.HOLOCARD_PORT ?? 8791);
 const OUT_DIR = process.env.HOLOCARD_OUT_DIR ?? '/srv/holocard-layers';
 const MODEL_DIR = process.env.HOLOCARD_MODEL_DIR ?? '/srv/holocard-models';
+/** 卡片数据库。默认放在产物目录的旁边，线上就是 /srv/holocard-data/holocard.db */
+const DB_PATH =
+  process.env.HOLOCARD_DB ?? join(dirname(resolve(OUT_DIR)), 'holocard-data', 'holocard.db');
 /** 上传体积上限。手机直出的照片通常 3~8MB */
 const MAX_UPLOAD = Number(process.env.HOLOCARD_MAX_UPLOAD ?? 16 * 1024 * 1024);
 /** 同时处理几张。这台机器 4 核且已有其他负载，多了只会互相拖慢并吃满内存 */
@@ -83,18 +77,11 @@ const WEB_DIR = process.env.HOLOCARD_WEB_DIR ?? '';
 env.localModelPath = MODEL_DIR;
 env.allowRemoteModels = false;
 
-type JobState = 'queued' | 'running' | 'done' | 'error';
-
-interface Job {
-  id: string;
-  state: JobState;
-  stage: SegmentStage | null;
-  createdAt: number;
-  /** 这张卡的元信息，跑完写进 meta.json。删除口令在这里生成 */
-  meta: CardMeta;
-  error?: string;
-  layerCount?: number;
-}
+/**
+ * 所有卡片状态的唯一来源。以前是内存里的任务表 + 每个目录一份 meta.json，
+ * 服务一重启进度就没了，也没法回答「最近传了什么、失败了几个」。
+ */
+const db = new CardDb(DB_PATH);
 
 /** 简单的滑动窗口限流。单进程、内存态，够用；真被大规模刷再上 Cloudflare 的规则 */
 const hits = new Map<string, number[]>();
@@ -139,9 +126,25 @@ function clientIp(req: IncomingMessage): string {
 /** 正在渲染预览图的卡片，避免同一张重复排队 */
 const previewJobs = new Set<string>();
 
-const jobs = new Map<string, Job>();
-const queue: Array<{ job: Job; bytes: Buffer }> = [];
+/**
+ * 待处理的卡片 id。原图已经在磁盘上，队列里不用再攥着字节——
+ * 以前最多 12 张 × 16MB 堆在内存里，而且服务一重启（每次发版都会）排队的任务就全丢了。
+ */
+const queue: string[] = [];
 let running = 0;
+
+/** 原图在磁盘上的位置。扩展名由存盘时的格式决定 */
+function originalFile(card: Pick<CardRow, 'id' | 'original_type'>): string | null {
+  const ext =
+    card.original_type === 'image/png'
+      ? 'png'
+      : card.original_type === 'image/webp'
+        ? 'webp'
+        : card.original_type === 'image/jpeg'
+          ? 'jpg'
+          : null;
+  return ext ? join(OUT_DIR, card.id, `original.${ext}`) : null;
+}
 
 function json(res: ServerResponse, status: number, body: unknown): void {
   const payload = JSON.stringify(body);
@@ -190,20 +193,22 @@ function sniffImage(bytes: Buffer): string | null {
   return null;
 }
 
-async function runJob(job: Job, bytes: Buffer): Promise<void> {
-  job.state = 'running';
-  const dir = join(OUT_DIR, job.id);
+async function runJob(id: string): Promise<void> {
+  const card = db.get(id);
+  const file = card ? originalFile(card) : null;
+  if (!card || !file) return;
+
+  db.update(id, { status: 'running', stage: null });
+  const dir = join(OUT_DIR, id);
 
   try {
+    const bytes = await readFile(file);
     // 拷一份到独立的 ArrayBuffer：Node 的 Buffer 可能落在共享池上，Blob 不接受那种视图
     const set = await segmentToLayerSet(new Blob([new Uint8Array(bytes)]), {
       extract: { images: sharpImages },
-      onProgress: (p) => {
-        job.stage = p.stage;
-      },
+      onProgress: (p) => db.update(id, { stage: p.stage }),
     });
 
-    await mkdir(dir, { recursive: true });
     await Promise.all(
       set.manifest.layers.map(async (layer, i) => {
         const blob = set.images[i];
@@ -212,25 +217,38 @@ async function runJob(job: Job, bytes: Buffer): Promise<void> {
       }),
     );
     await writeFile(join(dir, 'manifest.json'), JSON.stringify(set.manifest));
-    await writeMeta(dir, job.meta);
 
-    job.layerCount = set.manifest.layers.length;
-    job.state = 'done';
-    job.stage = 'done';
+    db.update(id, {
+      status: 'done',
+      stage: 'done',
+      error: null,
+      layer_count: set.manifest.layers.length,
+      result_url: `${PUBLIC_ORIGIN}/c/${id}`,
+    });
   } catch (error) {
-    job.state = 'error';
-    job.error = error instanceof Error ? error.message : String(error);
-    // 失败时别把半截产物留在磁盘上
-    await rm(dir, { recursive: true, force: true }).catch(() => undefined);
+    db.update(id, {
+      status: 'error',
+      error: error instanceof Error ? error.message : String(error),
+    });
+    /*
+     * 删掉半截产物，但**留着原图**：失败的那张图正是排查时最需要的东西。
+     * 它和其他卡一样受保留期约束，7 天后随目录一起清掉。
+     */
+    const entries = await readdir(dir).catch(() => [] as string[]);
+    await Promise.all(
+      entries
+        .filter((name) => !name.startsWith('original.'))
+        .map((name) => rm(join(dir, name), { force: true }).catch(() => undefined)),
+    );
   }
 }
 
 function pump(): void {
   while (running < CONCURRENCY && queue.length > 0) {
-    const next = queue.shift();
-    if (!next) break;
+    const id = queue.shift();
+    if (!id) break;
     running++;
-    void runJob(next.job, next.bytes).finally(() => {
+    void runJob(id).finally(() => {
       running--;
       pump();
     });
@@ -378,15 +396,11 @@ async function serveStatic(
   json(res, 404, { error: 'not found' });
 }
 
-/** 定期清理过期产物和任务记录 */
+/** 定期清理过期产物 */
 async function sweep(): Promise<void> {
-  const now = Date.now();
-  for (const [id, job] of jobs) {
-    if (now - job.createdAt > TTL_MS) jobs.delete(id);
-  }
-  // 先把内存里攒的访问量落盘，否则刚被看过的卡可能按旧的 lastHitAt 判成过期
-  await flushHits(OUT_DIR);
-  const removed = await sweepCards(OUT_DIR, TTL_MS, KEEP_DOUBLINGS_CAP);
+  // 先把内存里攒的访问量落库，否则刚被看过的卡可能按旧的 last_hit_at 判成过期
+  flushHits(db);
+  const removed = await sweepCards(db, OUT_DIR, TTL_MS, KEEP_DOUBLINGS_CAP);
   if (removed > 0) console.log(`[sweep] 清理了 ${removed} 张过期卡片`);
 }
 
@@ -425,15 +439,43 @@ const server = createServer((req, res) => {
         return;
       }
 
-      const job: Job = {
-        id: randomUUID(),
-        state: 'queued',
+      // 先把原图规范化（摆正方向、去掉 EXIF）存下来，再入队。
+      // 解不开的图在这里就挡掉，不用排到队里才失败
+      let original;
+      try {
+        original = await normalizeOriginal(bytes);
+      } catch (error) {
+        json(res, 415, { error: error instanceof Error ? error.message : '无法识别的图片' });
+        return;
+      }
+
+      const id = randomUUID();
+      const now = Date.now();
+      await mkdir(join(OUT_DIR, id), { recursive: true });
+      await writeFile(join(OUT_DIR, id, `original.${original.ext}`), original.data);
+
+      const card: CardRow = {
+        id,
+        status: 'queued',
         stage: null,
-        createdAt: Date.now(),
-        meta: newMeta(),
+        error: null,
+        created_at: now,
+        updated_at: now,
+        original_url: `${PUBLIC_ORIGIN}/api/layers/${id}/original.${original.ext}`,
+        original_type: original.type,
+        original_bytes: original.data.byteLength,
+        source_width: original.width,
+        source_height: original.height,
+        result_url: null,
+        layer_count: null,
+        shared: 0,
+        shared_at: null,
+        hits: 0,
+        last_hit_at: null,
+        delete_token: randomUUID(),
       };
-      jobs.set(job.id, job);
-      queue.push({ job, bytes });
+      db.insert(card);
+      queue.push(id);
       pump();
 
       /*
@@ -443,7 +485,7 @@ const server = createServer((req, res) => {
        * 而卡一旦分享出去，id 就是公开的——口令跟着泄漏，删除入口就等于没有。
        * 提交请求的响应只有上传者自己看得到。
        */
-      json(res, 202, { id: job.id, position: queue.length, deleteToken: job.meta.deleteToken });
+      json(res, 202, { id, position: queue.length, deleteToken: card.delete_token });
       return;
     }
 
@@ -452,22 +494,23 @@ const server = createServer((req, res) => {
     if (req.method === 'POST' && shareMatch) {
       const id = shareMatch[1] ?? '';
       const dir = join(OUT_DIR, id);
-      if (!(await stat(join(dir, 'manifest.json')).catch(() => null))) {
+      const card = db.get(id);
+      if (!card || card.status !== 'done') {
         json(res, 404, { error: '这张卡不存在或已过期' });
         return;
       }
-      const meta = (await ensureMeta(dir)) ?? newMeta();
-      if (!meta.shared) {
-        meta.shared = true;
-        meta.sharedAt = Date.now();
-      }
+      const now = Date.now();
       // 分享动作本身按一次访问算，保留窗口从此刻起算
-      meta.lastHitAt = Date.now();
-      await writeMeta(dir, meta);
+      db.update(id, {
+        shared: 1,
+        shared_at: card.shared_at ?? now,
+        last_hit_at: now,
+      });
+      const updated = db.get(id) ?? card;
 
       json(res, 200, {
         url: `${PUBLIC_ORIGIN}/c/${id}`,
-        expiresAt: expiresAt(meta, TTL_MS, KEEP_DOUBLINGS_CAP),
+        expiresAt: expiresAt(updated, TTL_MS, KEEP_DOUBLINGS_CAP),
       });
 
       // 预览图慢（要起浏览器渲染），不让用户等；失败也不影响分享本身
@@ -495,17 +538,23 @@ const server = createServer((req, res) => {
       const header = req.headers['x-holocard-token'];
       const token = typeof header === 'string' ? header : '';
 
-      const meta = await readMeta(dir);
-      if (!meta) {
+      const card = db.get(id);
+      if (!card || card.status === 'deleted' || card.status === 'expired') {
         json(res, 404, { error: '这张卡不存在或已过期' });
         return;
       }
-      if (!timingSafeEqualStr(token, meta.deleteToken)) {
+      if (!timingSafeEqualStr(token, card.delete_token)) {
         json(res, 403, { error: '口令不对，只有生成这张卡的人能删除它' });
         return;
       }
 
+      // 还在排队的也能删：从队列里拿掉，免得删完又被处理出来
+      const queued = queue.indexOf(id);
+      if (queued >= 0) queue.splice(queued, 1);
+
+      // 文件（含原图）全删；数据库那一行留着，只改状态，统计时还能数到
       await rm(dir, { recursive: true, force: true });
+      db.update(id, { status: 'deleted', stage: null });
       console.log(`[delete] ${id} 已被创建者删除`);
       json(res, 200, { deleted: true });
       return;
@@ -516,7 +565,7 @@ const server = createServer((req, res) => {
      * 而且服务自己能发才算自包含——别人拿去单跑一个 Node 进程就够了。
      * 路径两段都严格匹配，不给目录穿越留口子。
      */
-    const fileMatch = /^\/api\/layers\/([0-9a-f-]{36})\/(manifest\.json|layer-\d{1,2}\.png|preview\.jpg)$/.exec(
+    const fileMatch = /^\/api\/layers\/([0-9a-f-]{36})\/(manifest\.json|layer-\d{1,2}\.png|preview\.jpg|original\.(?:jpg|png|webp))$/.exec(
       url.pathname,
     );
     if ((req.method === 'GET' || req.method === 'HEAD') && fileMatch) {
@@ -528,7 +577,9 @@ const server = createServer((req, res) => {
             ? 'image/png'
             : name?.endsWith('.jpg')
               ? 'image/jpeg'
-              : 'application/json; charset=utf-8',
+              : name?.endsWith('.webp')
+                ? 'image/webp'
+                : 'application/json; charset=utf-8',
           'content-length': body.byteLength,
           /*
            * 层图和预览图按 id 是真的不变，可以 immutable。
@@ -560,17 +611,21 @@ const server = createServer((req, res) => {
     }
 
     if (req.method === 'GET' && jobMatch) {
-      const job = jobs.get(jobMatch[1] ?? '');
-      if (!job) {
+      const card = db.get(jobMatch[1] ?? '');
+      // 删掉的、过期的对前端来说都是「没有了」，不暴露内部状态
+      if (!card || card.status === 'deleted' || card.status === 'expired') {
         json(res, 404, { error: '任务不存在或已过期' });
         return;
       }
+      // 对外仍然叫 state，前端不用改
       json(res, 200, {
-        state: job.state,
-        stage: job.stage,
-        position: job.state === 'queued' ? queue.findIndex((q) => q.job.id === job.id) + 1 : 0,
-        ...(job.state === 'done' ? { layers: `/api/layers/${job.id}`, layerCount: job.layerCount } : {}),
-        ...(job.error ? { error: job.error } : {}),
+        state: card.status,
+        stage: card.stage,
+        position: card.status === 'queued' ? queue.indexOf(card.id) + 1 : 0,
+        ...(card.status === 'done'
+          ? { layers: `/api/layers/${card.id}`, layerCount: card.layer_count }
+          : {}),
+        ...(card.error ? { error: card.error } : {}),
       });
       return;
     }
@@ -580,14 +635,51 @@ const server = createServer((req, res) => {
 });
 
 await mkdir(OUT_DIR, { recursive: true });
-setInterval(() => void sweep(), 15 * 60 * 1000).unref();
-// 访问量在内存里累计，一分钟合并写一次盘。丢几条只影响保留时长，不影响正确性
-setInterval(() => void flushHits(OUT_DIR), 60 * 1000).unref();
 
-// 发版重启很频繁，退出前把攒着的访问量落盘，别每次都丢掉一分钟的计数
+// 数据库之前的存量卡（每个目录一份 meta.json）导进来，删除口令原样保留
+const imported = await importLegacy(db, OUT_DIR, PUBLIC_ORIGIN);
+if (imported > 0) console.log(`[db] 从旧格式导入了 ${imported} 张卡`);
+
+/*
+ * 上次退出时还没处理完的任务：原图在磁盘上的就接着排队，
+ * 发版重启不再把正在排队的人的图弄丢。原图都没有的只能标失败。
+ */
+{
+  let resumed = 0;
+  let abandoned = 0;
+  /*
+   * 两批必须先一次性取出来再处理。边查边改的话，running 的那张被改回 queued 之后，
+   * 下一轮查 queued 又会把它取出来一次——同一张卡入队两次、被处理两遍（实测踩到过）。
+   * running 排在前面：它是更早提交的，续跑时应该先轮到它。
+   */
+  const unfinished = [...db.byStatus('running'), ...db.byStatus('queued')];
+  for (const card of unfinished) {
+    const file = originalFile(card);
+    if (file && (await stat(file).catch(() => null))) {
+      db.update(card.id, { status: 'queued', stage: null });
+      queue.push(card.id);
+      resumed++;
+    } else {
+      db.update(card.id, { status: 'error', error: '服务重启，原图丢失' });
+      abandoned++;
+    }
+  }
+  if (resumed + abandoned > 0) {
+    console.log(`[db] 续跑 ${resumed} 个中断的任务，${abandoned} 个无法恢复`);
+  }
+  pump();
+}
+
+setInterval(() => void sweep(), 15 * 60 * 1000).unref();
+// 访问量在内存里累计，一分钟合并写一次库。丢几条只影响保留时长，不影响正确性
+setInterval(() => flushHits(db), 60 * 1000).unref();
+
+// 发版重启很频繁，退出前把攒着的访问量落库，别每次都丢掉一分钟的计数
 for (const signal of ['SIGTERM', 'SIGINT'] as const) {
   process.once(signal, () => {
-    void flushHits(OUT_DIR).finally(() => process.exit(0));
+    flushHits(db);
+    db.close();
+    process.exit(0);
   });
 }
 
@@ -595,6 +687,7 @@ server.listen(PORT, '127.0.0.1', () => {
   console.log(`holocard 分层服务已启动 127.0.0.1:${PORT}`);
   console.log(`  产物目录 ${OUT_DIR}`);
   console.log(`  模型目录 ${MODEL_DIR}`);
+  console.log(`  数据库   ${DB_PATH}`);
   console.log(`  静态目录 ${WEB_DIR || '(未配置，由前端开发服务器负责)'}`);
   const days = Math.round(TTL_MS / 86400000);
   console.log(`  并发 ${CONCURRENCY}，队列上限 ${MAX_QUEUE}`);
