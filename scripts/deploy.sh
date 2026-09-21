@@ -6,7 +6,7 @@
 #         静态前端 /srv/holocard
 #         /api/* 反代到分层服务 127.0.0.1:8791
 #
-# 本脚本只管「内容」：构建、打源码包、上传、重启服务。
+# 本脚本只管「内容」：构建、上传、重启服务。
 # 服务器侧的一次性配置（目录、Node、依赖、权重、systemd、Caddy、DNS）见 deploy/README.md。
 #
 # 用法：
@@ -21,8 +21,8 @@ APP_DIR="/opt/holocard"
 
 cd "$(dirname "$0")/.."
 
-# 源码包是从 HEAD 打出来的。工作区不干净的话，线上跑的代码和提供下载的源码就对不上——
-# 对 GPL 来说这不是小事，所以直接拒绝发版。
+# 页脚的源码链接指向 GitHub 上的当次 commit。工作区不干净的话，线上跑的代码和那个
+# commit 就对不上——对 GPL 来说这不是小事，所以直接拒绝发版。
 if [ -n "$(git status --porcelain)" ]; then
   echo "工作区有未提交的改动，先提交再发版：" >&2
   git status --short >&2
@@ -30,6 +30,13 @@ if [ -n "$(git status --porcelain)" ]; then
 fi
 
 COMMIT="$(git rev-parse --short HEAD)"
+
+# 页脚把用户指向 GitHub 上这个 commit。没推上去的话那个链接是死的——
+# GPL 要求提供的是**线上正在跑的**那份源码，不是随便一份。
+if ! git branch -r --contains HEAD 2>/dev/null | grep -q .; then
+  echo "HEAD ($COMMIT) 还没推到远端，页脚的源码链接会指向一个不存在的版本。先 git push。" >&2
+  exit 1
+fi
 
 # .env.production 不进仓库（见 .gitignore），所以每台发版机都要自己有一份。
 # 少了它站点照常工作，只是没有埋点——静默发生的话很难发现，这里说明白。
@@ -40,13 +47,9 @@ else
 fi
 
 echo "==> 构建 ${COMMIT}"
-pnpm build
+# 注入 commit：页脚的源码链接要指到线上正在跑的这一版
+VITE_COMMIT="${COMMIT}" pnpm build
 pnpm exec vite build --config vite.server.config.ts
-
-echo "==> 打源码包"
-mkdir -p dist/source
-git archive --format=tar.gz --prefix="holocard-${COMMIT}/" -o dist/source/holocard-src.tar.gz HEAD
-echo "${COMMIT}" > dist/source/COMMIT
 
 RELEASE="$(date +%Y%m%d-%H%M%S)-${COMMIT}"
 

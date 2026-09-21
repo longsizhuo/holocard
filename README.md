@@ -1,5 +1,7 @@
 # HoloCard
 
+https://github.com/longsizhuo/holocard ｜ 线上 https://holocard.longsizhuo.com
+
 上传一张照片，自动切成前中后景，每层各上各的箔面，渲染成可交互的闪卡。
 
 箔面效果和交互手感移植自 [pokemon-cards-css](https://github.com/simeydotme/pokemon-cards-css)
