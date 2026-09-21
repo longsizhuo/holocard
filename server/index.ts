@@ -530,8 +530,16 @@ const server = createServer((req, res) => {
               ? 'image/jpeg'
               : 'application/json; charset=utf-8',
           'content-length': body.byteLength,
-          // id 是一次性的 UUID，内容永不改变
-          'cache-control': 'public, max-age=3600, immutable',
+          /*
+           * 层图和预览图按 id 是真的不变，可以 immutable。
+           * manifest.json 不是：里面的视差、箔面这些参数是会被改的
+           * （修过一次分层判据之后，存量卡片的视差就地打过补丁）。
+           * 标成 immutable 的话边缘会攥着旧参数不放，改了也不生效。
+           */
+          'cache-control':
+            name === 'manifest.json'
+              ? 'public, max-age=60'
+              : 'public, max-age=3600, immutable',
         });
         if (req.method === 'HEAD') res.end();
         else res.end(body);
