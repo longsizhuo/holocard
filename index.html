@@ -41,16 +41,13 @@
               <input type="text" id="share-url" readonly />
               <button type="button" id="share-copy">复制</button>
             </div>
-            <small class="field__hint" id="share-hint">
-              不分享的话一周后自动清理；分享出去之后每被打开一次就续期，越常被看的留得越久
-            </small>
+            <!-- 平时空着，只在出错时填内容。保留策略这类事用户不关心，不占版面 -->
+            <small class="field__hint" id="share-hint"></small>
           </div>
 
           <div class="danger" id="owner" hidden>
             <button type="button" class="danger__btn" id="delete-btn">删除这张卡</button>
-            <small class="field__hint" id="delete-hint">
-              删除口令只存在这台设备的浏览器里，清了浏览器数据就没法再删了
-            </small>
+            <small class="field__hint" id="delete-hint"></small>
           </div>
 
           <div class="panel__scroll">

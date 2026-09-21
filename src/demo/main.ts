@@ -284,8 +284,8 @@ async function doShare(): Promise<void> {
     shareResult.hidden = false;
     shareBtn.textContent = '已生成';
     track('share');
-    shareHint.textContent =
-      '链接在微信、Twitter 里会显示卡片预览图。每被打开一次保留期就续一次，没人看了才开始倒计时';
+    // 成功不用多说，链接出现在输入框里本身就是反馈
+    shareHint.textContent = '';
     shareUrlInput.select();
   } catch (error) {
     shareBtn.disabled = false;
