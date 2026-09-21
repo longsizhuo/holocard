@@ -356,26 +356,8 @@ function buildRenderBackdrop(): void {
   document.querySelector('.page__body')?.append(copy);
 }
 
-/**
- * 把页脚的源码链接指到本次发版对应的 commit。
- *
- * GPL 要求提供的是「线上正在跑的那一份」源码，指向仓库首页不够精确——
- * 主干随时在动，用户点进去看到的未必是他正在用的版本。
- * 没注入 commit（本地开发）时就保持指向仓库首页。
- */
-function pinSourceLink(): void {
-  const commit = import.meta.env.VITE_COMMIT;
-  if (!commit) return;
-  const link = document.querySelector<HTMLAnchorElement>('#source-link');
-  if (!link) return;
-  link.href = `https://github.com/longsizhuo/holocard/tree/${commit}`;
-  link.title = `本站正在运行的版本 ${commit}`;
-}
-
 /** 按路由决定首屏加载什么 */
 async function boot(): Promise<void> {
-  pinSourceLink();
-
   if (route.mode === 'render') {
     // 给服务端截 OG 图用：只留卡片，固定在炫光峰值姿态，不带任何 UI
     document.body.classList.add('is-render');

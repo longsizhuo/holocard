@@ -21,8 +21,8 @@ APP_DIR="/opt/holocard"
 
 cd "$(dirname "$0")/.."
 
-# 页脚的源码链接指向 GitHub 上的当次 commit。工作区不干净的话，线上跑的代码和那个
-# commit 就对不上——对 GPL 来说这不是小事，所以直接拒绝发版。
+# 工作区不干净的话，线上跑的代码在仓库里根本不存在（没提交的改动推不上去），
+# 所以直接拒绝发版。
 if [ -n "$(git status --porcelain)" ]; then
   echo "工作区有未提交的改动，先提交再发版：" >&2
   git status --short >&2
@@ -31,10 +31,10 @@ fi
 
 COMMIT="$(git rev-parse --short HEAD)"
 
-# 页脚把用户指向 GitHub 上这个 commit。没推上去的话那个链接是死的——
-# GPL 要求提供的是**线上正在跑的**那份源码，不是随便一份。
+# 页面上说「源码在 GitHub」，那 GitHub 上就得真有线上跑的这一版。
+# 没推就发的话，公开仓库里根本找不到正在运行的代码，这句话就不成立了。
 if ! git branch -r --contains HEAD 2>/dev/null | grep -q .; then
-  echo "HEAD ($COMMIT) 还没推到远端，页脚的源码链接会指向一个不存在的版本。先 git push。" >&2
+  echo "HEAD ($COMMIT) 还没推到远端，线上会跑一份仓库里找不到的代码。先 git push。" >&2
   exit 1
 fi
 
@@ -47,8 +47,7 @@ else
 fi
 
 echo "==> 构建 ${COMMIT}"
-# 注入 commit：页脚的源码链接要指到线上正在跑的这一版
-VITE_COMMIT="${COMMIT}" pnpm build
+pnpm build
 pnpm exec vite build --config vite.server.config.ts
 
 RELEASE="$(date +%Y%m%d-%H%M%S)-${COMMIT}"

@@ -22,12 +22,6 @@ interface ImportMetaEnv {
    * 自托管这个项目的人不会被动连到我们的统计服务。
    */
   readonly VITE_UMAMI_ID?: string;
-
-  /**
-   * 本次构建对应的 git commit，发版脚本注入。
-   * 页脚的源码链接会指到这个 commit——GPL 要求提供的是线上正在跑的那份源码。
-   */
-  readonly VITE_COMMIT?: string;
 }
 
 interface ImportMeta {
