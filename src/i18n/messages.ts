@@ -43,7 +43,6 @@ export const zh = {
 
   // ---------- 状态与进度 ----------
   'status.loadingSample': '正在加载素材',
-  'status.sampleLoaded': '已加载 {n} 层手工素材 samples/forest',
   'status.sampleFailed': '素材加载失败：{message}',
   'status.processing': '正在处理 {name}',
   'status.done': '已切成 {n} 层 · {generator}',
@@ -162,7 +161,6 @@ export const en: Messages = {
   'layer.middleN': 'Middle {n}',
 
   'status.loadingSample': 'Loading the sample',
-  'status.sampleLoaded': 'Loaded the hand-made sample samples/forest ({n} layers)',
   'status.sampleFailed': 'Could not load the sample: {message}',
   'status.processing': 'Processing {name}',
   'status.done': 'Split into {n} layers · {generator}',
@@ -278,7 +276,6 @@ export const ja: Messages = {
   'layer.middleN': '中間 {n}',
 
   'status.loadingSample': 'サンプルを読み込み中',
-  'status.sampleLoaded': '手作りサンプル samples/forest を読み込みました（{n} レイヤー）',
   'status.sampleFailed': 'サンプルを読み込めませんでした：{message}',
   'status.processing': '{name} を処理中',
   'status.done': '{n} レイヤーに分けました · {generator}',

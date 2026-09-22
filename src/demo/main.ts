@@ -776,9 +776,10 @@ async function boot(): Promise<void> {
   }
 
   try {
-    const sample = await loadLayerSet(`${import.meta.env.BASE_URL}samples/forest`);
+    // 首页默认摆的就是分享图（og.jpg）上那张卡，进来第一眼和分享出去的样子一致
+    const sample = await loadLayerSet(`${import.meta.env.BASE_URL}samples/demo`);
     show(sample);
-    setText(status, 'status.sampleLoaded', { n: sample.manifest.layers.length });
+    setText(status, 'status.layers', { n: sample.manifest.layers.length });
   } catch (error) {
     setText(status, 'status.sampleFailed', { message: describeError(error) });
   }

@@ -1,0 +1,55 @@
+{
+  "version": 1,
+  "source": {
+    "width": 1400,
+    "height": 788
+  },
+  "generator": "holocard-web/0.1.0 depth-anything-v2-small layers=2 cuts=[0.282@0.144]",
+  "layers": [
+    {
+      "file": "layer-0.webp",
+      "depth": 0.15290915966033936,
+      "parallax": 0,
+      "bbox": [
+        0,
+        0,
+        1400,
+        788
+      ],
+      "inpainted": true,
+      "foil": {
+        "type": "sunpillar",
+        "intensity": 1
+      }
+    },
+    {
+      "file": "layer-1.webp",
+      "depth": 0.4983195960521698,
+      "parallax": 1,
+      "bbox": [
+        483,
+        55,
+        728,
+        733
+      ],
+      "inpainted": false,
+      "foil": {
+        "type": "none",
+        "intensity": 1
+      }
+    }
+  ],
+  "effects": {
+    "halo": {
+      "intensity": 0.35,
+      "light": {
+        "peakAt": [
+          0.7,
+          -0.7
+        ],
+        "sharpness": 120
+      }
+    },
+    "glare": true
+  }
+}

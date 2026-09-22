@@ -177,7 +177,7 @@ async function fetchBlob(url: string, signal?: AbortSignal): Promise<Blob> {
 
 /**
  * 从一个 .layers 目录的 URL 加载完整层集合。
- * baseUrl 指向目录本身，例如 "/samples/forest"。
+ * baseUrl 指向目录本身，例如 "/samples/demo"。
  */
 export async function loadLayerSet(baseUrl: string, signal?: AbortSignal): Promise<LayerSet> {
   const base = baseUrl.replace(/\/+$/, '');

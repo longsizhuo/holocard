@@ -194,7 +194,7 @@ pnpm dev           # frontend, fixed at port 5273
 pnpm dev:server    # in another terminal: the layering service, listens on 8791
 ```
 
-The demo page loads a hand-made SVG sample by default (`public/samples/forest`); dropping a photo runs the whole pipeline.
+The demo page loads a pre-layered sample card by default (`public/samples/demo`, the same card as in the social preview); dropping a photo runs the whole pipeline.
 `pnpm dev` proxies `/api` to 8791; without the server it still works and falls back to the in-browser pipeline.
 
 The server needs the weights locally on first run:
