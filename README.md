@@ -2,7 +2,7 @@
 
 中文 | [English](README.en.md)
 
-[![HoloCard](public/og.jpg)](https://holocard.longsizhuo.com)
+[![HoloCard](public/og.jpg)]([https://holocard.longsizhuo.com](https://raw.githubusercontent.com/longsizhuo/holocard/main/public/og-en.jpg))
 
 https://github.com/longsizhuo/holocard ｜ 线上 https://holocard.longsizhuo.com
 
