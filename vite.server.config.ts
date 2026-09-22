@@ -8,6 +8,13 @@ import { defineConfig } from 'vite';
  * 原生模块和 node 内置模块保持 external，不进包。
  */
 export default defineConfig({
+  ssr: {
+    /*
+     * 纯 JS 的小依赖直接打进包里。服务器上的 node_modules 是单独维护的（只装了原生模块和
+     * playwright-core），发版脚本不在那边装包——打进来就不用每加一个依赖都去服务器上手工装。
+     */
+    noExternal: ['upng-js', 'pako'],
+  },
   build: {
     ssr: 'server/index.ts',
     outDir: 'dist-server',

@@ -28,6 +28,14 @@ import { sharpImages, normalizeOriginal } from './images';
 import { renderPreview, PREVIEW_HEIGHT, PREVIEW_WIDTH } from './preview';
 import { recordHit, flushHits, sweepCards, expiresAt, importLegacy } from './cards';
 import { CardDb, type CardRow } from './db';
+import {
+  EXPORT_FILE,
+  EXPORT_FORMATS,
+  exportFiles,
+  exportReady,
+  runExport,
+  type ExportFormat,
+} from './export';
 
 const PORT = Number(process.env.HOLOCARD_PORT ?? 8791);
 const OUT_DIR = process.env.HOLOCARD_OUT_DIR ?? '/srv/holocard-layers';
@@ -83,22 +91,35 @@ env.allowRemoteModels = false;
  */
 const db = new CardDb(DB_PATH);
 
-/** 简单的滑动窗口限流。单进程、内存态，够用；真被大规模刷再上 Cloudflare 的规则 */
-const hits = new Map<string, number[]>();
+/**
+ * 导出动图：同时排队的上限，和每个 IP 在限流窗口内最多导出几次。
+ * 一次导出要十几到几十秒的 CPU（无头浏览器软件渲染 + 视频编码），比分层还重。
+ */
+const MAX_EXPORT_QUEUE = Number(process.env.HOLOCARD_MAX_EXPORT_QUEUE ?? 6);
+const EXPORT_RATE_LIMIT = Number(process.env.HOLOCARD_EXPORT_RATE_LIMIT ?? 8);
 
-function rateLimited(ip: string): boolean {
-  const now = Date.now();
-  const recent = (hits.get(ip) ?? []).filter((t) => now - t < RATE_WINDOW_MS);
-  recent.push(now);
-  hits.set(ip, recent);
-  // 顺手清掉早就过期的条目，别让这个 Map 无限长
-  if (hits.size > 5000) {
-    for (const [key, times] of hits) {
-      if (times.every((t) => now - t >= RATE_WINDOW_MS)) hits.delete(key);
+/** 简单的滑动窗口限流。单进程、内存态，够用；真被大规模刷再上 Cloudflare 的规则 */
+function makeLimiter(limit: number, windowMs: number): (ip: string) => boolean {
+  const hits = new Map<string, number[]>();
+  return (ip) => {
+    const now = Date.now();
+    const recent = (hits.get(ip) ?? []).filter((t) => now - t < windowMs);
+    recent.push(now);
+    hits.set(ip, recent);
+    // 顺手清掉早就过期的条目，别让这个 Map 无限长
+    if (hits.size > 5000) {
+      for (const [key, times] of hits) {
+        if (times.every((t) => now - t >= windowMs)) hits.delete(key);
+      }
     }
-  }
-  return recent.length > RATE_LIMIT;
+    return recent.length > limit;
+  };
 }
+
+/** 上传分层的限流 */
+const rateLimited = makeLimiter(RATE_LIMIT, RATE_WINDOW_MS);
+/** 导出动图的限流，和上传分开计数 */
+const exportLimited = makeLimiter(EXPORT_RATE_LIMIT, RATE_WINDOW_MS);
 
 /**
  * 定长字符串比较。长度不同时先比一个等长的占位串，让耗时与输入无关，
@@ -304,6 +325,74 @@ function pump(): void {
   }
 }
 
+/*
+ * 导出动图的队列，和分层队列分开：一次只做一张。
+ * 状态不进数据库——导出好的文件就在卡片目录里，有没有、新不新看文件本身（exportReady），
+ * 服务重启丢的只是排队中的请求，前端轮询拿到 none 会提示重试。
+ */
+interface ExportJob {
+  id: string;
+  format: ExportFormat;
+}
+const exportQueue: ExportJob[] = [];
+let exporting: ExportJob | null = null;
+/** 失败原因留一会儿，给轮询的人看；过了这段时间再点就是重新生成 */
+const exportErrors = new Map<string, { error: string; at: number }>();
+const EXPORT_ERROR_TTL_MS = 10 * 60 * 1000;
+
+const exportKey = (job: ExportJob): string => `${job.id}:${job.format}`;
+
+function pumpExports(): void {
+  if (exporting) return;
+  const job = exportQueue.shift();
+  if (!job) return;
+  exporting = job;
+  const started = Date.now();
+  void runExport(`http://127.0.0.1:${PORT}`, job.id, join(OUT_DIR, job.id), job.format)
+    .then(() => {
+      exportErrors.delete(exportKey(job));
+      console.log(`[export] ${job.id} ${job.format} 用时 ${((Date.now() - started) / 1000).toFixed(1)}s`);
+    })
+    .catch((error: unknown) => {
+      const message = error instanceof Error ? error.message : String(error);
+      exportErrors.set(exportKey(job), { error: message, at: Date.now() });
+      console.error(`[export] ${job.id} ${job.format} 失败:`, message);
+    })
+    .finally(() => {
+      exporting = null;
+      pumpExports();
+    });
+}
+
+type ExportStatus =
+  | { state: 'none' }
+  | { state: 'queued'; position: number }
+  | { state: 'running' }
+  | { state: 'error'; error: string }
+  | { state: 'done'; files: Array<{ url: string; name: string; type: string }> };
+
+/** 某张卡某种格式的导出现在到哪一步了 */
+async function exportStatus(job: ExportJob): Promise<ExportStatus> {
+  const version = await exportReady(join(OUT_DIR, job.id), job.format, job.id);
+  if (version !== null) {
+    return {
+      state: 'done',
+      // 地址带文件时间当版本号：卡片参数改过、重新生成之后，CDN 上的旧文件不会被拿到
+      files: exportFiles(job.format, job.id).map((f) => ({
+        url: `/api/layers/${job.id}/${f.file}?v=${version}`,
+        name: f.download,
+        type: f.type,
+      })),
+    };
+  }
+  if (exporting && exportKey(exporting) === exportKey(job)) return { state: 'running' };
+  const index = exportQueue.findIndex((j) => exportKey(j) === exportKey(job));
+  if (index >= 0) return { state: 'queued', position: index + 1 };
+  const failed = exportErrors.get(exportKey(job));
+  if (failed && Date.now() - failed.at < EXPORT_ERROR_TTL_MS) return { state: 'error', error: failed.error };
+  return { state: 'none' };
+}
+
 const MIME: Record<string, string> = {
   '.html': 'text/html; charset=utf-8',
   '.js': 'text/javascript; charset=utf-8',
@@ -337,6 +426,9 @@ const SPA_ROUTES = [
   /^\/c\/[0-9a-f-]{36}\/?$/,
   /^\/render\/[0-9a-f-]{36}\/?$/,
 ];
+
+/** 卡片目录里对外发的文件：清单、层图、分享图、原图。导出的动图另见 export.ts 的 EXPORT_FILE */
+const LAYER_FILE = /^(?:manifest\.json|layer-\d{1,2}\.png|preview\.jpg|original\.(?:jpg|png|webp))$/;
 
 /** HTML 属性转义。卡片 id 是我们自己生成的 UUID，但注入前仍然一律转义 */
 function escapeAttr(value: string): string {
@@ -578,7 +670,14 @@ const server = createServer((req, res) => {
     const url = new URL(req.url ?? '/', 'http://localhost');
 
     if ((req.method === 'GET' || req.method === 'HEAD') && url.pathname === '/api/health') {
-      json(res, 200, { ok: true, running, queued: queue.length, concurrency: CONCURRENCY });
+      json(res, 200, {
+        ok: true,
+        running,
+        queued: queue.length,
+        concurrency: CONCURRENCY,
+        exporting: exporting ? 1 : 0,
+        exportQueued: exportQueue.length,
+      });
       return;
     }
 
@@ -704,6 +803,41 @@ const server = createServer((req, res) => {
     }
 
     /*
+     * 导出动图（格式由前端按设备决定，见 src/demo/export.ts）。
+     *   POST  没有现成的就排队生成，返回当前状态
+     *   GET   只查状态，给前端轮询
+     * 生成好的文件就放在卡片目录里，和卡片同生共死：过期、被删时一起清掉。
+     */
+    const exportMatch = /^\/api\/cards\/([0-9a-f-]{36})\/export\/(live|motion|apng)$/.exec(url.pathname);
+    if ((req.method === 'POST' || req.method === 'GET') && exportMatch) {
+      const job: ExportJob = { id: exportMatch[1] ?? '', format: (exportMatch[2] ?? 'apng') as ExportFormat };
+      const card = db.get(job.id);
+      if (!card || card.status !== 'done') {
+        json(res, 404, { error: '这张卡不存在或已过期' });
+        return;
+      }
+      const current = await exportStatus(job);
+      if (req.method === 'GET' || (current.state !== 'none' && current.state !== 'error')) {
+        json(res, 200, current);
+        return;
+      }
+
+      if (exportLimited(clientIp(req))) {
+        json(res, 429, { error: '导出太频繁了，过几分钟再试' });
+        return;
+      }
+      if (exportQueue.length >= MAX_EXPORT_QUEUE) {
+        json(res, 503, { error: '现在导出的人太多，稍后再试' });
+        return;
+      }
+      exportErrors.delete(exportKey(job));
+      exportQueue.push(job);
+      pumpExports();
+      json(res, 202, await exportStatus(job));
+      return;
+    }
+
+    /*
      * 删除自己的卡。
      *
      * 口令是产出时随 202 响应给上传者的，只有他们手上有（前端存在 localStorage）。
@@ -727,9 +861,12 @@ const server = createServer((req, res) => {
         return;
       }
 
-      // 还在排队的也能删：从队列里拿掉，免得删完又被处理出来
+      // 还在排队的也能删：从队列里拿掉，免得删完又被处理出来。排着的导出同理
       const queued = queue.indexOf(id);
       if (queued >= 0) queue.splice(queued, 1);
+      for (let i = exportQueue.length - 1; i >= 0; i--) {
+        if (exportQueue[i]?.id === id) exportQueue.splice(i, 1);
+      }
 
       // 文件（含原图）全删；数据库那一行留着，只改状态，统计时还能数到
       await rm(dir, { recursive: true, force: true });
@@ -744,11 +881,18 @@ const server = createServer((req, res) => {
      * 而且服务自己能发才算自包含——别人拿去单跑一个 Node 进程就够了。
      * 路径两段都严格匹配，不给目录穿越留口子。
      */
-    const fileMatch = /^\/api\/layers\/([0-9a-f-]{36})\/(manifest\.json|layer-\d{1,2}\.png|preview\.jpg|original\.(?:jpg|png|webp))$/.exec(
-      url.pathname,
-    );
-    if ((req.method === 'GET' || req.method === 'HEAD') && fileMatch) {
+    const fileMatch = /^\/api\/layers\/([0-9a-f-]{36})\/([\w.-]+)$/.exec(url.pathname);
+    const fileName = fileMatch?.[2] ?? '';
+    if (
+      (req.method === 'GET' || req.method === 'HEAD') &&
+      fileMatch &&
+      (LAYER_FILE.test(fileName) || EXPORT_FILE.test(fileName))
+    ) {
       const [, id, name] = fileMatch;
+      // 导出的动图按下载处理，文件名用给用户看的那个（HoloCard_xxxx.jpg 之类）
+      const exported = EXPORT_FORMATS
+        .flatMap((format) => exportFiles(format, id ?? ''))
+        .find((f) => f.file === name);
       try {
         const body = await readFile(join(OUT_DIR, id ?? '', name ?? ''));
         res.writeHead(200, {
@@ -758,7 +902,10 @@ const server = createServer((req, res) => {
               ? 'image/jpeg'
               : name?.endsWith('.webp')
                 ? 'image/webp'
-                : 'application/json; charset=utf-8',
+                : name?.endsWith('.mov')
+                  ? 'video/quicktime'
+                  : 'application/json; charset=utf-8',
+          ...(exported ? { 'content-disposition': `attachment; filename="${exported.download}"` } : {}),
           'content-length': body.byteLength,
           /*
            * 层图和预览图按 id 是真的不变，可以 immutable。

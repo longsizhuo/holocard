@@ -11,6 +11,8 @@
  *   pnpm og --size 1280x640        出别的尺寸。GitHub 仓库的社交预览图要 1280×640
  *   pnpm og --pose 78,22           换个姿态（指针在卡面上的百分比位置，默认和线上一致）
  *   pnpm og --out 路径 --png --no-open
+ *   pnpm og --export live          出导出动图：live（实况照片）、motion（动态照片）、apng（电脑上的动图），
+ *                                  写到 out/export/，文件名和用户下载到的一样
  *
  * 和线上是同一套渲染：前端用 vite 现构建，截图直接调服务端的 renderPreview，
  * 所以这里看到什么，分享出去就是什么。
@@ -31,6 +33,7 @@ import { env } from '@huggingface/transformers';
 import { segmentToLayerSet } from '../src/segmenter';
 import { sharpImages } from '../server/images';
 import { renderPreview, closeBrowser } from '../server/preview';
+import { EXPORT_FORMATS, exportFiles, runExport, type ExportFormat } from '../server/export';
 
 /**
  * 仓库根目录：从脚本所在位置往上找 package.json。
@@ -61,6 +64,7 @@ interface Args {
   open: boolean;
   watch: boolean;
   pose: { x: number; y: number } | null;
+  export: ExportFormat | null;
 }
 
 function parseArgs(argv: string[]): Args {
@@ -73,6 +77,7 @@ function parseArgs(argv: string[]): Args {
     open: true,
     watch: false,
     pose: null,
+    export: null,
   };
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i] ?? '';
@@ -85,6 +90,13 @@ function parseArgs(argv: string[]): Args {
       const m = /^(\d+(?:\.\d+)?),(\d+(?:\.\d+)?)$/.exec(next());
       if (!m) throw new Error('--pose 的格式是 x,y，卡面上的百分比位置，比如 78,22');
       args.pose = { x: Number(m[1]), y: Number(m[2]) };
+    }
+    else if (a === '--export') {
+      const format = next();
+      if (!EXPORT_FORMATS.includes(format as ExportFormat)) {
+        throw new Error(`--export 只认 ${EXPORT_FORMATS.join(' / ')}`);
+      }
+      args.export = format as ExportFormat;
     }
     else if (a === '--size') {
       const m = /^(\d+)x(\d+)$/.exec(next());
@@ -224,6 +236,25 @@ async function render(base: string, id: string, args: Args): Promise<void> {
   );
 }
 
+/** 出一种导出格式，拷到 out/export/ 下，用和用户下载时一样的文件名 */
+async function renderExport(base: string, id: string, format: ExportFormat): Promise<string> {
+  const started = Date.now();
+  const dir = join(CACHE, id);
+  await runExport(base, id, dir, format);
+  const outDir = join(ROOT, 'out', 'export');
+  await mkdir(outDir, { recursive: true });
+  let first = '';
+  for (const f of exportFiles(format, id)) {
+    const target = join(outDir, f.download);
+    const data = await readFile(join(dir, f.file));
+    await writeFile(target, data);
+    first ||= target;
+    console.log(`导出：${target}（${(data.length / 1024).toFixed(0)}KB）`);
+  }
+  console.log(`导出：${format} 用时 ${((Date.now() - started) / 1000).toFixed(1)}s`);
+  return first;
+}
+
 function openFile(file: string): void {
   const cmd = process.platform === 'win32' ? 'cmd' : process.platform === 'darwin' ? 'open' : 'xdg-open';
   const argv = process.platform === 'win32' ? ['/c', 'start', '""', file] : [file];
@@ -274,6 +305,14 @@ async function main(): Promise<void> {
   const id = await ensureLayers(args.image);
   await buildFrontend();
   const { server, base } = await startServer();
+
+  if (args.export) {
+    const file = await renderExport(base, id, args.export);
+    if (args.open) openFile(file);
+    server.close();
+    await closeBrowser();
+    return;
+  }
 
   await render(base, id, args);
   if (args.open) openFile(args.out);

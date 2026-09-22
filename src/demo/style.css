@@ -436,6 +436,23 @@ select {
 .share__result input { flex: 1; min-width: 0; }
 .share__result button { cursor: pointer; }
 
+/* 导出动图。次一级的动作：白底描边，不和上面珠光的分享按钮抢 */
+.export { display: grid; gap: 6px; }
+.export__btn {
+  width: 100%;
+  padding: 8px 12px;
+  border-radius: 10px;
+  border: 1px solid var(--line);
+  background: var(--surface-solid);
+  color: var(--fg);
+  font: inherit;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+}
+.export__btn:hover { border-color: rgba(123, 95, 208, 0.45); }
+.export__btn:disabled { opacity: 0.55; cursor: default; }
+
 /* 删除入口。故意做得比分享按钮低调，是个不可撤销的操作但不该抢视线 */
 .danger { display: grid; gap: 6px; }
 .danger__btn {
@@ -717,4 +734,43 @@ body.is-render .hc {
   font-size: 18px;
   letter-spacing: 0.02em;
   color: rgba(255, 255, 255, 0.92);
+}
+
+/* ---------- 导出动图：手机竖屏（实况照片 / 动态照片） ---------- */
+
+/*
+ * 画布是 360×640 的竖屏（服务端按 3 倍像素密度截成 1080×1920），卡片居中。
+ * 宽度占 78%，横卡也按宽度走；高度封顶 60%，给锁屏的时钟和底部按钮留出位置。
+ */
+/*
+ * 不加分享图那道大投影：深色底上几乎看不出来，服务器软件渲染每帧却要多花两成时间。
+ * 卡片自带的阴影（.hc__rotator 的 box-shadow）还在，立体感够用。
+ */
+body.is-export-phone .hc {
+  width: min(78vw, 60vh * var(--hc-ratio, 0.718));
+  filter: none;
+}
+/* 分享图里卡片居左，背后那团光也偏左；竖屏里卡片居中，光挪到正中 */
+body.is-export-phone .render-bg::after {
+  background:
+    radial-gradient(62% 38% at 50% 50%, rgba(150, 130, 255, 0.2) 0%, transparent 70%),
+    radial-gradient(120% 85% at 50% 50%, transparent 30%, rgba(4, 5, 10, 0.72) 100%);
+}
+
+/* 竖屏导出分两遍截（见 main.ts 的 exposeExportHooks）：一遍只要背景，一遍只要卡片、透明底 */
+body.is-export-bg .stage { visibility: hidden; }
+body.is-export-card { background: transparent; }
+body.is-export-card .render-bg { display: none; }
+
+/* ---------- 导出动图：透明底贴纸（电脑上下载的 APNG） ---------- */
+
+/*
+ * 画布由服务端按卡片比例算好：卡片本身加四周一圈边。
+ * 这圈边留给转动时透视外扩的角和卡片自带的阴影，截出来不会被切。
+ * 大投影不要：透明底上一团黑影放到浅色背景里很脏，每帧都变也白白撑大文件。
+ */
+body.is-export-sticker { background: transparent; }
+body.is-export-sticker .hc {
+  width: calc(100vw - 2 * var(--export-margin, 36px));
+  filter: none;
 }

@@ -70,6 +70,15 @@
             <small class="field__hint" id="share-hint"></small>
           </div>
 
+          <!--
+            导出动图：按设备给格式——iPhone 实况照片、安卓动态照片、电脑 APNG。
+            按钮文字由脚本按设备填，见 src/demo/export.ts
+          -->
+          <div class="export" id="export" hidden>
+            <button type="button" class="export__btn" id="export-btn"></button>
+            <small class="field__hint" id="export-hint"></small>
+          </div>
+
           <div class="danger" id="owner" hidden>
             <button type="button" class="danger__btn" id="delete-btn">删除这张卡</button>
             <small class="field__hint" id="delete-hint"></small>

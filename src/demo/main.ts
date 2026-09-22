@@ -2,11 +2,21 @@
 
 import './style.css';
 import { HoloCard } from '../renderer/card';
+import { ensureTextures } from '../renderer/textures';
 import { loadLayerSet } from '../format/io';
 import { FOIL_TYPES, type FoilType, type LayerSet } from '../format/types';
 import { segmentOnServer, ServerUnavailableError, rememberOwned, ownedToken, deleteCard } from './api';
 import { initTracking, pageView, track } from './track';
 import { parseRoute, shareUrl } from './route';
+import {
+  blockingInAppBrowser,
+  detectPlatform,
+  download,
+  fetchFiles,
+  FORMAT_FOR,
+  requestExport,
+  type Platform,
+} from './export';
 
 /** 取元素并断言存在，省掉一堆空判断 */
 function need<T extends Element>(selector: string): T {
@@ -51,6 +61,9 @@ const deleteHint = need<HTMLElement>('#delete-hint');
 const shareUrlInput = need<HTMLInputElement>('#share-url');
 const shareCopy = need<HTMLButtonElement>('#share-copy');
 const shareHint = need<HTMLElement>('#share-hint');
+const exportBox = need<HTMLDivElement>('#export');
+const exportBtn = need<HTMLButtonElement>('#export-btn');
+const exportHint = need<HTMLElement>('#export-hint');
 
 const route = parseRoute();
 const card = new HoloCard(stage, { amplitude: Number(ctlAmp.value) / 100 });
@@ -67,6 +80,28 @@ if (import.meta.env.DEV) {
 let current: LayerSet | null = null;
 /** 分层中，防止重复提交 */
 let busy = false;
+
+/** 导出按钮按设备说人话：iPhone 叫实况照片，安卓叫动态照片，都是各自相册里的叫法 */
+const platform = detectPlatform();
+const EXPORT_LABEL: Record<Platform, string> = {
+  ios: '存为实况照片',
+  android: '存为动态照片',
+  desktop: '下载动图',
+};
+/** 导出进行中，防止重复点 */
+let exporting = false;
+/**
+ * iPhone 上文件取好之后，等用户再点一次按钮才唤起分享面板：
+ * Safari 只认用户点击直接唤起的 share()，等了几十秒生成之后再调会被拒绝。
+ */
+let pendingShare: File[] | null = null;
+
+function resetExport(): void {
+  pendingShare = null;
+  exportBtn.disabled = false;
+  exportBtn.textContent = EXPORT_LABEL[platform];
+  exportHint.textContent = '';
+}
 
 /** 层的称呼：由远及近 */
 function layerName(index: number, count: number): string {
@@ -133,6 +168,9 @@ function show(set: LayerSet, id: string | null = null): void {
   shareResult.hidden = true;
   shareBtn.disabled = false;
   shareBtn.textContent = '生成分享链接';
+  // 导出不限于卡的主人：别人分享过来的卡也能存成实况照片、当壁纸
+  exportBox.hidden = id === null || route.mode === 'render';
+  if (!exporting) resetExport();
   // 只有手上有这张卡口令的人才看得到删除入口
   ownerBox.hidden = id === null || ownedToken(id) === null;
   deleteBtn.disabled = false;
@@ -310,6 +348,7 @@ async function doDelete(): Promise<void> {
     track('delete');
     ownerBox.hidden = true;
     shareBox.hidden = true;
+    exportBox.hidden = true;
     status.textContent = '这张卡已删除。服务端上的层文件和预览图都已清掉';
   } catch (error) {
     deleteBtn.disabled = false;
@@ -318,7 +357,86 @@ async function doDelete(): Promise<void> {
   }
 }
 
+/**
+ * 导出动图，格式按设备定（见 export.ts）。
+ *
+ * iPhone 分两步：第一次点生成并把文件取到手上，按钮变成「保存到相册」；
+ * 第二次点直接唤起系统分享面板，在里面存储，两个文件进相册后自动合成一张实况照片。
+ * 安卓和电脑生成好就直接下载。
+ */
+async function doExport(): Promise<void> {
+  if (pendingShare) {
+    // 第二步：这次点击直接唤起分享面板，中间不能有任何 await，否则 Safari 不认这是用户操作
+    const files = pendingShare;
+    try {
+      await navigator.share({ files });
+      // 只知道面板里选了某个操作，不知道是不是「存储」
+      track('export-share', { format: FORMAT_FOR[platform] });
+      resetExport();
+    } catch (error) {
+      // 用户在面板里点了关闭，不算错，按钮保持「保存到相册」可以再点
+      if (error instanceof DOMException && error.name === 'AbortError') return;
+      exportHint.textContent = `保存失败：${error instanceof Error ? error.message : String(error)}`;
+    }
+    return;
+  }
+
+  const id = currentId;
+  if (!id || exporting) return;
+
+  const app = blockingInAppBrowser();
+  if (app) {
+    exportHint.textContent = `${app}里存不了，点右上角「···」在浏览器中打开再试`;
+    return;
+  }
+
+  const format = FORMAT_FOR[platform];
+  exporting = true;
+  exportBtn.disabled = true;
+  exportBtn.textContent = '正在生成…';
+  exportHint.textContent = '';
+  track('export', { format });
+
+  try {
+    const files = await requestExport(id, format, (state) => {
+      exportBtn.textContent = state === 'queued' ? '排队中…' : '正在生成…';
+    });
+    // 等的功夫换了一张卡，这份结果就不用了
+    if (currentId !== id) {
+      resetExport();
+      return;
+    }
+
+    if (platform === 'ios') {
+      const shareFiles = await fetchFiles(files);
+      if (navigator.canShare?.({ files: shareFiles })) {
+        pendingShare = shareFiles;
+        exportBtn.disabled = false;
+        exportBtn.textContent = '保存到相册';
+        return;
+      }
+      // 不支持分享文件的老系统：两个文件都下载下来，让用户在「文件」里一起存
+      files.forEach(download);
+      resetExport();
+      exportHint.textContent = '已下载 2 个文件：在「文件」App 里同时选中它们，存储到照片';
+      return;
+    }
+
+    const [file] = files;
+    if (file) download(file);
+    resetExport();
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    track('export-fail', { format, message: message.slice(0, 120) });
+    resetExport();
+    exportHint.textContent = `生成失败：${message}`;
+  } finally {
+    exporting = false;
+  }
+}
+
 shareBtn.addEventListener('click', () => void doShare());
+exportBtn.addEventListener('click', () => void doExport());
 deleteBtn.addEventListener('click', () => void doDelete());
 shareCopy.addEventListener('click', () => {
   shareUrlInput.select();
@@ -329,14 +447,10 @@ shareCopy.addEventListener('click', () => {
 });
 
 /**
- * 给 OG 图补上背景和右侧文案。
- *
- * 1200×630 的横图配竖卡片，直接居中会剩两大片空白，所以排成左卡片右文案。
- * 背景用这张卡自己的画面糊开当色调（具体叠法见 style.css 里 .render-bg 的注释），
- * 复用已经加载好的层图片，不额外发请求。
+ * 渲染页的深色底。背景用这张卡自己的画面糊开当色调（具体叠法见 style.css 里 .render-bg 的注释），
+ * 复用已经加载好的层图片，不额外发请求。分享图和导出的竖屏动图共用。
  */
-function buildRenderBackdrop(): void {
-  // 底色复用已经加载好的层图片，不额外发请求
+function buildRenderBackground(): void {
   const bg = document.createElement('div');
   bg.className = 'render-bg';
   for (const img of document.querySelectorAll<HTMLImageElement>('.hc__art')) {
@@ -346,7 +460,14 @@ function buildRenderBackdrop(): void {
     bg.append(clone);
   }
   document.body.append(bg);
+}
 
+/**
+ * 给 OG 图补上右侧文案。
+ *
+ * 1200×630 的横图配竖卡片，直接居中会剩两大片空白，所以排成左卡片右文案。
+ */
+function buildRenderCopy(): void {
   const copy = document.createElement('div');
   copy.className = 'render-copy';
   /*
@@ -379,11 +500,64 @@ function renderPose(): { x: number; y: number } {
   return m ? { x: clamp(Number(m[1])), y: clamp(Number(m[2])) } : { x: 78, y: 22 };
 }
 
+/**
+ * 导出动图时渲染页的版式（服务端 export.ts 用）：
+ *   phone    手机竖屏、深色底，给实况照片和动态照片
+ *   sticker  只有卡片、透明底，给电脑上下载的 APNG
+ * 不带这个参数就是分享图的版式。
+ */
+type ExportLayout = 'phone' | 'sticker';
+
+function renderExportLayout(): ExportLayout | null {
+  const value = new URLSearchParams(location.search).get('export');
+  return value === 'phone' || value === 'sticker' ? value : null;
+}
+
+/**
+ * 箔面纹理是现算的，还要等它解码。截图前不等的话，头几帧的箔面没有颗粒和闪粉。
+ * 以前截分享图靠固定等 250ms 碰运气，导出动图第一帧就是封面，不能碰运气。
+ */
+async function preloadTextures(): Promise<void> {
+  try {
+    const { grain, glitter } = await ensureTextures();
+    await Promise.all(
+      [grain, glitter].map((src) => {
+        const img = new Image();
+        img.src = src;
+        return img.decode().catch(() => undefined);
+      }),
+    );
+  } catch {
+    // 生成不了纹理的环境里箔面退化成纯渐变，照样能截
+  }
+}
+
+/**
+ * 给服务端逐帧导出用的两个钩子（server/export.ts）：
+ *   __hcExportPose   摆一个姿态
+ *   __hcExportLayer  竖屏导出分两遍截——背景是静的只截一次，卡片每帧截、透明底，
+ *                    最后由 ffmpeg 叠起来。服务器没有显卡，模糊过的背景每帧重画太贵
+ * 都只改状态、不等浏览器画出来：服务端截图时会先刷新样式再按需要的倍率现画。
+ */
+function exposeExportHooks(): void {
+  const hooks = window as Window & {
+    __hcExportPose?: (x: number, y: number) => void;
+    __hcExportLayer?: (layer: 'background' | 'card') => void;
+  };
+  hooks.__hcExportPose = (x, y) => card.setPose({ x, y });
+  hooks.__hcExportLayer = (layer) => {
+    document.body.classList.toggle('is-export-bg', layer === 'background');
+    document.body.classList.toggle('is-export-card', layer === 'card');
+  };
+}
+
 /** 按路由决定首屏加载什么 */
 async function boot(): Promise<void> {
+  const exportLayout = route.mode === 'render' ? renderExportLayout() : null;
   if (route.mode === 'render') {
-    // 给服务端截 OG 图用：只留卡片，固定在炫光峰值姿态，不带任何 UI
+    // 给服务端截 OG 图、导出动图用：只留卡片，固定在炫光峰值姿态，不带任何 UI
     document.body.classList.add('is-render');
+    if (exportLayout) document.body.classList.add(`is-export-${exportLayout}`);
   } else {
     /*
      * 统计只在真人访问的页面上加载，render 模式（无头浏览器截 OG 图）跳过——
@@ -404,14 +578,18 @@ async function boot(): Promise<void> {
       status.textContent = `${set.manifest.layers.length} 层`;
 
       if (route.mode === 'render') {
-        buildRenderBackdrop();
+        // 透明底的贴纸只要卡片本身；竖屏动图要深色底但不要分享图右边那段字
+        if (exportLayout !== 'sticker') buildRenderBackground();
+        if (exportLayout === null) buildRenderCopy();
         // 等所有层真正解码完再摆姿态，否则截图可能截到半成品
         await Promise.all(
           [...document.querySelectorAll('img.hc__art')].map((img) =>
             (img as HTMLImageElement).decode().catch(() => undefined),
           ),
         );
+        await preloadTextures();
         card.setPose(renderPose());
+        exposeExportHooks();
         // 给截图脚本一个明确的信号，别靠猜时间
         document.body.dataset['ready'] = '1';
       }

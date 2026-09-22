@@ -61,7 +61,7 @@ CPUQuota=200%     # 4 核里最多占 2 核，留给 Minecraft 和数据库
 Environment=PLAYWRIGHT_BROWSERS_PATH=/opt/holocard/browsers
 ```
 
-渲染 OG 预览图的 Chromium 常驻复用，空闲 5 分钟自动关掉。
+渲染 OG 预览图的 Chromium 常驻复用，空闲 5 分钟自动关掉。导出动图也用它，一次开两个页面并行截帧。
 那台 ARM 机器没有显卡，启动参数里必须带 `--disable-gpu --use-gl=swiftshader --in-process-gpu`，
 否则 headless shell 截图直接报 `Unable to capture screenshot`。
 
@@ -150,6 +150,27 @@ ssh oracle "cd /opt/holocard && node22/bin/node db.mjs \"SELECT ...\""  # 任意
 口令不放在 `GET /api/jobs/{id}` 里——那个接口任何知道 id 的人都能打，而卡一分享出去
 id 就是公开的。这个站没有账号，「所有者」就是「手上有口令的人」；用户清了浏览器数据
 就等于放弃删除权，页面上写明了这一点。
+
+## 导出动图
+
+卡片旁边的导出按钮按设备给格式，文件都是服务端生成的：
+
+| 设备 | 格式 | 卡片目录里的文件 |
+|---|---|---|
+| iPhone / iPad | 实况照片 | `live-v1.jpg` + `live-v1.mov`，靠同一个 UUID 配对 |
+| 安卓 | 动态照片（Motion Photo 1.0，另写老版 MicroVideo 字段） | `motion-v1.jpg`，JPEG 末尾接 MP4 |
+| 电脑 | APNG | `sticker-v1.png`，透明底，无限循环 |
+
+`POST /api/cards/{id}/export/{live|motion|apng}` 排队生成，`GET` 同一地址轮询状态。
+文件随卡片过期、删除一起清掉；manifest 改过之后会重新生成。
+文件名里的 `v1` 是 `server/export.ts` 的 `EXPORT_VERSION`：改了画面或封装参数就加一，存量自动作废。
+
+依赖服务器上的 `ffmpeg`（要带 libx264，路径可用 `HOLOCARD_FFMPEG` 指定）。
+单并发，排队上限 `HOLOCARD_MAX_EXPORT_QUEUE`（默认 6），
+每个 IP 10 分钟最多导出 `HOLOCARD_EXPORT_RATE_LIMIT`（默认 8）次。
+这台机器上（2 核额度、没有显卡）一张实况照片或动态照片约 30 秒，APNG 约 25 秒。
+
+本地看效果：`pnpm og --export live`（或 `motion` / `apng`），产物在 `out/export/`。
 
 ## 埋点
 

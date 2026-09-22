@@ -18,10 +18,12 @@
   },
   "dependencies": {
     "@huggingface/transformers": "^4.3.0",
+    "playwright-core": "^1.63.0",
     "sharp": "^0.35.4",
-    "playwright-core": "^1.63.0"
+    "upng-js": "2.1.0"
   },
   "devDependencies": {
+    "@types/upng-js": "^2.1.5",
     "typescript": "^7.0.2",
     "vite": "^8.3.0"
   },
