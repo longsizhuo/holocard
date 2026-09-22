@@ -22,7 +22,7 @@ import { createServer, type IncomingMessage, type ServerResponse } from 'node:ht
 import { createReadStream } from 'node:fs';
 import { mkdir, rm, writeFile, readFile, readdir, stat } from 'node:fs/promises';
 import { randomUUID, timingSafeEqual } from 'node:crypto';
-import { dirname, extname, join, resolve, sep } from 'node:path';
+import { basename, dirname, extname, join, resolve, sep } from 'node:path';
 import { env } from '@huggingface/transformers';
 import { segmentToLayerSet } from '../src/segmenter';
 import { sharpImages, normalizeOriginal, layerToWebp, ImageError } from './images';
@@ -777,8 +777,13 @@ async function serveStatic(
    * 首页示例卡（samples/ 下）每个访客都要下两百多 KB。按 no-cache 发的话，
    * Cloudflare 每次都判过期、整个回源重拉（实测 EXPIRED，出图慢两三秒）。
    * 这些文件不跟着发版变——要换示例卡就换个目录名，旧地址自然没人引用——所以缓存一天没问题。
+   *
+   * 首页分享图 og*.jpg 同理：抓取方（GitHub 的图片代理、各家的链接预览）从 Cloudflare 回源拉图，
+   * 源站那一段慢，拉不完就超时。页面里引用时带 ?v=修改时间，换图会换地址，缓存一天也不会拿到旧图。
    */
-  const isSample = candidate.startsWith(join(root, 'samples') + sep);
+  const isStable =
+    candidate.startsWith(join(root, 'samples') + sep) ||
+    (dirname(candidate) === root && /^og(?:-[a-z]{2})?\.jpg$/.test(basename(candidate)));
   const isHtml = ext === '.html';
   if (isHtml) body = Buffer.from(localizeHtml(body.toString('utf8'), lang), 'utf8');
 
@@ -819,10 +824,10 @@ async function serveStatic(
   res.writeHead(status, {
     'content-type': MIME[ext] ?? 'application/octet-stream',
     'content-length': body.byteLength,
-    // assets 下的文件名带内容 hash，可以永久缓存；示例卡缓存一天（见上）；其余不缓存，保证发版即时生效
+    // assets 下的文件名带内容 hash，可以永久缓存；示例卡和首页分享图缓存一天（见上）；其余不缓存，保证发版即时生效
     'cache-control': isHashed
       ? 'public, max-age=31536000, immutable'
-      : isSample
+      : isStable
         ? 'public, max-age=86400'
         : 'no-cache',
     'x-content-type-options': 'nosniff',

@@ -160,8 +160,13 @@ export async function renderPreview(
     {
       width: options.width ?? PREVIEW_WIDTH,
       height: options.height ?? PREVIEW_HEIGHT,
-      // 截出来的图会被放大显示，2 倍像素密度看着才不糊
-      scale: 2,
+      /*
+       * 按 1 倍出，图就是标准的 1200×630。各平台的卡片预览最宽也就五六百像素，
+       * 视网膜屏上 1200 也够用。以前按 2 倍出 2400×1260，一张 200~360KB：
+       * GitHub 的图片代理从我们这拉 5 秒只拿到前 48KB，缓存了半张坏图，帖子里的图直接挂了。
+       * 1 倍一张六七十 KB，服务器上软件渲染的像素也只剩四分之一。
+       */
+      scale: 1,
       query: {
         ...(options.pose ? { pose: `${options.pose.x},${options.pose.y}` } : {}),
         /*
