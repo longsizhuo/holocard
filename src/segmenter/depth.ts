@@ -7,7 +7,7 @@
  */
 
 import { pipeline, RawImage } from '@huggingface/transformers';
-import { configureModelSource, pickDevice, type LoadProgress } from './runtime';
+import { configureModelSource, pickDevice, useOwnModelHost, type LoadProgress } from './runtime';
 import type { DepthMap } from './slice';
 
 const MODEL_ID = 'onnx-community/depth-anything-v2-small';
@@ -24,7 +24,9 @@ export async function loadDepthModel(
 
   estimatorPromise = (async () => {
     configureModelSource();
-    const device = await pickDevice();
+    // 本站发的权重只有 q8，而 q8 在 WebGPU 上没有加速，这种情况直接用 WASM
+    const own = await useOwnModelHost(MODEL_ID);
+    const device = own ? 'wasm' : await pickDevice();
 
     /*
      * WebGPU 下用 fp16，约 50MB。CPU（Node）和 WASM 上 fp16 都没有加速，

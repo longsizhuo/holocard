@@ -6,7 +6,12 @@
  *
  * 服务不可用时抛 ServerUnavailableError，调用方据此回退到浏览器端流水线
  * （自托管、纯静态部署的场景下本来就没有后端）。
+ *
+ * 这里不产出任何给人看的文字：进度给的是文案的键，错误带服务端的 code，
+ * 由界面按当前语言翻译（见 src/i18n）。
  */
+
+import { lang, type MessageKey } from '../i18n';
 
 /** 服务端不可用——没部署、掉线、或者忙不过来。调用方应当回退，而不是报错 */
 export class ServerUnavailableError extends Error {
@@ -16,8 +21,40 @@ export class ServerUnavailableError extends Error {
   }
 }
 
+/**
+ * 服务端返回的错误。code 是稳定的错误类型（rate_limited、card_not_found…），
+ * 界面按它翻译；认不出的 code 就显示服务端给的原文。
+ */
+export class ApiError extends Error {
+  constructor(
+    message: string,
+    readonly code?: string,
+    readonly params?: Record<string, string | number>,
+  ) {
+    super(message);
+    this.name = 'ApiError';
+  }
+}
+
+/** 从错误响应里取出 code 和参数 */
+export async function apiError(res: Response, fallback: string): Promise<ApiError> {
+  const body = (await res.json().catch(() => ({}))) as {
+    error?: string;
+    code?: string;
+    params?: Record<string, string | number>;
+  };
+  return new ApiError(body.error ?? fallback, body.code, body.params);
+}
+
+/** 所有接口请求都带上当前语言，服务端据此决定分享图、导出之类用哪种语言 */
+export function apiHeaders(): Record<string, string> {
+  return { 'x-holocard-lang': lang() };
+}
+
 export interface ServerProgress {
-  detail: string;
+  /** 界面文字的键 */
+  key: MessageKey;
+  params?: Record<string, string | number>;
   /** 0..1，拿不到确切进度时为 undefined */
   ratio?: number;
 }
@@ -31,18 +68,20 @@ interface JobStatus {
   error?: string;
 }
 
-const STAGE_TEXT: Record<string, string> = {
-  'loading-model': '服务端正在加载模型',
-  'estimating-depth': '服务端正在估计深度',
-  analyzing: '正在分析深度分布',
-  extracting: '正在切层与补洞',
-  done: '完成',
+const STAGE_KEYS: Record<string, MessageKey> = {
+  'loading-model': 'stage.loading-model',
+  'estimating-depth': 'stage.estimating-depth',
+  analyzing: 'stage.analyzing',
+  extracting: 'stage.extracting',
+  done: 'stage.done',
 };
 
 /** 轮询间隔。处理通常几秒，一秒一次既不浪费也不显迟钝 */
 const POLL_INTERVAL_MS = 1000;
 /** 总超时。超过就认为服务端卡死了 */
 const TIMEOUT_MS = 5 * 60 * 1000;
+/** 轮询连续失败多久才放弃，见 segmentOnServer 里的说明 */
+const POLL_GIVE_UP_MS = 60 * 1000;
 
 function sleep(ms: number, signal?: AbortSignal): Promise<void> {
   return new Promise((resolve, reject) => {
@@ -77,13 +116,14 @@ export async function segmentOnServer(
 ): Promise<SegmentResult> {
   const base = import.meta.env.BASE_URL;
 
-  onProgress?.({ detail: '正在上传' });
+  onProgress?.({ key: 'progress.uploading' });
 
   let created: Response;
   try {
     created = await fetch(`${base}api/jobs`, {
       method: 'POST',
       body: file,
+      headers: apiHeaders(),
       ...(signal ? { signal } : {}),
     });
   } catch (error) {
@@ -94,41 +134,61 @@ export async function segmentOnServer(
   }
 
   if (created.status === 404 || created.status === 502 || created.status === 503) {
-    const body = await created.json().catch(() => ({}) as { error?: string });
-    throw new ServerUnavailableError(body.error ?? `分层服务不可用（HTTP ${created.status}）`);
+    const error = await apiError(created, `分层服务不可用（HTTP ${created.status}）`);
+    // 排队满了是服务端明确说「忙」，照样回退；但带上原因，回退也失败时能显示出来
+    throw new ServerUnavailableError(error.message);
   }
   if (!created.ok) {
     // 4xx 是这张图本身的问题（太大、格式不认），回退到浏览器端也一样会失败
-    const body = await created.json().catch(() => ({}) as { error?: string });
-    throw new Error(body.error ?? `上传失败（HTTP ${created.status}）`);
+    throw await apiError(created, `上传失败（HTTP ${created.status}）`);
   }
 
   const { id, deleteToken } = (await created.json()) as { id: string; deleteToken: string };
   const deadline = Date.now() + TIMEOUT_MS;
+  /*
+   * 连续失败从什么时候开始算。
+   *
+   * 任务已经交出去了，服务端在处理——轮询偶尔失败一次（网络抖一下、发版重启那几秒、
+   * Cloudflare 回源超时）不代表服务端没了。以前一次失败就退回浏览器端，
+   * 用户白下 50MB 模型，服务端做好的卡也扔了（埋点里查到过好几次）。
+   * 现在连续失败超过 POLL_GIVE_UP_MS 才放弃；任务在服务端是持久化的，重启后会接着做。
+   */
+  let failingSince: number | null = null;
 
   while (Date.now() < deadline) {
     await sleep(POLL_INTERVAL_MS, signal);
 
-    let res: Response;
+    let res: Response | null = null;
+    let failure = '';
     try {
       res = await fetch(`${base}api/jobs/${id}`, signal ? { signal } : {});
+      if (!res.ok) failure = `HTTP ${res.status}`;
     } catch (error) {
-      throw new ServerUnavailableError(
-        `轮询中断：${error instanceof Error ? error.message : String(error)}`,
-      );
+      if (signal?.aborted) throw error;
+      failure = error instanceof Error ? error.message : String(error);
     }
-    if (!res.ok) {
-      throw new ServerUnavailableError(`查询任务失败（HTTP ${res.status}）`);
+    // 404 是真的没有这个任务了（被删或过期），重试也不会好
+    if (res?.status === 404) {
+      throw await apiError(res, '任务不存在或已过期');
     }
+    if (failure || !res) {
+      failingSince ??= Date.now();
+      if (Date.now() - failingSince > POLL_GIVE_UP_MS) {
+        throw new ServerUnavailableError(`轮询中断：${failure}`);
+      }
+      onProgress?.({ key: 'progress.reconnecting' });
+      continue;
+    }
+    failingSince = null;
 
     const status = (await res.json()) as JobStatus;
 
     if (status.state === 'queued') {
-      onProgress?.({ detail: `排队中（前面还有 ${Math.max(0, status.position - 1)} 个）` });
+      onProgress?.({ key: 'progress.queued', params: { n: Math.max(0, status.position - 1) } });
     } else if (status.state === 'running') {
-      onProgress?.({ detail: STAGE_TEXT[status.stage ?? ''] ?? '服务端处理中' });
+      onProgress?.({ key: STAGE_KEYS[status.stage ?? ''] ?? 'progress.serverWorking' });
     } else if (status.state === 'done' && status.layers) {
-      onProgress?.({ detail: '正在取回分层结果', ratio: 0.95 });
+      onProgress?.({ key: 'progress.fetching', ratio: 0.95 });
       // 服务端返回的是绝对路径，base 已经包含在里面
       return { layers: status.layers, id, deleteToken };
     } else if (status.state === 'error') {
@@ -188,15 +248,14 @@ export function forgetOwned(id: string): void {
 /** 删除一张自己的卡。口令不对或卡不存在时抛错 */
 export async function deleteCard(id: string): Promise<void> {
   const token = ownedToken(id);
-  if (!token) throw new Error('这台设备上没有这张卡的删除口令');
+  if (!token) throw new ApiError('这台设备上没有这张卡的删除口令', 'no_token');
 
   const res = await fetch(`${import.meta.env.BASE_URL}api/cards/${id}`, {
     method: 'DELETE',
-    headers: { 'x-holocard-token': token },
+    headers: { ...apiHeaders(), 'x-holocard-token': token },
   });
   if (!res.ok && res.status !== 404) {
-    const body = (await res.json().catch(() => ({}))) as { error?: string };
-    throw new Error(body.error ?? `删除失败（HTTP ${res.status}）`);
+    throw await apiError(res, `删除失败（HTTP ${res.status}）`);
   }
   // 404 说明已经被清理过了，对用户来说结果一样
   forgetOwned(id);

@@ -1,5 +1,7 @@
 # HoloCard
 
+中文 | [English](README.en.md)
+
 https://github.com/longsizhuo/holocard ｜ 线上 https://holocard.longsizhuo.com
 
 上传一张照片，自动切成前中后景，每层各上各的箔面，渲染成可交互的闪卡。
@@ -9,6 +11,7 @@ https://github.com/longsizhuo/holocard ｜ 线上 https://holocard.longsizhuo.co
 HoloCard 做的事情是**用分层算法自动生成这张遮罩**，于是任意一张照片都能变成闪卡。
 
 > 状态：早期。渲染器、分层流水线、边缘精修、服务端处理都已跑通并上线：https://holocard.longsizhuo.com
+> 页面有中文、英文、日文；做好的卡可以存成 iPhone 实况照片、安卓动态照片，电脑上存成 APNG 动图。
 
 ## 一张卡由什么叠成
 
@@ -179,6 +182,8 @@ mycard.layers/
 }
 ```
 
+层图可以是浏览器能解的任何格式；服务端存的是 WebP（画面有损、alpha 无损），体积约为 PNG 的十分之一。
+
 `foil.type` 目前有四种：`none`（哑光）、`holo`（经典闪卡）、`sunpillar`（V 卡日柱）、`rainbow`（彩虹闪粉）。
 
 ## 跑起来
@@ -221,6 +226,8 @@ pnpm og 图片路径            # 换一张图
 pnpm og --watch            # 改了 src/ 下的样式或代码，保存即重出（约 2 秒）
 pnpm og --pose 20,80       # 换个角度看箔面和炫光
 pnpm og --size 1280x640    # GitHub 仓库社交预览图的尺寸
+pnpm og --lang en          # 右边那段字用英文（en / ja）
+pnpm og --export live      # 出一张实况照片（或 motion / apng），写到 out/export/
 ```
 
 和线上是同一套渲染：前端现构建，截图直接调服务端的 `renderPreview`，这里看到什么，分享出去就是什么。

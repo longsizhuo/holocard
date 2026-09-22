@@ -42,9 +42,25 @@ function run(fn: Queued): void {
   else fn();
 }
 
+/**
+ * 本机和局域网地址上不上报。
+ *
+ * 本地用生产配置构建（pnpm build 会读 .env.production）时站点 id 也在，
+ * 以前在 127.0.0.1 上测试的访问和事件全进了线上统计（查埋点时翻出过 27 条）。
+ * 不写死线上域名：别人自托管到自己的域名上，统计照样要能用。
+ */
+function isLocalHost(hostname: string): boolean {
+  return (
+    hostname === 'localhost' ||
+    hostname.endsWith('.local') ||
+    hostname === '[::1]' ||
+    /^(127\.|10\.|192\.168\.|172\.(1[6-9]|2\d|3[01])\.)/.test(hostname)
+  );
+}
+
 /** 注入统计脚本。render 模式下不要调用 */
 export function initTracking(): void {
-  if (!WEBSITE_ID) return;
+  if (!WEBSITE_ID || isLocalHost(location.hostname)) return;
 
   const script = document.createElement('script');
   script.async = true;

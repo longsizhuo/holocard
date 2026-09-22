@@ -13,7 +13,15 @@ export default defineConfig({
      * 纯 JS 的小依赖直接打进包里。服务器上的 node_modules 是单独维护的（只装了原生模块和
      * playwright-core），发版脚本不在那边装包——打进来就不用每加一个依赖都去服务器上手工装。
      */
-    noExternal: ['upng-js', 'pako'],
+    noExternal: ['upng-js', 'pako', 'heic-decode', 'libheif-js'],
+  },
+  /*
+   * libheif-js 的 Emscripten 胶水代码在 Node 分支里会读 __dirname（找 wasm 文件用）。
+   * 打成 ESM 之后没有这个变量，服务一启动就崩。它的 wasm 是内嵌的，给个真实目录就行。
+   */
+  define: {
+    __dirname: 'import.meta.dirname',
+    __filename: 'import.meta.filename',
   },
   build: {
     ssr: 'server/index.ts',

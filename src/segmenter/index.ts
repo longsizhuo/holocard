@@ -36,8 +36,10 @@ export type SegmentStage =
 
 export interface SegmentProgress {
   stage: SegmentStage;
-  /** 给人看的一句话 */
+  /** 给人看的一句话（中文，日志和服务端用；界面按 stage / file 自己翻译） */
   detail: string;
+  /** 正在下载的模型文件，只在 loading-model 阶段有 */
+  file?: string;
   /** 0..1，拿不到确切进度时为 undefined */
   ratio?: number;
 }
@@ -129,6 +131,7 @@ export async function segmentToLayerSet(
     options.onProgress?.({
       stage: 'loading-model',
       detail: p.file ? `正在下载 ${p.file}` : STAGE_TEXT['loading-model'],
+      ...(p.file ? { file: p.file } : {}),
       ...(typeof p.progress === 'number' ? { ratio: p.progress / 100 } : {}),
     });
   };

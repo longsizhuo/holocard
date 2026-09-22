@@ -112,10 +112,10 @@ ssh oracle "cd /opt/holocard && node22/bin/node db.mjs \"SELECT ...\""  # 任意
 
 | | 做法 |
 |---|---|
-| `robots.txt` | 服务端按 `PUBLIC_ORIGIN` 现生成。允许所有爬虫（包括 AI 的），只挡 `/render/`（截分享图的内部页）和 `/api/jobs`、`/api/cards` |
-| `sitemap.xml` | 同上，只有首页；`lastmod` 取 index.html 的修改时间 |
-| `llms.txt` | 给 AI 读的说明，静态文件 `public/llms.txt`，内容摘自 README |
-| 首页 | canonical + JSON-LD（`WebApplication` + `SoftwareSourceCode`）。结构化数据里的描述直接读页面的 meta description，不另写一份 |
+| `robots.txt` | 服务端按 `PUBLIC_ORIGIN` 现生成。允许所有爬虫（包括 AI 的），只挡 `/render/`（截分享图的内部页）、`/api/jobs`、`/api/cards` 和 `/models/`（27MB 的权重） |
+| `sitemap.xml` | 同上，首页的中、英、日三个版本，每条都用 `xhtml:link` 列出全部语言版本；`lastmod` 取 index.html 的修改时间 |
+| `llms.txt` | 给 AI 读的说明，静态文件 `public/llms.txt`，中英日三段，内容摘自 README |
+| 首页 | 每种语言一个规范地址（`/`、`/?lang=en`、`/?lang=ja`）+ hreflang（`x-default` 指向不带参数、按浏览器语言自动选的 `/`）+ JSON-LD（`WebApplication` + `SoftwareSourceCode`）。结构化数据里的描述直接读页面的 meta description，不另写一份 |
 | 卡片页 `/c/<id>` | `noindex, nofollow`，不进 sitemap |
 | 层文件 `/api/layers/` | 响应头 `x-robots-tag: noindex`。**不在 robots.txt 里挡**：分享图就在这下面，Twitter 的爬虫遵守 robots.txt，挡了分享卡片就没图 |
 | 不存在的路径 | 返回 404（页面照旧显示首页，人看不出区别）。以前一律 200，搜索引擎会把 `/abc` 这类当成首页的重复页 |
@@ -126,7 +126,42 @@ ssh oracle "cd /opt/holocard && node22/bin/node db.mjs \"SELECT ...\""  # 任意
 - Cloudflare → Security → Bots：确认没开「拦截 AI 爬虫」。开着的话 AI 爬虫在边缘就被挡了，从外面用伪造 UA 测不出来
 - Google Search Console、Bing Webmaster Tools：验证站点、提交 `https://holocard.longsizhuo.com/sitemap.xml`
 - 百度搜索资源平台：同上。站点没有 ICP 备案、服务器在海外，百度会收录得慢、排得靠后
-- GitHub 仓库 Settings → Social preview：上传 `docs/social-preview.jpg`（没有 API，只能网页上传）
+- GitHub 仓库 Settings → Social preview：上传 `docs/social-preview.jpg`（中文）或 `docs/social-preview-en.jpg`（英文），没有 API，只能网页上传
+
+## 多语言
+
+界面有中文、英文、日文，文案全在 `src/i18n/messages.ts`：中文是源头，英文、日文的类型由它推出来，
+少翻一个键类型检查就过不去。前端和服务端共用这一份。
+
+这次请求用哪种语言，先到先得：地址上的 `?lang=` → 接口请求头 `x-holocard-lang` → cookie `hc_lang`
+（页头手动切过一次就记住）→ `Accept-Language` → 中文。
+
+- **页面**：服务端发 index.html 时按语言把标了 `data-i18n` 的静态文字、标题、描述都换好（`localizeHtml`），
+  页面一出来就是对的语言，不会先闪一下中文。HTML 响应带 `Vary: Accept-Language, Cookie`。
+  页头切换语言是就地换，不刷新页面——刷新会丢掉刚做好、还没分享的卡
+- **接口报错**：返回 `code`（`rate_limited`、`card_not_found`…）和参数，前端按当前语言翻译；`error` 字段仍是中文原文
+- **分享链接**：带分享人的语言（`/c/<id>?lang=en`，中文不带），对方看到的预览标题、描述、分享图和打开后的界面都是这个语言
+- **首页分享图**：`public/og.jpg`、`og-en.jpg`、`og-ja.jpg`，都用 `pnpm og --lang <语言> --out public/og-<语言>.jpg` 从同一张测试图出。
+  某个语言的图缺了就用中文那张
+
+## 分享图
+
+每张分享过的卡、每种语言一张（`preview.jpg`、`preview-en.jpg`、`preview-ja.jpg`），用无头浏览器截。
+
+渲染排队，一次一张，失败隔 30 秒、60 秒再试，共三次；截图超时 90 秒。
+以前分享那一下直接在后台渲染、失败就算了：上线头一天高峰期截图超时 18 次，32 张分享过的卡有 23 张一直没图。
+现在另有两道兜底：**卡片页被打开时**发现这个语言的图缺了就排队补；**服务启动时**把分享过却缺中文图的都排上。
+
+## 图片格式与权重
+
+- **上传**：JPEG、PNG、WebP、AVIF 用 sharp；**HEIC** 用 heic-decode（libheif 的 WASM 版）——sharp 预编译包里的
+  libheif 只有 AV1 解码器，解不了手机拍的 HEVC 编码的 HEIC，而微信、安卓的内置浏览器会把相册里的 HEIC 原图直接传上来。
+  超过 16MB 的图前端先在浏览器里缩到 4096 以内再传
+- **层图**：存成 WebP（画面有损 q88、alpha 无损），体积约为 PNG 的十分之一。老卡的 PNG 照常能用
+- **权重**：服务端本来就有的 q8 权重在 `/models/` 下原样发出去，给浏览器端退回处理用（国内连不上 huggingface.co）。
+  只发三个文件，其余 404
+- upng-js、heic-decode、libheif-js 是纯 JS/WASM，打进了服务端的包（`vite.server.config.ts` 的 `ssr.noExternal`），
+  服务器上的 `node_modules` 不用动
 
 ## 保留与删除
 
@@ -183,7 +218,11 @@ id 通过 `.env.production` 里的 `VITE_UMAMI_ID` 在构建时注入。
 
 上报的内容：页面浏览（`/c/<uuid>` 归一成 `/c`，具体哪张卡放在事件数据里，
 否则页面列表会被几千个 uuid 撑爆）、`upload`（只带体积档位）、`segment-ok`、
-`segment-fail`（只带错误信息前 120 字）、`share`、`delete`。不带文件名。
+`segment-fail`（错误信息前 120 字，外加走到哪一步 `stage`：upload / server / download / browser）、
+`share`、`delete`、`export` / `export-fail` / `export-share`（带格式）、`lang`（手动切换语言）。不带文件名。
+
+本机和局域网地址（localhost、127.x、10.x、192.168.x…）上不加载统计：本地用生产配置构建时站点 id 也在，
+以前在 127.0.0.1 上的测试全进了线上统计。查数据时照样加 `hostname = 'holocard.longsizhuo.com'`。
 
 `/render/<id>`（无头浏览器截 OG 图的页面）不加载统计脚本——否则每生成一张预览图
 就多一条假访问，而且刚好落在分享这个动作上，会把「分享后有多少人真的点开」打歪。

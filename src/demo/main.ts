@@ -3,9 +3,18 @@
 import './style.css';
 import { HoloCard } from '../renderer/card';
 import { ensureTextures } from '../renderer/textures';
-import { loadLayerSet } from '../format/io';
+import { LayerFormatError, loadLayerSet } from '../format/io';
 import { FOIL_TYPES, type FoilType, type LayerSet } from '../format/types';
-import { segmentOnServer, ServerUnavailableError, rememberOwned, ownedToken, deleteCard } from './api';
+import {
+  ApiError,
+  apiError,
+  apiHeaders,
+  deleteCard,
+  ownedToken,
+  rememberOwned,
+  segmentOnServer,
+  ServerUnavailableError,
+} from './api';
 import { initTracking, pageView, track } from './track';
 import { parseRoute, shareUrl } from './route';
 import {
@@ -17,6 +26,16 @@ import {
   requestExport,
   type Platform,
 } from './export';
+import {
+  applyTranslations,
+  lang,
+  LANGS,
+  onLangChange,
+  setLang,
+  t,
+  type Lang,
+  type MessageKey,
+} from '../i18n';
 
 /** 取元素并断言存在，省掉一堆空判断 */
 function need<T extends Element>(selector: string): T {
@@ -25,11 +44,11 @@ function need<T extends Element>(selector: string): T {
   return el;
 }
 
-const FOIL_LABEL: Record<FoilType, string> = {
-  none: '哑光（不上箔）',
-  holo: '经典闪卡 holo',
-  sunpillar: '日柱 sunpillar',
-  rainbow: '彩虹闪粉 rainbow',
+const FOIL_LABEL: Record<FoilType, MessageKey> = {
+  none: 'foil.none',
+  holo: 'foil.holo',
+  sunpillar: 'foil.sunpillar',
+  rainbow: 'foil.rainbow',
 };
 
 const stage = need<HTMLDivElement>('#stage');
@@ -64,6 +83,7 @@ const shareHint = need<HTMLElement>('#share-hint');
 const exportBox = need<HTMLDivElement>('#export');
 const exportBtn = need<HTMLButtonElement>('#export-btn');
 const exportHint = need<HTMLElement>('#export-hint');
+const langButtons = [...document.querySelectorAll<HTMLButtonElement>('.lang [data-lang]')];
 
 const route = parseRoute();
 const card = new HoloCard(stage, { amplitude: Number(ctlAmp.value) / 100 });
@@ -81,12 +101,52 @@ let current: LayerSet | null = null;
 /** 分层中，防止重复提交 */
 let busy = false;
 
+// ---------- 会变的文字 ----------
+
+/**
+ * 页面上随状态变的文字（按钮当前状态、进度、状态栏、提示）都经过这里：
+ * 记住每个元素当前显示的是哪句文案、带什么参数，切换语言时原地按新语言重写一遍。
+ * 不刷新页面——刷新会丢掉刚做好、还没分享的卡。
+ */
+const liveTexts = new Map<HTMLElement, { key: MessageKey; params?: Record<string, string | number> }>();
+
+function setText(el: HTMLElement, key: MessageKey, params?: Record<string, string | number>): void {
+  liveTexts.set(el, params ? { key, params } : { key });
+  el.textContent = t(key, params);
+}
+
+function clearText(el: HTMLElement): void {
+  liveTexts.delete(el);
+  el.textContent = '';
+}
+
+/**
+ * 把错误变成给人看的一句话。
+ * 服务端的错误按 code 翻译；浏览器自己的网络错误（Load failed、Failed to fetch…）
+ * 原文对用户毫无意义，统一换成「网络断了」；其余照原文。
+ */
+function describeError(error: unknown): string {
+  if (error instanceof ApiError && error.code) {
+    const key = `error.${error.code}` as MessageKey;
+    const translated = t(key, error.params);
+    if (translated !== key) return translated;
+  }
+  // 卡过期、被删之后再打开分享链接，取 manifest 是 404
+  if (error instanceof LayerFormatError && error.status === 404) return t('error.card_not_found');
+  if (error instanceof TypeError && /fetch|load failed|network/i.test(error.message)) {
+    return t('error.network');
+  }
+  return error instanceof Error ? error.message : String(error);
+}
+
+// ---------- 导出按钮 ----------
+
 /** 导出按钮按设备说人话：iPhone 叫实况照片，安卓叫动态照片，都是各自相册里的叫法 */
 const platform = detectPlatform();
-const EXPORT_LABEL: Record<Platform, string> = {
-  ios: '存为实况照片',
-  android: '存为动态照片',
-  desktop: '下载动图',
+const EXPORT_LABEL: Record<Platform, MessageKey> = {
+  ios: 'export.live',
+  android: 'export.motion',
+  desktop: 'export.apng',
 };
 /** 导出进行中，防止重复点 */
 let exporting = false;
@@ -99,16 +159,18 @@ let pendingShare: File[] | null = null;
 function resetExport(): void {
   pendingShare = null;
   exportBtn.disabled = false;
-  exportBtn.textContent = EXPORT_LABEL[platform];
-  exportHint.textContent = '';
+  setText(exportBtn, EXPORT_LABEL[platform]);
+  clearText(exportHint);
 }
+
+// ---------- 箔面面板 ----------
 
 /** 层的称呼：由远及近 */
 function layerName(index: number, count: number): string {
-  if (count === 1) return '整张';
-  if (index === 0) return '最远层（背景）';
-  if (index === count - 1) return '最近层（主体）';
-  return count === 3 ? '中间层' : `中间层 ${index}`;
+  if (count === 1) return t('layer.whole');
+  if (index === 0) return t('layer.far');
+  if (index === count - 1) return t('layer.near');
+  return count === 3 ? t('layer.middle') : t('layer.middleN', { n: index });
 }
 
 /** 按当前层数重建「各层箔面」面板。层数是算出来的，不能写死在 HTML 里 */
@@ -132,7 +194,7 @@ function buildFoilControls(set: LayerSet): void {
     for (const type of FOIL_TYPES) {
       const option = document.createElement('option');
       option.value = type;
-      option.textContent = FOIL_LABEL[type];
+      option.textContent = t(FOIL_LABEL[type]);
       select.append(option);
     }
     select.value = layer.foil.type;
@@ -143,7 +205,7 @@ function buildFoilControls(set: LayerSet): void {
     strength.max = '1';
     strength.step = '0.05';
     strength.value = String(layer.foil.intensity);
-    strength.title = '这一层的箔面强度';
+    strength.title = t('panel.foilStrength');
 
     const apply = (): void => {
       layer.foil = { type: select.value as FoilType, intensity: Number(strength.value) };
@@ -167,14 +229,14 @@ function show(set: LayerSet, id: string | null = null): void {
   shareBox.hidden = id === null || route.mode !== 'demo';
   shareResult.hidden = true;
   shareBtn.disabled = false;
-  shareBtn.textContent = '生成分享链接';
+  setText(shareBtn, 'share.create');
   // 导出不限于卡的主人：别人分享过来的卡也能存成实况照片、当壁纸
   exportBox.hidden = id === null || route.mode === 'render';
   if (!exporting) resetExport();
   // 只有手上有这张卡口令的人才看得到删除入口
   ownerBox.hidden = id === null || ownedToken(id) === null;
   deleteBtn.disabled = false;
-  deleteBtn.textContent = '删除这张卡';
+  setText(deleteBtn, 'delete.button');
 
   // 方向是 manifest → 面板，和下面 buildFoilControls 处理逐层箔面的方向一致。
   // 反过来写（拿滑杆当前值去覆盖 manifest）的话，任何自带炫光参数的卡
@@ -206,49 +268,102 @@ function pollHalo(): void {
   requestAnimationFrame(pollHalo);
 }
 
-function showProgress(text: string, ratio?: number): void {
+function showProgress(key: MessageKey, params?: Record<string, string | number>, ratio?: number): void {
   progress.hidden = false;
-  progressText.textContent = text;
+  setText(progressText, key, params);
   // 拿不到确切比例时用一个固定的低值占位，避免进度条看起来是卡死的
   progressFill.style.width = `${Math.round((ratio ?? 0.05) * 100)}%`;
+}
+
+// ---------- 上传与分层 ----------
+
+/** 服务端的上传上限是 16MB，留一点余量 */
+const UPLOAD_LIMIT_BYTES = 15 * 1024 * 1024;
+/** 超过上限时缩到的最长边。分层本来就只用到 1400，原图留 4096 以后重跑也够 */
+const SHRINK_TO = 4096;
+
+/**
+ * 太大的图先在浏览器里缩小再传。
+ *
+ * 埋点里有人传过 25MB、32MB 的图：服务端直接拒了，页面退回浏览器端又跑不动，
+ * 人就走了。浏览器解不开的格式（比如 Chrome 里的 HEIC）原样上传，由服务端判断。
+ * 顺带把 EXIF（含 GPS）也去掉了——画到 canvas 上再导出，只剩像素。
+ */
+async function shrinkIfHuge(file: File): Promise<Blob> {
+  if (file.size <= UPLOAD_LIMIT_BYTES || typeof OffscreenCanvas === 'undefined') return file;
+  let bitmap: ImageBitmap;
+  try {
+    bitmap = await createImageBitmap(file);
+  } catch {
+    return file;
+  }
+  showProgress('progress.shrinking');
+  try {
+    for (const [side, quality] of [[SHRINK_TO, 0.92], [3072, 0.85]] as const) {
+      const scale = Math.min(1, side / Math.max(bitmap.width, bitmap.height));
+      const canvas = new OffscreenCanvas(Math.round(bitmap.width * scale), Math.round(bitmap.height * scale));
+      canvas.getContext('2d')?.drawImage(bitmap, 0, 0, canvas.width, canvas.height);
+      const blob = await canvas.convertToBlob({ type: 'image/jpeg', quality });
+      if (blob.size <= UPLOAD_LIMIT_BYTES) return blob;
+    }
+    return file;
+  } finally {
+    bitmap.close();
+  }
 }
 
 /**
  * 分层：优先让服务端做，浏览器一个字节的模型都不用下。
  * 服务端没部署或忙不过来时回退到浏览器端流水线——自托管的纯静态部署走的就是这条路。
+ *
+ * stage 记着走到了哪一步，失败时随埋点一起报上去：只看错误原文分不清是上传断了、
+ * 服务端失败，还是结果下载到一半断了（之前排查时只能拿服务端数据库一条条对）。
  */
 async function processImage(file: File): Promise<void> {
   if (busy) return;
   busy = true;
   drop.classList.remove('is-over');
-  showProgress('准备中');
-  status.textContent = `正在处理 ${file.name}`;
+  showProgress('progress.preparing');
+  setText(status, 'status.processing', { name: file.name });
   // 只报体积档位，不报文件名和具体大小
   track('upload', { sizeMb: Math.round(file.size / 1024 / 1024) });
 
+  let stage: 'upload' | 'server' | 'download' | 'browser' = 'upload';
   try {
     let set: LayerSet;
     let serverId: string | null = null;
     try {
-      const result = await segmentOnServer(file, (p) => showProgress(p.detail, p.ratio));
+      const upload = await shrinkIfHuge(file);
+      const result = await segmentOnServer(upload, (p) => {
+        if (p.key !== 'progress.uploading') stage = 'server';
+        showProgress(p.key, p.params, p.ratio);
+      });
+      stage = 'download';
       set = await loadLayerSet(result.layers);
       serverId = result.id;
       // 删除口令服务端只给这一次，立刻存下来，否则这张卡就没法删了
       rememberOwned(result.id, result.deleteToken);
       track('segment-ok', { where: 'server', layers: set.manifest.layers.length });
-      status.textContent = `已切成 ${set.manifest.layers.length} 层 · ${set.manifest.generator ?? ''}`;
+      setText(status, 'status.done', { n: set.manifest.layers.length, generator: set.manifest.generator ?? '' });
     } catch (serverError) {
       if (!(serverError instanceof ServerUnavailableError)) throw serverError;
 
       // 回退：在浏览器里跑。首次要下约 50MB 权重，所以只在服务端指望不上时才走
       console.info('[holocard] 服务端不可用，回退到浏览器端：', serverError.message);
-      showProgress('服务端不可用，改在本机处理');
+      stage = 'browser';
+      showProgress('progress.fallback');
       const { segmentToLayerSet } = await import('../segmenter');
       set = await segmentToLayerSet(file, {
-        onProgress: (p) => showProgress(p.detail, p.ratio),
+        onProgress: (p) =>
+          p.file
+            ? showProgress('stage.downloading', { file: p.file }, p.ratio)
+            : showProgress(`stage.${p.stage}`, undefined, p.ratio),
       });
       track('segment-ok', { where: 'browser', layers: set.manifest.layers.length });
-      status.textContent = `已在本机切成 ${set.manifest.layers.length} 层 · ${set.manifest.generator ?? ''}`;
+      setText(status, 'status.doneLocal', {
+        n: set.manifest.layers.length,
+        generator: set.manifest.generator ?? '',
+      });
     }
 
     show(set, serverId);
@@ -256,9 +371,9 @@ async function processImage(file: File): Promise<void> {
   } catch (error) {
     progress.hidden = true;
     const message = error instanceof Error ? error.message : String(error);
-    // 只报错误信息，不报文件名——那是用户的东西
-    track('segment-fail', { message: message.slice(0, 120) });
-    status.textContent = `处理失败：${message}`;
+    // 只报错误信息和走到哪一步，不报文件名——那是用户的东西
+    track('segment-fail', { stage, message: message.slice(0, 120) });
+    setText(status, 'status.failed', { message: describeError(error) });
   } finally {
     busy = false;
   }
@@ -300,35 +415,39 @@ drop.addEventListener('drop', (event) => {
   if (file?.type.startsWith('image/')) {
     void processImage(file);
   } else if (file) {
-    status.textContent = '只接受图片文件';
+    setText(status, 'status.imagesOnly');
   }
 });
 
-/** 把这张卡转为永久保留，并拿到分享链接 */
+// ---------- 分享与删除 ----------
+
+/**
+ * 把这张卡转为永久保留，并拿到分享链接。
+ * 请求头带着当前语言：服务端按它渲染这个语言的分享图，链接上也带上语言，
+ * 发到群里别人点开看到的标题、描述、分享图都是分享人的语言。
+ */
 async function doShare(): Promise<void> {
   if (!currentId) return;
   shareBtn.disabled = true;
-  shareBtn.textContent = '正在生成…';
+  setText(shareBtn, 'share.creating');
 
   try {
     const res = await fetch(`${import.meta.env.BASE_URL}api/cards/${currentId}/share`, {
       method: 'POST',
+      headers: apiHeaders(),
     });
-    if (!res.ok) {
-      const body = (await res.json().catch(() => ({}))) as { error?: string };
-      throw new Error(body.error ?? `HTTP ${res.status}`);
-    }
-    shareUrlInput.value = shareUrl(currentId);
+    if (!res.ok) throw await apiError(res, `HTTP ${res.status}`);
+    shareUrlInput.value = shareUrl(currentId, lang());
     shareResult.hidden = false;
-    shareBtn.textContent = '已生成';
+    setText(shareBtn, 'share.created');
     track('share');
     // 成功不用多说，链接出现在输入框里本身就是反馈
-    shareHint.textContent = '';
+    clearText(shareHint);
     shareUrlInput.select();
   } catch (error) {
     shareBtn.disabled = false;
-    shareBtn.textContent = '生成分享链接';
-    shareHint.textContent = `生成失败：${error instanceof Error ? error.message : String(error)}`;
+    setText(shareBtn, 'share.create');
+    setText(shareHint, 'share.failed', { message: describeError(error) });
   }
 }
 
@@ -339,23 +458,25 @@ async function doShare(): Promise<void> {
  */
 async function doDelete(): Promise<void> {
   if (!currentId) return;
-  if (!confirm('删除后无法恢复，已经分享出去的链接也会立刻失效。确定要删除吗？')) return;
+  if (!confirm(t('delete.confirm'))) return;
 
   deleteBtn.disabled = true;
-  deleteBtn.textContent = '正在删除…';
+  setText(deleteBtn, 'delete.deleting');
   try {
     await deleteCard(currentId);
     track('delete');
     ownerBox.hidden = true;
     shareBox.hidden = true;
     exportBox.hidden = true;
-    status.textContent = '这张卡已删除。服务端上的层文件和预览图都已清掉';
+    setText(status, 'delete.done');
   } catch (error) {
     deleteBtn.disabled = false;
-    deleteBtn.textContent = '删除这张卡';
-    deleteHint.textContent = `删除失败：${error instanceof Error ? error.message : String(error)}`;
+    setText(deleteBtn, 'delete.button');
+    setText(deleteHint, 'delete.failed', { message: describeError(error) });
   }
 }
+
+// ---------- 导出动图 ----------
 
 /**
  * 导出动图，格式按设备定（见 export.ts）。
@@ -376,7 +497,7 @@ async function doExport(): Promise<void> {
     } catch (error) {
       // 用户在面板里点了关闭，不算错，按钮保持「保存到相册」可以再点
       if (error instanceof DOMException && error.name === 'AbortError') return;
-      exportHint.textContent = `保存失败：${error instanceof Error ? error.message : String(error)}`;
+      setText(exportHint, 'export.saveFailed', { message: describeError(error) });
     }
     return;
   }
@@ -386,20 +507,20 @@ async function doExport(): Promise<void> {
 
   const app = blockingInAppBrowser();
   if (app) {
-    exportHint.textContent = `${app}里存不了，点右上角「···」在浏览器中打开再试`;
+    setText(exportHint, 'export.inApp', { app: t(app) });
     return;
   }
 
   const format = FORMAT_FOR[platform];
   exporting = true;
   exportBtn.disabled = true;
-  exportBtn.textContent = '正在生成…';
-  exportHint.textContent = '';
+  setText(exportBtn, 'export.working');
+  clearText(exportHint);
   track('export', { format });
 
   try {
     const files = await requestExport(id, format, (state) => {
-      exportBtn.textContent = state === 'queued' ? '排队中…' : '正在生成…';
+      setText(exportBtn, state === 'queued' ? 'export.queued' : 'export.working');
     });
     // 等的功夫换了一张卡，这份结果就不用了
     if (currentId !== id) {
@@ -412,13 +533,13 @@ async function doExport(): Promise<void> {
       if (navigator.canShare?.({ files: shareFiles })) {
         pendingShare = shareFiles;
         exportBtn.disabled = false;
-        exportBtn.textContent = '保存到相册';
+        setText(exportBtn, 'export.save');
         return;
       }
       // 不支持分享文件的老系统：两个文件都下载下来，让用户在「文件」里一起存
       files.forEach(download);
       resetExport();
-      exportHint.textContent = '已下载 2 个文件：在「文件」App 里同时选中它们，存储到照片';
+      setText(exportHint, 'export.downloadedTwo');
       return;
     }
 
@@ -429,7 +550,7 @@ async function doExport(): Promise<void> {
     const message = error instanceof Error ? error.message : String(error);
     track('export-fail', { format, message: message.slice(0, 120) });
     resetExport();
-    exportHint.textContent = `生成失败：${message}`;
+    setText(exportHint, 'export.failed', { message: describeError(error) });
   } finally {
     exporting = false;
   }
@@ -442,9 +563,35 @@ shareCopy.addEventListener('click', () => {
   shareUrlInput.select();
   // clipboard API 在非安全上下文下不可用，退回老办法
   navigator.clipboard?.writeText(shareUrlInput.value).catch(() => document.execCommand('copy'));
-  shareCopy.textContent = '已复制';
-  setTimeout(() => (shareCopy.textContent = '复制'), 1500);
+  setText(shareCopy, 'share.copied');
+  setTimeout(() => setText(shareCopy, 'share.copy'), 1500);
 });
+
+// ---------- 语言切换 ----------
+
+function markLangButtons(active: Lang): void {
+  for (const button of langButtons) {
+    button.setAttribute('aria-pressed', String(button.dataset['lang'] === active));
+  }
+}
+
+for (const button of langButtons) {
+  button.addEventListener('click', () => {
+    const next = LANGS.find((l) => l === button.dataset['lang']);
+    if (next) setLang(next);
+  });
+}
+
+onLangChange((next) => {
+  markLangButtons(next);
+  for (const [el, { key, params }] of liveTexts) el.textContent = t(key, params);
+  if (current) buildFoilControls(current);
+  // 已经生成的分享链接也换成新语言的地址
+  if (currentId && !shareResult.hidden) shareUrlInput.value = shareUrl(currentId, next);
+  track('lang', { lang: next });
+});
+
+// ---------- 渲染页（服务端截分享图、导出动图） ----------
 
 /**
  * 渲染页的深色底。背景用这张卡自己的画面糊开当色调（具体叠法见 style.css 里 .render-bg 的注释），
@@ -463,27 +610,48 @@ function buildRenderBackground(): void {
 }
 
 /**
- * 给 OG 图补上右侧文案。
+ * 给 OG 图补上右侧文案，按渲染页地址上的 ?lang 出对应语言。
  *
  * 1200×630 的横图配竖卡片，直接居中会剩两大片空白，所以排成左卡片右文案。
  */
 function buildRenderCopy(): void {
   const copy = document.createElement('div');
   copy.className = 'render-copy';
+
+  const headline = document.createElement('h2');
+  headline.innerHTML = t('og.headlineHtml');
+
   /*
    * 「前中后」三个字本身摆成三层：前最大最近，依次往右后方退，
    * 每一个都被前一个盖住左边三分之一。一眼就能看懂「分层」，不用读说明。
    * 三个字的质感也对应默认的上箔方式：最近层哑光（白），中间 holo，最远 sunpillar。
+   * 英文是三个单词，宽度不是方块字那样一个字号见方，改用行内排版、互相压一角（见 style.css）。
    */
-  copy.innerHTML =
-    '<h2>会发光的<br />分层闪卡</h2>' +
-    '<div class="depth" role="img" aria-label="前中后景">' +
-    '<span class="depth__g depth__g--back">后</span>' +
-    '<span class="depth__g depth__g--mid">中</span>' +
-    '<span class="depth__g depth__g--front">前</span>' +
-    '</div>' +
-    '<p>每层各上各的箔面，转动它，箔面会跟着角度变。</p>' +
-    '<span class="render-url">holocard.longsizhuo.com</span>';
+  const depth = document.createElement('div');
+  depth.className = lang() === 'en' ? 'depth depth--words' : 'depth';
+  depth.setAttribute('role', 'img');
+  depth.setAttribute('aria-label', t('og.depthLabel'));
+  const glyph = (which: 'front' | 'mid' | 'back'): HTMLSpanElement => {
+    const span = document.createElement('span');
+    span.className = `depth__g depth__g--${which}`;
+    span.textContent = t(`og.${which}`);
+    return span;
+  };
+  // 方块字按绝对定位摆，DOM 顺序无所谓；单词走行内排版，得按从前到后的顺序排
+  depth.append(
+    ...(lang() === 'en'
+      ? [glyph('front'), glyph('mid'), glyph('back')]
+      : [glyph('back'), glyph('mid'), glyph('front')]),
+  );
+
+  const body = document.createElement('p');
+  body.textContent = t('og.body');
+
+  const url = document.createElement('span');
+  url.className = 'render-url';
+  url.textContent = 'holocard.longsizhuo.com';
+
+  copy.append(headline, depth, body, url);
   document.querySelector('.page__body')?.append(copy);
 }
 
@@ -551,8 +719,14 @@ function exposeExportHooks(): void {
   };
 }
 
+// ---------- 启动 ----------
+
 /** 按路由决定首屏加载什么 */
 async function boot(): Promise<void> {
+  // 服务端发页面时已经按语言换好了文字；这里再过一遍，本地开发（vite 直接发页面）时也对
+  applyTranslations();
+  markLangButtons(lang());
+
   const exportLayout = route.mode === 'render' ? renderExportLayout() : null;
   if (route.mode === 'render') {
     // 给服务端截 OG 图、导出动图用：只留卡片，固定在炫光峰值姿态，不带任何 UI
@@ -575,7 +749,7 @@ async function boot(): Promise<void> {
     try {
       const set = await loadLayerSet(`${import.meta.env.BASE_URL}api/layers/${route.id}`);
       show(set, route.id);
-      status.textContent = `${set.manifest.layers.length} 层`;
+      setText(status, 'status.layers', { n: set.manifest.layers.length });
 
       if (route.mode === 'render') {
         // 透明底的贴纸只要卡片本身；竖屏动图要深色底但不要分享图右边那段字
@@ -595,7 +769,7 @@ async function boot(): Promise<void> {
       }
       return;
     } catch (error) {
-      status.textContent = `这张卡打不开了：${error instanceof Error ? error.message : String(error)}`;
+      setText(status, 'status.cardFailed', { message: describeError(error) });
       if (route.mode === 'render') document.body.dataset['ready'] = 'error';
       return;
     }
@@ -604,9 +778,9 @@ async function boot(): Promise<void> {
   try {
     const sample = await loadLayerSet(`${import.meta.env.BASE_URL}samples/forest`);
     show(sample);
-    status.textContent = `已加载 ${sample.manifest.layers.length} 层手工素材 samples/forest`;
+    setText(status, 'status.sampleLoaded', { n: sample.manifest.layers.length });
   } catch (error) {
-    status.textContent = `素材加载失败：${error instanceof Error ? error.message : String(error)}`;
+    setText(status, 'status.sampleFailed', { message: describeError(error) });
   }
 }
 

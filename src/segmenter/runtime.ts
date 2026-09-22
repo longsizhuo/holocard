@@ -47,6 +47,34 @@ export function configureModelSource(): void {
   if (template) env.remotePathTemplate = template;
 }
 
+/**
+ * 浏览器端退回处理时，优先从本站的 /models/ 取权重（服务端把自己在用的 q8 权重原样发出来）。
+ *
+ * 默认的 Hugging Face 官方 CDN 在国内基本连不上。埋点里查到过：服务端一抖、前端退回本机处理，
+ * 模型下不来，用户看到的就是一句「Load failed」。本站能打开，权重就能下。
+ * 纯静态自托管（没有后端、也就没有 /models/）或者构建时指定了 VITE_MODEL_HOST 的，照旧。
+ *
+ * 返回是不是用上了本站：本站只有 q8 一种精度，调用方据此选精度和设备。
+ */
+export async function useOwnModelHost(modelId: string): Promise<boolean> {
+  configureModelSource();
+  if (isNode() || import.meta.env.VITE_MODEL_HOST) return false;
+
+  const base = `${location.origin}${import.meta.env.BASE_URL}models/`;
+  try {
+    const res = await fetch(`${base}${modelId}/config.json`, {
+      method: 'HEAD',
+      signal: AbortSignal.timeout(3000),
+    });
+    if (!res.ok) return false;
+  } catch {
+    return false;
+  }
+  env.remoteHost = base;
+  env.remotePathTemplate = '{model}/';
+  return true;
+}
+
 let devicePromise: Promise<Device> | null = null;
 
 /** 探测 WebGPU 是否可用。不可用就退回 WASM，慢很多但至少能跑 */

@@ -16,9 +16,13 @@ import {
 
 /** manifest 校验失败时抛出，带上具体原因便于排查坏数据 */
 export class LayerFormatError extends Error {
-  constructor(message: string) {
+  /** 取文件时的 HTTP 状态码。404 多半是卡过期或被删了，界面据此给一句人话 */
+  readonly status: number | undefined;
+
+  constructor(message: string, status?: number) {
     super(`[.layers] ${message}`);
     this.name = 'LayerFormatError';
+    this.status = status;
   }
 }
 
@@ -145,29 +149,45 @@ export function parseManifest(raw: unknown): LayerManifest {
   return manifest;
 }
 
+/** 网络失败、5xx 时最多重试几次，以及两次之间等多久 */
+const RETRIES = 3;
+const RETRY_DELAY_MS = 1200;
+
+/**
+ * 带重试的 fetch，并且把响应体整个读完才算成功。
+ *
+ * 线上查到过：服务端十几秒就做好了卡，用户在微信里下载层图时连接断了（Load failed），
+ * 前端直接报错，卡就这么丢了。层图一张一两 MB，手机网络上断一次很常见，重来一次多半就好。
+ * 4xx 不重试——那是真的没有这个文件。
+ */
+async function fetchBlob(url: string, signal?: AbortSignal): Promise<Blob> {
+  for (let attempt = 1; ; attempt++) {
+    try {
+      const res = await fetch(url, signal ? { signal } : {});
+      if (res.ok) return await res.blob();
+      if (res.status < 500 || attempt >= RETRIES) {
+        throw new LayerFormatError(`读取 ${url.split('/').pop() ?? url} 失败：HTTP ${res.status}`, res.status);
+      }
+    } catch (error) {
+      if (error instanceof LayerFormatError || signal?.aborted || attempt >= RETRIES) throw error;
+    }
+    await new Promise((resolve) => setTimeout(resolve, RETRY_DELAY_MS * attempt));
+  }
+}
+
 /**
  * 从一个 .layers 目录的 URL 加载完整层集合。
  * baseUrl 指向目录本身，例如 "/samples/forest"。
  */
 export async function loadLayerSet(baseUrl: string, signal?: AbortSignal): Promise<LayerSet> {
   const base = baseUrl.replace(/\/+$/, '');
-  const init: RequestInit = signal ? { signal } : {};
 
-  const res = await fetch(`${base}/manifest.json`, init);
-  if (!res.ok) {
-    throw new LayerFormatError(`读取 manifest 失败：HTTP ${res.status}`);
-  }
-  const manifest = parseManifest(await res.json());
+  const manifestBlob = await fetchBlob(`${base}/manifest.json`, signal);
+  const manifest = parseManifest(JSON.parse(await manifestBlob.text()));
 
   // 并行拉取所有层，层数很少（2~5），不必限流
   const images = await Promise.all(
-    manifest.layers.map(async (layer) => {
-      const imgRes = await fetch(`${base}/${layer.file}`, init);
-      if (!imgRes.ok) {
-        throw new LayerFormatError(`读取 ${layer.file} 失败：HTTP ${imgRes.status}`);
-      }
-      return imgRes.blob();
-    }),
+    manifest.layers.map((layer) => fetchBlob(`${base}/${layer.file}`, signal)),
   );
 
   return { manifest, images };

@@ -144,6 +144,8 @@ export interface PreviewOptions {
    * 调分享图时用来看不同角度下箔面和炫光的样子。
    */
   pose?: { x: number; y: number };
+  /** 分享图右边那段字用哪种语言（zh / en / ja），不给就是中文 */
+  lang?: string;
 }
 
 /** 渲染一张卡的预览图 */
@@ -160,14 +162,25 @@ export async function renderPreview(
       height: options.height ?? PREVIEW_HEIGHT,
       // 截出来的图会被放大显示，2 倍像素密度看着才不糊
       scale: 2,
-      query: options.pose ? { pose: `${options.pose.x},${options.pose.y}` } : {},
+      query: {
+        ...(options.pose ? { pose: `${options.pose.x},${options.pose.y}` } : {}),
+        /*
+         * 中文也要显式带上：不带的话渲染页按无头浏览器自己的语言选，
+         * 服务器上的 Chromium 是 en-US，中文分享图会被渲染成英文。
+         */
+        lang: options.lang ?? 'zh',
+      },
     },
     async (page) => {
       // 姿态是 setPose 直接写的（不走动画），但样式重算和合成还需要一两帧
       await page.waitForTimeout(250);
+      /*
+       * 截图超时放宽到 90 秒。默认 30 秒在上线头一天的高峰期超时了 18 次：
+       * 机器同时在跑分层，没有显卡的软件渲染被挤得很慢，但并不是卡死了。
+       */
       return options.format === 'png'
-        ? await page.screenshot({ type: 'png' })
-        : await page.screenshot({ type: 'jpeg', quality: 88 });
+        ? await page.screenshot({ type: 'png', timeout: 90_000 })
+        : await page.screenshot({ type: 'jpeg', quality: 88, timeout: 90_000 });
     },
   );
 }

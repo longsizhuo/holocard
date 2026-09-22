@@ -41,7 +41,7 @@ export const EXPORT_FORMATS: readonly ExportFormat[] = ['live', 'motion', 'apng'
  * 导出的版本号，写在文件名里。改了画面、动作或封装参数就加一：
  * 旧文件名对不上，下次有人导出时自然重新生成，不用手工清理存量。
  */
-const EXPORT_VERSION = 1;
+const EXPORT_VERSION = 2;
 
 const FFMPEG = process.env.HOLOCARD_FFMPEG ?? 'ffmpeg';
 
@@ -307,10 +307,12 @@ const PHONE = { width: 360, height: 640, stillScale: 3, videoScale: 2, fps: 25, 
 
 /**
  * 透明底贴纸的画面参数。APNG 每一帧都是一整张图，体积涨得很快：
- * 卡片宽 300、按 1.25 倍截（375 像素宽），20 帧/秒、一圈 2 秒共 40 帧，首尾相接循环。
- * 量化成 256 色之后竖卡约 3MB、横卡约 1.5MB。试过 1.5 倍、48 帧，竖卡要 5.6MB。
+ * 卡片宽 300、最多按 1.25 倍截（375 像素宽），20 帧/秒、一圈 2 秒共 40 帧，首尾相接循环。
+ * 每帧另有一个像素上限：体积基本和画面面积成正比，又细又长的竖卡按 1.25 倍截的话
+ * 一帧四十多万像素，纹理再碎一点（月球表面那种）能到 7MB。
+ * 量化成 256 色之后横卡约 1.5MB、竖卡两三 MB。试过 1.5 倍、48 帧，竖卡要 5.6MB。
  */
-const STICKER = { cardWidth: 300, margin: 36, scale: 1.25, fps: 20, steps: 40 };
+const STICKER = { cardWidth: 300, margin: 36, scale: 1.25, maxPixels: 200_000, fps: 20, steps: 40 };
 
 async function readManifestRatio(dir: string): Promise<number> {
   const manifest = JSON.parse(await readFile(join(dir, 'manifest.json'), 'utf8')) as {
@@ -442,14 +444,18 @@ async function exportApng(baseUrl: string, id: string, dir: string, signal: Abor
   const frames: Buffer[] = [];
   const size = { width: 0, height: 0 };
 
+  const width = STICKER.cardWidth + STICKER.margin * 2;
+  const height = Math.round(STICKER.cardWidth / ratio) + STICKER.margin * 2;
+  const scale = Math.min(STICKER.scale, Math.sqrt(STICKER.maxPixels / (width * height)));
+
   await captureSequence({
     baseUrl,
     id,
-    width: STICKER.cardWidth + STICKER.margin * 2,
-    height: Math.round(STICKER.cardWidth / ratio) + STICKER.margin * 2,
+    width,
+    height,
     query: { export: 'sticker' },
     poses,
-    scale: STICKER.scale,
+    scale,
     signal,
     prepare: (page) =>
       page.evaluate((margin) => {

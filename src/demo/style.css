@@ -157,7 +157,6 @@ body {
  * 指的是仓库首页（方便直接 Star），和页脚那个指向确切 commit 的源码链接是两回事。
  */
 .gh {
-  margin-left: auto;          /* 顶到最右，不依赖固定定位，窄屏换行也不会盖住别的 */
   align-self: center;
   position: relative;
   overflow: hidden;
@@ -193,6 +192,48 @@ body {
 .gh:hover {
   transform: translateY(-1px);
   box-shadow: 0 1px 0 rgba(255, 255, 255, 0.9) inset, 0 10px 22px -10px rgba(60, 50, 90, 0.7);
+}
+
+/* GitHub 按钮和语言切换一组，顶到最右。不依赖固定定位，窄屏换行也不会盖住别的 */
+.page__actions {
+  margin-left: auto;
+  align-self: center;
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+/*
+ * 语言切换：一组小胶囊，当前语言用和 GitHub 按钮同一套珠光底标出来。
+ * 紧挨在 GitHub 按钮右边，两个一起放在 .page__actions 里靠右。
+ */
+.lang {
+  align-self: center;
+  flex: none;
+  display: inline-flex;
+  padding: 2px;
+  border-radius: 999px;
+  border: 1px solid var(--line);
+  background: var(--surface);
+}
+.lang button {
+  min-width: 30px;
+  padding: 4px 8px;
+  border: 0;
+  border-radius: 999px;
+  background: transparent;
+  color: var(--muted);
+  font: inherit;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+}
+.lang button:hover { color: var(--fg); }
+.lang button[aria-pressed='true'] {
+  background: linear-gradient(120deg, var(--p5), var(--p2) 45%, var(--p3));
+  box-shadow: 0 1px 0 rgba(255, 255, 255, 0.9) inset;
+  color: var(--fg);
 }
 
 .page__body {
@@ -513,6 +554,7 @@ select {
   .page__sub { font-size: 12px; order: 3; }
   /* 手机上标题和按钮一行，副标题整行放下面 */
   .gh { font-size: 12px; padding: 6px 12px; }
+  .lang button { min-width: 26px; padding: 3px 6px; font-size: 11px; }
   .panel { max-height: none; }
   .panel__scroll { overflow: visible; }
 }
@@ -717,6 +759,38 @@ body.is-render .hc {
   -webkit-background-clip: text;
   background-clip: text;
   color: transparent;
+}
+
+/*
+ * 英文版的「前中后」是三个单词。单词宽度不像方块字那样等于字号，没法按字号算位置，
+ * 改成行内排版：后一个词往左压住前一个词的末尾、再往上抬一点，层次关系和方块字版一样。
+ * 字号整体收小：三个词并排比三个方块字宽得多，原来的字号会冲出文案那一栏。
+ */
+.depth--words {
+  --f: 58px;
+  --m: 48px;
+  --b: 40px;
+  display: flex;
+  align-items: flex-end;
+  /* 三个词一级级往上抬，块要留出抬起来的高度 */
+  height: calc(var(--f) * 1.9);
+}
+.depth--words .depth__g {
+  position: relative;
+  left: auto;
+  letter-spacing: -0.02em;
+}
+/*
+ * 台阶：每个词往上抬大半个字高，只压住前一个词右上角那一小块。
+ * 一开始只抬了几个像素、压了 0.28em，三个词粘成一个词读不出来（FrontMid3ack）。
+ */
+.depth--words .depth__g--mid {
+  margin-left: -0.14em;
+  bottom: calc(var(--f) * 0.5);
+}
+.depth--words .depth__g--back {
+  margin-left: -0.14em;
+  bottom: calc(var(--f) * 0.95);
 }
 
 .render-copy p {

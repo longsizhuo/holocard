@@ -21,24 +21,38 @@
     <main class="page">
       <header class="page__head">
         <h1>HoloCard</h1>
-        <p class="page__sub">上传一张照片，自动切成前中后景，每层各上各的箔面，渲染成闪卡。</p>
+        <p class="page__sub" data-i18n="head.sub">上传一张照片，自动切成前中后景，每层各上各的箔面，渲染成闪卡。</p>
 
         <!--
           仓库直链，给人点 Star 用。页脚那个是许可证声明里的同一个地址。
           render 模式（截 OG 图）整个页头都是隐藏的，不会进分享图。
         -->
+        <!-- GitHub 按钮和语言切换放一组，一起靠右；分开放的话副标题一长，切换就被挤到下一行最左边 -->
+        <div class="page__actions">
         <a
           class="gh"
           href="https://github.com/longsizhuo/holocard"
           target="_blank"
           rel="noreferrer"
           title="在 GitHub 上查看并 Star"
+          data-i18n-title="head.starTitle"
         >
           <svg viewBox="0 0 16 16" aria-hidden="true" focusable="false">
             <path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27s1.36.09 2 .27c1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.012 8.012 0 0 0 16 8c0-4.42-3.58-8-8-8z" />
           </svg>
-          <span>开源 · 给个 Star</span>
+          <span data-i18n="head.star">开源 · 给个 Star</span>
         </a>
+
+        <!--
+          语言切换。按浏览器语言自动选好了，这里给想换的人；选过一次记在 cookie 里。
+          按钮上写的是各自语言的名字，不跟着当前语言变——找自己的语言时认得出来。
+        -->
+        <div class="lang" role="group" aria-label="语言" data-i18n-aria="head.lang">
+          <button type="button" data-lang="zh" lang="zh-CN">中</button>
+          <button type="button" data-lang="en" lang="en">EN</button>
+          <button type="button" data-lang="ja" lang="ja">日</button>
+        </div>
+        </div>
       </header>
 
       <section class="page__body">
@@ -51,20 +65,20 @@
           -->
           <div class="drop" id="drop">
             <input type="file" id="file" accept="image/*" hidden />
-            <strong>拖一张照片进来</strong>
-            <span>或点击选择</span>
+            <strong data-i18n="drop.title">拖一张照片进来</strong>
+            <span data-i18n="drop.hint">或点击选择</span>
           </div>
 
           <div class="progress" id="progress" hidden>
             <div class="progress__bar"><i id="progress-fill"></i></div>
-            <span id="progress-text">准备中</span>
+            <span id="progress-text" data-i18n="progress.preparing">准备中</span>
           </div>
 
           <div class="share" id="share" hidden>
-            <button type="button" class="share__btn" id="share-btn">生成分享链接</button>
+            <button type="button" class="share__btn" id="share-btn" data-i18n="share.create">生成分享链接</button>
             <div class="share__result" id="share-result" hidden>
               <input type="text" id="share-url" readonly />
-              <button type="button" id="share-copy">复制</button>
+              <button type="button" id="share-copy" data-i18n="share.copy">复制</button>
             </div>
             <!-- 平时空着，只在出错时填内容。保留策略这类事用户不关心，不占版面 -->
             <small class="field__hint" id="share-hint"></small>
@@ -80,56 +94,49 @@
           </div>
 
           <div class="danger" id="owner" hidden>
-            <button type="button" class="danger__btn" id="delete-btn">删除这张卡</button>
+            <button type="button" class="danger__btn" id="delete-btn" data-i18n="delete.button">删除这张卡</button>
             <small class="field__hint" id="delete-hint"></small>
           </div>
 
           <div class="panel__scroll">
-            <h2 class="panel__title">各层箔面</h2>
-            <p class="panel__lead">
-              真实闪卡的底材是箔：主体用不透明油墨盖住所以哑光，背景不盖所以闪。
-            </p>
+            <h2 class="panel__title" data-i18n="panel.foils">各层箔面</h2>
+            <p class="panel__lead" data-i18n="panel.lead">真实闪卡的底材是箔：主体用不透明油墨盖住所以哑光，背景不盖所以闪。</p>
             <div id="foil-list"></div>
 
             <!-- 调参是次要动作，默认折起来，省下的高度留给卡片 -->
             <details class="more">
-              <summary class="more__head">景深与炫光</summary>
+              <summary class="more__head" data-i18n="panel.more">景深与炫光</summary>
 
               <label class="field">
-                <span class="field__label">视差振幅 <output id="out-amp">6%</output></span>
+                <span class="field__label"><span data-i18n="panel.amp">视差振幅</span> <output id="out-amp">6%</output></span>
                 <input id="ctl-amp" type="range" min="0" max="16" step="0.5" value="6" />
-                <small class="field__hint">拉到 0 卡面就是完全平的</small>
+                <small class="field__hint" data-i18n="panel.ampHint">拉到 0 卡面就是完全平的</small>
               </label>
 
               <label class="field">
-                <span class="field__label">炫光强度 <output id="out-intensity">0.35</output></span>
+                <span class="field__label"><span data-i18n="panel.halo">炫光强度</span> <output id="out-intensity">0.35</output></span>
                 <input id="ctl-intensity" type="range" min="0" max="1" step="0.05" value="0.35" />
               </label>
 
               <label class="field">
-                <span class="field__label">角度锐度 <output id="out-sharp">120</output></span>
+                <span class="field__label"><span data-i18n="panel.sharp">角度锐度</span> <output id="out-sharp">120</output></span>
                 <input id="ctl-sharp" type="range" min="10" max="400" step="10" value="120" />
-                <small class="field__hint">越大，出五彩的倾角窗口越窄</small>
+                <small class="field__hint" data-i18n="panel.sharpHint">越大，出五彩的倾角窗口越窄</small>
               </label>
 
               <div class="readout">
-                <span>当前炫光</span>
+                <span data-i18n="panel.readout">当前炫光</span>
                 <div class="readout__bar"><i id="halo-fill"></i></div>
                 <output id="out-halo">0.00</output>
               </div>
             </details>
 
-            <p class="panel__note" id="status">正在加载素材</p>
+            <p class="panel__note" id="status" data-i18n="status.loadingSample">正在加载素材</p>
           </div>
         </aside>
       </section>
 
-      <footer class="page__foot">
-        箔面配方与交互手感移植自
-        <a href="https://github.com/simeydotme/pokemon-cards-css" target="_blank" rel="noreferrer">pokemon-cards-css</a>
-        （Simon Goellner，GPL-3.0）。本项目同样以 GPL-3.0 发布，源码在
-        <a href="https://github.com/longsizhuo/holocard" target="_blank" rel="noreferrer">GitHub</a>。
-      </footer>
+      <footer class="page__foot" data-i18n-html="foot.creditHtml">箔面配方与交互手感移植自 <a href="https://github.com/simeydotme/pokemon-cards-css" target="_blank" rel="noreferrer">pokemon-cards-css</a>（Simon Goellner，GPL-3.0）。本项目同样以 GPL-3.0 发布，源码在 <a href="https://github.com/longsizhuo/holocard" target="_blank" rel="noreferrer">GitHub</a>。</footer>
     </main>
 
     <script type="module" src="/src/demo/main.ts"></script>

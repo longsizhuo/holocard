@@ -10,6 +10,7 @@
  *   pnpm og --watch                改了前端代码自动重出（盯着 src/）
  *   pnpm og --size 1280x640        出别的尺寸。GitHub 仓库的社交预览图要 1280×640
  *   pnpm og --pose 78,22           换个姿态（指针在卡面上的百分比位置，默认和线上一致）
+ *   pnpm og --lang en              右边那段字用英文（en / ja；首页的 og-en.jpg、og-ja.jpg 就是这么出的）
  *   pnpm og --out 路径 --png --no-open
  *   pnpm og --export live          出导出动图：live（实况照片）、motion（动态照片）、apng（电脑上的动图），
  *                                  写到 out/export/，文件名和用户下载到的一样
@@ -65,6 +66,7 @@ interface Args {
   watch: boolean;
   pose: { x: number; y: number } | null;
   export: ExportFormat | null;
+  lang: string;
 }
 
 function parseArgs(argv: string[]): Args {
@@ -78,6 +80,7 @@ function parseArgs(argv: string[]): Args {
     watch: false,
     pose: null,
     export: null,
+    lang: 'zh',
   };
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i] ?? '';
@@ -90,6 +93,11 @@ function parseArgs(argv: string[]): Args {
       const m = /^(\d+(?:\.\d+)?),(\d+(?:\.\d+)?)$/.exec(next());
       if (!m) throw new Error('--pose 的格式是 x,y，卡面上的百分比位置，比如 78,22');
       args.pose = { x: Number(m[1]), y: Number(m[2]) };
+    }
+    else if (a === '--lang') {
+      const lang = next();
+      if (!['zh', 'en', 'ja'].includes(lang)) throw new Error('--lang 只认 zh / en / ja');
+      args.lang = lang;
     }
     else if (a === '--export') {
       const format = next();
@@ -228,6 +236,7 @@ async function render(base: string, id: string, args: Args): Promise<void> {
     height: args.height,
     format: args.png ? 'png' : 'jpeg',
     ...(args.pose ? { pose: args.pose } : {}),
+    lang: args.lang,
   });
   await mkdir(dirname(args.out), { recursive: true });
   await writeFile(args.out, buf);

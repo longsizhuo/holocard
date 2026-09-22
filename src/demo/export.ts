@@ -7,6 +7,9 @@
  * 文件都在服务端生成（server/export.ts），这里只负责提交、等待、交到用户手上。
  */
 
+import { apiError, apiHeaders, ApiError } from './api';
+import type { MessageKey } from '../i18n';
+
 export type ExportFormat = 'live' | 'motion' | 'apng';
 
 export type Platform = 'ios' | 'android' | 'desktop';
@@ -26,14 +29,14 @@ export const FORMAT_FOR: Record<Platform, ExportFormat> = {
 };
 
 /**
- * 在不让下载的内置浏览器里：返回 App 的名字，否则 null。
+ * 在不让下载的内置浏览器里：返回 App 名字的文案键，否则 null。
  * 微信、QQ 的内置浏览器既拦下载，也不支持系统分享面板，只能请用户换到浏览器里打开。
  * QQ 要排除 QQ 浏览器（UA 里是 MQQBrowser），那是正经浏览器。
  */
-export function blockingInAppBrowser(): string | null {
+export function blockingInAppBrowser(): MessageKey | null {
   const ua = navigator.userAgent;
-  if (/MicroMessenger/i.test(ua)) return '微信';
-  if (/\sQQ\//.test(ua)) return 'QQ';
+  if (/MicroMessenger/i.test(ua)) return 'app.wechat';
+  if (/\sQQ\//.test(ua)) return 'app.qq';
   return null;
 }
 
@@ -57,10 +60,9 @@ const POLL_INTERVAL_MS = 1500;
 const TIMEOUT_MS = 6 * 60 * 1000;
 
 async function call(url: string, method: 'GET' | 'POST'): Promise<ExportStatus> {
-  const res = await fetch(url, { method });
-  const body = (await res.json().catch(() => ({}))) as ExportStatus & { error?: string };
-  if (!res.ok) throw new Error(body.error ?? `HTTP ${res.status}`);
-  return body;
+  const res = await fetch(url, { method, headers: apiHeaders() });
+  if (!res.ok) throw await apiError(res, `HTTP ${res.status}`);
+  return (await res.json()) as ExportStatus;
 }
 
 /** 提交导出并等到生成好，返回文件列表。onWait 在排队 / 生成中时回调，给界面更新文字用 */
@@ -74,13 +76,14 @@ export async function requestExport(
   let status = await call(url, 'POST');
   while (status.state === 'queued' || status.state === 'running') {
     onWait?.(status.state);
-    if (Date.now() > deadline) throw new Error('等太久了，稍后再试');
+    if (Date.now() > deadline) throw new ApiError('等太久了', 'export_timeout');
     await new Promise((resolve) => setTimeout(resolve, POLL_INTERVAL_MS));
     status = await call(url, 'GET');
   }
   if (status.state === 'done' && status.files?.length) return status.files;
   // none：服务重启把排着的请求丢了
-  throw new Error(status.error ?? '服务刚重启过，再点一次');
+  if (status.state === 'none') throw new ApiError('服务刚重启过', 'export_restarted');
+  throw new Error(status.error ?? '生成失败');
 }
 
 /** 下载一个文件。同源地址配 download 属性，浏览器直接存，不跳页面 */

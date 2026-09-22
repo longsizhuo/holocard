@@ -19,12 +19,23 @@
  */
 
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
+import { createReadStream } from 'node:fs';
 import { mkdir, rm, writeFile, readFile, readdir, stat } from 'node:fs/promises';
 import { randomUUID, timingSafeEqual } from 'node:crypto';
 import { dirname, extname, join, resolve, sep } from 'node:path';
 import { env } from '@huggingface/transformers';
 import { segmentToLayerSet } from '../src/segmenter';
-import { sharpImages, normalizeOriginal } from './images';
+import { sharpImages, normalizeOriginal, layerToWebp, ImageError } from './images';
+import {
+  LANG_TAG,
+  LANGS,
+  isLang,
+  langFromAcceptLanguage,
+  langFromCookie,
+  localizeHtml,
+  translate,
+  type Lang,
+} from '../src/i18n/core';
 import { renderPreview, PREVIEW_HEIGHT, PREVIEW_WIDTH } from './preview';
 import { recordHit, flushHits, sweepCards, expiresAt, importLegacy } from './cards';
 import { CardDb, type CardRow } from './db';
@@ -144,8 +155,64 @@ function clientIp(req: IncomingMessage): string {
   return req.socket.remoteAddress ?? 'unknown';
 }
 
-/** 正在渲染预览图的卡片，避免同一张重复排队 */
-const previewJobs = new Set<string>();
+/*
+ * 分享图（OG 预览图）的渲染队列，一次只渲染一张，失败了过一会儿重试。
+ *
+ * 以前是分享那一下在后台直接渲染、失败就算了。上线头一天的高峰期，渲染和分层挤在一起，
+ * 截图超时 18 次，分享过的 32 张卡里有 23 张一直没有分享图——链接发到微信里没有大图。
+ * 现在除了排队重试，卡片页被打开时发现缺图也会补，服务启动时把分享过却缺图的都补上。
+ *
+ * 每种语言一张：分享链接带着分享人的语言，分享图右边那段字也是那个语言。
+ */
+interface PreviewJob {
+  id: string;
+  lang: Lang;
+  attempts: number;
+}
+const previewQueue: PreviewJob[] = [];
+let previewing: PreviewJob | null = null;
+const PREVIEW_ATTEMPTS = 3;
+
+function previewFile(lang: Lang): string {
+  return lang === 'zh' ? 'preview.jpg' : `preview-${lang}.jpg`;
+}
+
+function queuePreview(id: string, lang: Lang): void {
+  const same = (job: PreviewJob): boolean => job.id === id && job.lang === lang;
+  if ((previewing && same(previewing)) || previewQueue.some(same)) return;
+  previewQueue.push({ id, lang, attempts: 0 });
+  pumpPreviews();
+}
+
+function pumpPreviews(): void {
+  if (previewing) return;
+  const job = previewQueue.shift();
+  if (!job) return;
+  // 排着的时候被删了、过期了，就不用渲染了
+  if (db.get(job.id)?.status !== 'done') {
+    pumpPreviews();
+    return;
+  }
+  previewing = job;
+  void renderPreview(`http://127.0.0.1:${PORT}`, job.id, { lang: job.lang })
+    .then((buf) => writeFile(join(OUT_DIR, job.id, previewFile(job.lang)), buf))
+    .catch((error: unknown) => {
+      job.attempts++;
+      const message = error instanceof Error ? (error.message.split('\n')[0] ?? '') : String(error);
+      console.error(`[preview] ${job.id} ${job.lang} 渲染失败（第 ${job.attempts} 次）: ${message}`);
+      // 失败多半是那一刻机器太忙，过一会儿再排到队尾
+      if (job.attempts < PREVIEW_ATTEMPTS) {
+        setTimeout(() => {
+          previewQueue.push(job);
+          pumpPreviews();
+        }, 30_000 * job.attempts).unref();
+      }
+    })
+    .finally(() => {
+      previewing = null;
+      pumpPreviews();
+    });
+}
 
 /**
  * 待处理的卡片 id。原图已经在磁盘上，队列里不用再攥着字节——
@@ -177,6 +244,35 @@ function json(res: ServerResponse, status: number, body: unknown): void {
   res.end(payload);
 }
 
+/**
+ * 出错响应。code 是稳定的错误类型，前端按它翻译成当前语言（src/i18n/messages.ts 里的 error.*）；
+ * error 是中文原文，给日志、给没升级的旧页面看。
+ */
+function fail(
+  res: ServerResponse,
+  status: number,
+  code: string,
+  error: string,
+  params?: Record<string, string | number>,
+): void {
+  json(res, status, { error, code, ...(params ? { params } : {}) });
+}
+
+/**
+ * 这次请求用哪种语言：地址上的 ?lang= → 接口请求头 x-holocard-lang（前端已经定好的语言）
+ * → cookie → Accept-Language → 中文。和前端 src/i18n 的规则一致，
+ * 页面一出来就是对的语言，不会先闪一下中文再变。
+ */
+function requestLang(req: IncomingMessage, url: URL): Lang {
+  const fromUrl = url.searchParams.get('lang');
+  if (isLang(fromUrl)) return fromUrl;
+  const fromHeader = req.headers['x-holocard-lang'];
+  if (isLang(fromHeader)) return fromHeader;
+  return (
+    langFromCookie(req.headers.cookie) ?? langFromAcceptLanguage(req.headers['accept-language']) ?? 'zh'
+  );
+}
+
 function text(res: ServerResponse, type: string, body: string, method: string): void {
   res.writeHead(200, {
     'content-type': type,
@@ -201,6 +297,8 @@ function robotsTxt(): string {
     'Disallow: /render/',
     'Disallow: /api/jobs',
     'Disallow: /api/cards',
+    // 模型权重给浏览器端退回处理用，27MB，爬虫抓了没意义
+    'Disallow: /models/',
     '',
     `Sitemap: ${PUBLIC_ORIGIN}/sitemap.xml`,
     '',
@@ -208,19 +306,28 @@ function robotsTxt(): string {
 }
 
 /**
- * sitemap.xml。只有首页：用户的卡片页是 noindex 的，不该出现在这里。
+ * sitemap.xml。只有首页的三个语言版本：用户的卡片页是 noindex 的，不该出现在这里。
+ * 每一条都列出所有语言版本（xhtml:link），搜索引擎据此把它们认成同一页的不同语言。
  * lastmod 取 index.html 的修改时间，也就是最近一次发版。
  */
 async function sitemapXml(): Promise<string> {
   const index = WEB_DIR ? await stat(join(WEB_DIR, 'index.html')).catch(() => null) : null;
   const lastmod = index ? new Date(index.mtimeMs).toISOString().slice(0, 10) : null;
+  const url = (lang: Lang): string => `${PUBLIC_ORIGIN}/${lang === 'zh' ? '' : `?lang=${lang}`}`;
+  const alternates = [
+    ...LANGS.map((l) => `    <xhtml:link rel="alternate" hreflang="${LANG_TAG[l]}" href="${url(l)}" />`),
+    `    <xhtml:link rel="alternate" hreflang="x-default" href="${PUBLIC_ORIGIN}/" />`,
+  ];
   return [
     '<?xml version="1.0" encoding="UTF-8"?>',
-    '<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">',
-    '  <url>',
-    `    <loc>${PUBLIC_ORIGIN}/</loc>`,
-    ...(lastmod ? [`    <lastmod>${lastmod}</lastmod>`] : []),
-    '  </url>',
+    '<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9" xmlns:xhtml="http://www.w3.org/1999/xhtml">',
+    ...LANGS.flatMap((lang) => [
+      '  <url>',
+      `    <loc>${url(lang)}</loc>`,
+      ...(lastmod ? [`    <lastmod>${lastmod}</lastmod>`] : []),
+      ...alternates,
+      '  </url>',
+    ]),
     '</urlset>',
     '',
   ].join('\n');
@@ -279,11 +386,14 @@ async function runJob(id: string): Promise<void> {
       onProgress: (p) => db.update(id, { stage: p.stage }),
     });
 
+    // 流水线出的是 PNG，存盘前转成 WebP（画面有损、alpha 无损），体积只剩一成左右，见 layerToWebp
     await Promise.all(
       set.manifest.layers.map(async (layer, i) => {
         const blob = set.images[i];
         if (!blob) return;
-        await writeFile(join(dir, layer.file), Buffer.from(await blob.arrayBuffer()));
+        const webp = await layerToWebp(Buffer.from(await blob.arrayBuffer()));
+        layer.file = layer.file.replace(/\.png$/, '.webp');
+        await writeFile(join(dir, layer.file), webp);
       }),
     );
     await writeFile(join(dir, 'manifest.json'), JSON.stringify(set.manifest));
@@ -427,8 +537,12 @@ const SPA_ROUTES = [
   /^\/render\/[0-9a-f-]{36}\/?$/,
 ];
 
-/** 卡片目录里对外发的文件：清单、层图、分享图、原图。导出的动图另见 export.ts 的 EXPORT_FILE */
-const LAYER_FILE = /^(?:manifest\.json|layer-\d{1,2}\.png|preview\.jpg|original\.(?:jpg|png|webp))$/;
+/**
+ * 卡片目录里对外发的文件：清单、层图（新卡是 WebP，老卡是 PNG）、各语言的分享图、原图。
+ * 导出的动图另见 export.ts 的 EXPORT_FILE
+ */
+const LAYER_FILE =
+  /^(?:manifest\.json|layer-\d{1,2}\.(?:png|webp)|preview(?:-(?:en|ja))?\.jpg|original\.(?:jpg|png|webp))$/;
 
 /** HTML 属性转义。卡片 id 是我们自己生成的 UUID，但注入前仍然一律转义 */
 function escapeAttr(value: string): string {
@@ -439,39 +553,73 @@ function escapeAttr(value: string): string {
     .replace(/>/g, '&gt;');
 }
 
+/** 各语言版本的地址：中文就是本来的地址，别的语言带 ?lang= */
+function langUrl(path: string, lang: Lang): string {
+  return `${PUBLIC_ORIGIN}${path}${lang === 'zh' ? '' : `?lang=${lang}`}`;
+}
+
+const OG_LOCALE: Record<Lang, string> = { zh: 'zh_CN', en: 'en_US', ja: 'ja_JP' };
+
+/** OG 和 Twitter card 标签，首页和分享页共用 */
+function socialTags(o: {
+  url: string;
+  title: string;
+  description: string;
+  image: string | null;
+  lang: Lang;
+}): string[] {
+  return [
+    `<meta property="og:type" content="website" />`,
+    `<meta property="og:url" content="${escapeAttr(o.url)}" />`,
+    `<meta property="og:title" content="${escapeAttr(o.title)}" />`,
+    `<meta property="og:description" content="${escapeAttr(o.description)}" />`,
+    `<meta property="og:locale" content="${OG_LOCALE[o.lang]}" />`,
+    ...LANGS.filter((l) => l !== o.lang).map(
+      (l) => `<meta property="og:locale:alternate" content="${OG_LOCALE[l]}" />`,
+    ),
+    // 预览图还没渲染好时不给 og:image，免得抓取方缓存一个 404
+    ...(o.image
+      ? [
+          `<meta property="og:image" content="${escapeAttr(o.image)}" />`,
+          `<meta property="og:image:width" content="${PREVIEW_WIDTH}" />`,
+          `<meta property="og:image:height" content="${PREVIEW_HEIGHT}" />`,
+          `<meta name="twitter:card" content="summary_large_image" />`,
+          `<meta name="twitter:image" content="${escapeAttr(o.image)}" />`,
+        ]
+      : [`<meta name="twitter:card" content="summary" />`]),
+    `<meta name="twitter:title" content="${escapeAttr(o.title)}" />`,
+    `<meta name="twitter:description" content="${escapeAttr(o.description)}" />`,
+  ];
+}
+
 /**
  * 给 /c/<id> 注入 OG / Twitter card 标签。
  *
  * 这是分享能不能扩散的关键：链接在微信、Twitter 里有没有大图预览，
  * 直接决定别人点不点。标签里的 URL 必须是绝对地址。
  *
- * previewVersion 是预览图文件的 mtime，null 表示还没渲染出来。
- * 带上它是因为预览图在 CDN 上按 immutable 缓存了 4 小时，
- * 改了渲染逻辑重新出图之后，不换 URL 的话抓取方和边缘都还拿着旧图。
+ * 标题、描述按分享链接上的语言出（分享人的语言）。分享图优先用同一语言的那张；
+ * 那张还没渲染出来时先用中文那张顶上——有图总比没图强，卡片本身才是主角。
+ * 图的地址带文件 mtime 当版本号：预览图在 CDN 上按 immutable 缓存，
+ * 重新出图之后不换 URL 的话抓取方和边缘都还拿着旧图。
  */
-function injectShareMeta(html: string, id: string, previewVersion: number | null): string {
-  const pageUrl = escapeAttr(`${PUBLIC_ORIGIN}/c/${id}`);
-  const image = escapeAttr(`${PUBLIC_ORIGIN}/api/layers/${id}/preview.jpg?v=${previewVersion ?? 0}`);
-  const title = 'HoloCard — 一张会发光的分层闪卡';
-  const desc = '前中后景自动分层，每层各上各的箔面。上传你自己的照片试试。';
-
+function injectShareMeta(
+  html: string,
+  id: string,
+  lang: Lang,
+  preview: { lang: Lang; version: number } | null,
+): string {
+  const image = preview
+    ? `${PUBLIC_ORIGIN}/api/layers/${id}/${previewFile(preview.lang)}?v=${preview.version}`
+    : null;
   const tags = [
-    `<meta property="og:type" content="website" />`,
-    `<meta property="og:url" content="${pageUrl}" />`,
-    `<meta property="og:title" content="${title}" />`,
-    `<meta property="og:description" content="${desc}" />`,
-    // 预览图还没渲染好时不给 og:image，免得抓取方缓存一个 404
-    ...(previewVersion !== null
-      ? [
-          `<meta property="og:image" content="${image}" />`,
-          `<meta property="og:image:width" content="${PREVIEW_WIDTH}" />`,
-          `<meta property="og:image:height" content="${PREVIEW_HEIGHT}" />`,
-          `<meta name="twitter:card" content="summary_large_image" />`,
-          `<meta name="twitter:image" content="${image}" />`,
-        ]
-      : [`<meta name="twitter:card" content="summary" />`]),
-    `<meta name="twitter:title" content="${title}" />`,
-    `<meta name="twitter:description" content="${desc}" />`,
+    ...socialTags({
+      url: langUrl(`/c/${id}`, lang),
+      title: translate(lang, 'share.ogTitle'),
+      description: translate(lang, 'share.ogDescription'),
+      image,
+      lang,
+    }),
     // 用户上传的内容，不进搜索引擎
     `<meta name="robots" content="noindex, nofollow" />`,
   ].join('\n    ');
@@ -480,41 +628,32 @@ function injectShareMeta(html: string, id: string, previewVersion: number | null
 }
 
 /**
- * 给首页注入 OG / Twitter card 标签。
+ * 给首页注入 OG / Twitter card 标签、规范地址和各语言版本的地址。
  *
- * 之前只有 /c/<id> 有预览图，直接分享站点首页出去是一张白卡。
- * 图是 public/og.jpg——用 `pnpm og` 从一张挑好的卡渲染出来的静态文件，
- * 不直接引用某张用户卡的 preview.jpg：用户的卡会过期、会被删，首页的门面不能跟着没了。
+ * 分享图是 public/og.jpg（英文、日文是 og-en.jpg、og-ja.jpg）——用 `pnpm og` 从一张挑好的卡
+ * 渲染出来的静态文件，不直接引用某张用户卡：用户的卡会过期、会被删，首页的门面不能跟着没了。
+ * 某个语言的图还没做出来时用中文那张。
  *
- * 地址带文件 mtime 当版本号，理由同分享页：CDN 和各家抓取方都按 URL 缓存。
  * 放在服务端注入而不是写死在 index.html 里，是为了拿 PUBLIC_ORIGIN 拼绝对地址——
  * 别人自托管时地址自然就对。
  */
-function injectHomeMeta(html: string, imageVersion: number | null): string {
-  const pageUrl = escapeAttr(`${PUBLIC_ORIGIN}/`);
-  const title = 'HoloCard — 把任意照片变成会发光的分层闪卡';
-  const desc = '上传一张照片，自动切成前中后景，每层各上各的箔面。转动它，箔面会跟着角度变。';
-  const image = escapeAttr(`${PUBLIC_ORIGIN}/og.jpg?v=${imageVersion ?? 0}`);
-
+function injectHomeMeta(html: string, lang: Lang, image: { file: string; version: number } | null): string {
   const tags = [
-    `<meta property="og:type" content="website" />`,
-    `<meta property="og:url" content="${pageUrl}" />`,
-    `<meta property="og:title" content="${title}" />`,
-    `<meta property="og:description" content="${desc}" />`,
-    ...(imageVersion !== null
-      ? [
-          `<meta property="og:image" content="${image}" />`,
-          `<meta property="og:image:width" content="${PREVIEW_WIDTH}" />`,
-          `<meta property="og:image:height" content="${PREVIEW_HEIGHT}" />`,
-          `<meta name="twitter:card" content="summary_large_image" />`,
-          `<meta name="twitter:image" content="${image}" />`,
-        ]
-      : [`<meta name="twitter:card" content="summary" />`]),
-    `<meta name="twitter:title" content="${title}" />`,
-    `<meta name="twitter:description" content="${desc}" />`,
-    // 带参数的地址（?utm=…、?pose=…）都算同一页，别让搜索引擎当成重复页面
-    `<link rel="canonical" href="${pageUrl}" />`,
-    `<script type="application/ld+json">${structuredData(html)}</script>`,
+    ...socialTags({
+      url: langUrl('/', lang),
+      title: translate(lang, 'home.ogTitle'),
+      description: translate(lang, 'home.ogDescription'),
+      image: image ? `${PUBLIC_ORIGIN}/${image.file}?v=${image.version}` : null,
+      lang,
+    }),
+    // 每种语言一个规范地址；带别的参数（?utm=…、?pose=…）的都算同一页
+    `<link rel="canonical" href="${escapeAttr(langUrl('/', lang))}" />`,
+    // 各语言版本在哪；x-default 是不带参数、按浏览器语言自动选的那个入口
+    ...LANGS.map(
+      (l) => `<link rel="alternate" hreflang="${LANG_TAG[l]}" href="${escapeAttr(langUrl('/', l))}" />`,
+    ),
+    `<link rel="alternate" hreflang="x-default" href="${escapeAttr(`${PUBLIC_ORIGIN}/`)}" />`,
+    `<script type="application/ld+json">${structuredData(html, lang)}</script>`,
   ].join('\n    ');
 
   return html.replace('</head>', `  ${tags}\n  </head>`);
@@ -524,10 +663,10 @@ function injectHomeMeta(html: string, imageVersion: number | null): string {
  * 首页的结构化数据（JSON-LD）。
  *
  * 搜索引擎和 AI 靠它确认「这是个免费、开源的网页工具，谁做的，源码在哪」，
- * 不用从一堆按钮文字里猜。描述直接取页面上的 meta description，不在这里另写一份——
- * 改页面描述时这里自动跟着变。
+ * 不用从一堆按钮文字里猜。描述直接取页面上（已经换成当前语言的）meta description，
+ * 不在这里另写一份——改页面描述时这里自动跟着变。
  */
-function structuredData(html: string): string {
+function structuredData(html: string, lang: Lang): string {
   const description =
     /<meta name="description" content="([^"]*)"/.exec(html)?.[1] ?? '';
   const repo = 'https://github.com/longsizhuo/holocard';
@@ -541,10 +680,10 @@ function structuredData(html: string): string {
         '@type': 'WebApplication',
         '@id': `${PUBLIC_ORIGIN}/#app`,
         name: 'HoloCard',
-        url: `${PUBLIC_ORIGIN}/`,
+        url: langUrl('/', lang),
         description,
         image: `${PUBLIC_ORIGIN}/og.jpg`,
-        inLanguage: 'zh-CN',
+        inLanguage: LANG_TAG[lang],
         applicationCategory: 'MultimediaApplication',
         operatingSystem: 'Any',
         browserRequirements: 'Requires JavaScript',
@@ -569,17 +708,27 @@ function structuredData(html: string): string {
   return JSON.stringify(data).replace(/</g, '\\u003c');
 }
 
+/** 某个文件的 mtime（毫秒取整），不存在返回 null。拿来当 URL 上的版本号 */
+async function fileVersion(path: string): Promise<number | null> {
+  const s = await stat(path).catch(() => null);
+  return s ? Math.floor(s.mtimeMs) : null;
+}
+
 /**
  * 发前端静态文件。找不到就回 index.html，交给前端路由。
  *
  * HEAD 和 GET 走同一条路径，只是不写 body——健康检查、链接预览抓取工具、
  * 各种监控都会先发 HEAD，之前只认 GET，它们一律拿到 404。
+ *
+ * 页面按这次请求的语言发（见 requestLang）：静态文字、标题、分享标签都换成那个语言，
+ * 页面一出来就是对的，不用等脚本跑完再变。
  */
 async function serveStatic(
   pathname: string,
   res: ServerResponse,
   method: string,
   ip: string,
+  lang: Lang,
 ): Promise<void> {
   // /c/<id> 要带上这张卡自己的 OG 标签
   const cardPath = /^\/c\/([0-9a-f-]{36})\/?$/.exec(pathname);
@@ -624,13 +773,21 @@ async function serveStatic(
   }
   const ext = extname(candidate);
   const isHashed = candidate.includes(`${sep}assets${sep}`);
+  const isHtml = ext === '.html';
+  if (isHtml) body = Buffer.from(localizeHtml(body.toString('utf8'), lang), 'utf8');
 
   // 404 只是个兜底页：不注入分享标签、不计访问
-  if (status === 200 && cardPath?.[1] && ext === '.html') {
+  if (status === 200 && cardPath?.[1] && isHtml) {
     const id = cardPath[1];
-    const previewStat = await stat(join(OUT_DIR, id, 'preview.jpg')).catch(() => null);
-    const previewVersion = previewStat ? Math.floor(previewStat.mtimeMs) : null;
-    body = Buffer.from(injectShareMeta(body.toString('utf8'), id, previewVersion), 'utf8');
+    const dir = join(OUT_DIR, id);
+    const own = await fileVersion(join(dir, previewFile(lang)));
+    const fallback = own === null && lang !== 'zh' ? await fileVersion(join(dir, previewFile('zh'))) : null;
+    const preview =
+      own !== null ? { lang, version: own } : fallback !== null ? { lang: 'zh' as Lang, version: fallback } : null;
+    body = Buffer.from(injectShareMeta(body.toString('utf8'), id, lang, preview), 'utf8');
+
+    // 这个语言的分享图还没有（渲染失败过、或者是新语言），趁有人打开时补一张
+    if (own === null && db.get(id)?.status === 'done') queuePreview(id, lang);
 
     /*
      * 一次页面访问给这张卡的保留窗口续期。
@@ -640,10 +797,17 @@ async function serveStatic(
      * 这条路径不会被 CDN 挡掉——/c/<id> 的 cache-control 是 no-cache，每次都回源。
      */
     if (method === 'GET') recordHit(id, ip);
-  } else if (status === 200 && isHome && ext === '.html') {
-    const ogStat = await stat(join(root, 'og.jpg')).catch(() => null);
-    const ogVersion = ogStat ? Math.floor(ogStat.mtimeMs) : null;
-    body = Buffer.from(injectHomeMeta(body.toString('utf8'), ogVersion), 'utf8');
+  } else if (status === 200 && isHome && isHtml) {
+    const langImage = lang === 'zh' ? null : `og-${lang}.jpg`;
+    const langVersion = langImage ? await fileVersion(join(root, langImage)) : null;
+    const zhVersion = langVersion === null ? await fileVersion(join(root, 'og.jpg')) : null;
+    const image =
+      langImage && langVersion !== null
+        ? { file: langImage, version: langVersion }
+        : zhVersion !== null
+          ? { file: 'og.jpg', version: zhVersion }
+          : null;
+    body = Buffer.from(injectHomeMeta(body.toString('utf8'), lang, image), 'utf8');
   }
 
   res.writeHead(status, {
@@ -652,6 +816,8 @@ async function serveStatic(
     // assets 下的文件名带内容 hash，可以永久缓存；其余不缓存，保证发版即时生效
     'cache-control': isHashed ? 'public, max-age=31536000, immutable' : 'no-cache',
     'x-content-type-options': 'nosniff',
+    // 同一个地址按语言发不同的页面，任何中间缓存都得把这两个头算进缓存键
+    ...(isHtml ? { vary: 'Accept-Language, Cookie', 'content-language': LANG_TAG[lang] } : {}),
   });
   if (method === 'HEAD') res.end();
   else res.end(body);
@@ -693,27 +859,32 @@ const server = createServer((req, res) => {
 
     if (req.method === 'POST' && url.pathname === '/api/jobs') {
       if (rateLimited(clientIp(req))) {
-        json(res, 429, {
-          error: `提交太频繁了，${Math.round(RATE_WINDOW_MS / 60000)} 分钟内最多 ${RATE_LIMIT} 次`,
+        const minutes = Math.round(RATE_WINDOW_MS / 60000);
+        fail(res, 429, 'rate_limited', `提交太频繁了，${minutes} 分钟内最多 ${RATE_LIMIT} 次`, {
+          minutes,
+          limit: RATE_LIMIT,
         });
         return;
       }
       if (queue.length >= MAX_QUEUE) {
-        json(res, 503, { error: `排队的人太多（${queue.length} 个在等），稍后再试` });
+        fail(res, 503, 'queue_full', `排队的人太多（${queue.length} 个在等），稍后再试`, {
+          queued: queue.length,
+        });
         return;
       }
 
+      const limitMb = Math.round(MAX_UPLOAD / 1024 / 1024);
       let bytes: Buffer;
       try {
         bytes = await readBody(req, MAX_UPLOAD);
-      } catch (error) {
-        json(res, 413, { error: error instanceof Error ? error.message : '请求体过大' });
+      } catch {
+        fail(res, 413, 'too_large', `图片超过 ${limitMb}MB 上限`, { limitMb });
         return;
       }
 
       const kind = sniffImage(bytes);
       if (!kind) {
-        json(res, 415, { error: '不是可识别的图片（支持 JPEG / PNG / WebP / AVIF）' });
+        fail(res, 415, 'unsupported_image', '不是可识别的图片（支持 JPEG / PNG / WebP / AVIF / HEIC）');
         return;
       }
 
@@ -723,7 +894,8 @@ const server = createServer((req, res) => {
       try {
         original = await normalizeOriginal(bytes);
       } catch (error) {
-        json(res, 415, { error: error instanceof Error ? error.message : '无法识别的图片' });
+        if (error instanceof ImageError) fail(res, 415, error.code, error.message, error.params);
+        else fail(res, 415, 'unsupported_image', error instanceof Error ? error.message : '无法识别的图片');
         return;
       }
 
@@ -774,7 +946,7 @@ const server = createServer((req, res) => {
       const dir = join(OUT_DIR, id);
       const card = db.get(id);
       if (!card || card.status !== 'done') {
-        json(res, 404, { error: '这张卡不存在或已过期' });
+        fail(res, 404, 'card_not_found', '这张卡不存在或已过期');
         return;
       }
       const now = Date.now();
@@ -791,14 +963,9 @@ const server = createServer((req, res) => {
         expiresAt: expiresAt(updated, TTL_MS, KEEP_DOUBLINGS_CAP),
       });
 
-      // 预览图慢（要起浏览器渲染），不让用户等；失败也不影响分享本身
-      if (!previewJobs.has(id)) {
-        previewJobs.add(id);
-        void renderPreview(`http://127.0.0.1:${PORT}`, id)
-          .then((buf) => writeFile(join(dir, 'preview.jpg'), buf))
-          .catch((error) => console.error(`[preview] ${id} 渲染失败:`, error.message))
-          .finally(() => previewJobs.delete(id));
-      }
+      // 预览图慢（要起浏览器渲染），不让用户等；排队渲染分享人那个语言的，失败也不影响分享本身
+      const lang = requestLang(req, url);
+      if (!(await stat(join(dir, previewFile(lang))).catch(() => null))) queuePreview(id, lang);
       return;
     }
 
@@ -813,7 +980,7 @@ const server = createServer((req, res) => {
       const job: ExportJob = { id: exportMatch[1] ?? '', format: (exportMatch[2] ?? 'apng') as ExportFormat };
       const card = db.get(job.id);
       if (!card || card.status !== 'done') {
-        json(res, 404, { error: '这张卡不存在或已过期' });
+        fail(res, 404, 'card_not_found', '这张卡不存在或已过期');
         return;
       }
       const current = await exportStatus(job);
@@ -823,11 +990,11 @@ const server = createServer((req, res) => {
       }
 
       if (exportLimited(clientIp(req))) {
-        json(res, 429, { error: '导出太频繁了，过几分钟再试' });
+        fail(res, 429, 'export_rate_limited', '导出太频繁了，过几分钟再试');
         return;
       }
       if (exportQueue.length >= MAX_EXPORT_QUEUE) {
-        json(res, 503, { error: '现在导出的人太多，稍后再试' });
+        fail(res, 503, 'export_busy', '现在导出的人太多，稍后再试');
         return;
       }
       exportErrors.delete(exportKey(job));
@@ -853,11 +1020,11 @@ const server = createServer((req, res) => {
 
       const card = db.get(id);
       if (!card || card.status === 'deleted' || card.status === 'expired') {
-        json(res, 404, { error: '这张卡不存在或已过期' });
+        fail(res, 404, 'card_not_found', '这张卡不存在或已过期');
         return;
       }
       if (!timingSafeEqualStr(token, card.delete_token)) {
-        json(res, 403, { error: '口令不对，只有生成这张卡的人能删除它' });
+        fail(res, 403, 'wrong_token', '口令不对，只有生成这张卡的人能删除它');
         return;
       }
 
@@ -932,13 +1099,41 @@ const server = createServer((req, res) => {
       return;
     }
 
+    /*
+     * 深度模型的权重，给浏览器端退回处理用（见 src/segmenter/runtime.ts 的 useOwnModelHost）。
+     * 国内连不上 huggingface.co，本站能打开，权重就能下。只发服务端自己在用的那三个文件。
+     * 27MB 的文件用流发，不整个读进内存。
+     */
+    const modelMatch =
+      /^\/models\/(onnx-community\/depth-anything-v2-small\/(?:config\.json|preprocessor_config\.json|onnx\/model_quantized\.onnx))$/.exec(
+        url.pathname,
+      );
+    if ((req.method === 'GET' || req.method === 'HEAD') && modelMatch) {
+      const file = join(MODEL_DIR, modelMatch[1] ?? '');
+      const info = await stat(file).catch(() => null);
+      if (!info) {
+        json(res, 404, { error: 'not found' });
+        return;
+      }
+      res.writeHead(200, {
+        'content-type': file.endsWith('.json') ? 'application/json; charset=utf-8' : 'application/octet-stream',
+        'content-length': info.size,
+        // 同一个版本的权重不会变；换模型时路径里的文件名也会跟着变
+        'cache-control': 'public, max-age=604800',
+        'access-control-allow-origin': '*',
+      });
+      if (req.method === 'HEAD') res.end();
+      else createReadStream(file).pipe(res);
+      return;
+    }
+
     const jobMatch = /^\/api\/jobs\/([0-9a-f-]{36})$/.exec(url.pathname);
     if (
       (req.method === 'GET' || req.method === 'HEAD') &&
       !jobMatch &&
       !url.pathname.startsWith('/api/')
     ) {
-      await serveStatic(url.pathname, res, req.method, clientIp(req));
+      await serveStatic(url.pathname, res, req.method, clientIp(req), requestLang(req, url));
       return;
     }
 
@@ -946,7 +1141,7 @@ const server = createServer((req, res) => {
       const card = db.get(jobMatch[1] ?? '');
       // 删掉的、过期的对前端来说都是「没有了」，不暴露内部状态
       if (!card || card.status === 'deleted' || card.status === 'expired') {
-        json(res, 404, { error: '任务不存在或已过期' });
+        fail(res, 404, 'job_not_found', '任务不存在或已过期');
         return;
       }
       // 对外仍然叫 state，前端不用改
@@ -1002,6 +1197,22 @@ if (imported > 0) console.log(`[db] 从旧格式导入了 ${imported} 张卡`);
   pump();
 }
 
+/*
+ * 分享过、却没有分享图的卡补渲染一遍（中文那张；别的语言有人打开时再补）。
+ * 以前渲染失败就算了，上线头一天 32 张分享过的卡里有 23 张没图。
+ * 排在队列里一张张来，不耽误启动；要等服务开始监听之后再调——渲染页是从本服务取的。
+ */
+async function backfillPreviews(): Promise<void> {
+  let missing = 0;
+  for (const card of db.byStatus('done')) {
+    if (!card.shared) continue;
+    if (await stat(join(OUT_DIR, card.id, previewFile('zh'))).catch(() => null)) continue;
+    queuePreview(card.id, 'zh');
+    missing++;
+  }
+  if (missing > 0) console.log(`[preview] ${missing} 张分享过的卡缺分享图，排队补渲染`);
+}
+
 setInterval(() => void sweep(), 15 * 60 * 1000).unref();
 // 访问量在内存里累计，一分钟合并写一次库。丢几条只影响保留时长，不影响正确性
 setInterval(() => flushHits(db), 60 * 1000).unref();
@@ -1016,6 +1227,7 @@ for (const signal of ['SIGTERM', 'SIGINT'] as const) {
 }
 
 server.listen(PORT, '127.0.0.1', () => {
+  void backfillPreviews();
   console.log(`holocard 分层服务已启动 127.0.0.1:${PORT}`);
   console.log(`  产物目录 ${OUT_DIR}`);
   console.log(`  模型目录 ${MODEL_DIR}`);

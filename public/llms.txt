@@ -6,7 +6,9 @@ HoloCard 是一个网页工具。上传一张照片，服务端用单目深度�
 
 - 在线使用：https://holocard.longsizhuo.com/
 - 做好的卡可以生成分享链接，别人打开就能转着看
-- 支持 JPG、PNG、WebP、AVIF，单张最大 16MB
+- 支持 JPG、PNG、WebP、AVIF、HEIC，单张最大 16MB
+- 做好的卡可以存成 iPhone 实况照片、安卓动态照片，电脑上存成 APNG 动图
+- 界面有中文、英文、日文：https://holocard.longsizhuo.com/?lang=en 、https://holocard.longsizhuo.com/?lang=ja
 - 作者：longsizhuo（https://github.com/longsizhuo）
 
 ## 原理
@@ -25,4 +27,8 @@ HoloCard 是一个网页工具。上传一张照片，服务端用单目深度�
 
 ## English
 
-HoloCard is a free, open-source (GPL-3.0) web tool that turns any photo into an interactive holographic trading card. It estimates depth with Depth Anything V2-Small, splits the photo into 2–4 layers (foreground, midground, background), and gives each layer its own holographic foil; tilting the card shifts the foils and the layers in parallax. Foil effects are ported from pokemon-cards-css by Simon Goellner. Try it at https://holocard.longsizhuo.com/ — source code at https://github.com/longsizhuo/holocard.
+HoloCard is a free, open-source (GPL-3.0) web tool that turns any photo into an interactive holographic trading card. It estimates depth with Depth Anything V2-Small, splits the photo into 2–4 layers (foreground, midground, background), and gives each layer its own holographic foil; tilting the card shifts the foils and the layers in parallax. Foil effects are ported from pokemon-cards-css by Simon Goellner. Finished cards can be saved as an iPhone Live Photo, an Android Motion Photo, or an animated PNG on desktop. The site is available in English at https://holocard.longsizhuo.com/?lang=en (also Chinese and Japanese). Source code: https://github.com/longsizhuo/holocard.
+
+## 日本語
+
+HoloCard は、どんな写真もインタラクティブなキラカードにする無料・オープンソース（GPL-3.0）の Web ツールです。Depth Anything V2-Small で深度を推定し、写真を前景・中景・背景の 2～4 レイヤーに分け、レイヤーごとにホイルを重ねます。カードを傾けると、ホイルとレイヤーが視差で動きます。できたカードは iPhone の Live Photos、Android のモーションフォト、パソコンではアニメーション PNG として保存できます。ホイルの表現は Simon Goellner の pokemon-cards-css から移植しています。日本語版：https://holocard.longsizhuo.com/?lang=ja 、ソースコード：https://github.com/longsizhuo/holocard
