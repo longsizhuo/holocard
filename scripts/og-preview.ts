@@ -12,7 +12,7 @@
  *   pnpm og --pose 78,22           换个姿态（指针在卡面上的百分比位置，默认和线上一致）
  *   pnpm og --lang en              右边那段字用英文（en / ja；首页的 og-en.jpg、og-ja.jpg 就是这么出的）
  *   pnpm og --out 路径 --png --no-open
- *   pnpm og --export live          出导出动图：live（实况照片）、motion（动态照片）、apng（电脑上的动图），
+ *   pnpm og --export gif           出导出动图：gif（iPhone）、motion（安卓的动态照片）、apng（电脑上的动图），
  *                                  写到 out/export/，文件名和用户下载到的一样
  *
  * 和线上是同一套渲染：前端用 vite 现构建，截图直接调服务端的 renderPreview，

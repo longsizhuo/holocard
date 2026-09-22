@@ -141,10 +141,10 @@ function describeError(error: unknown): string {
 
 // ---------- 导出按钮 ----------
 
-/** 导出按钮按设备说人话：iPhone 叫实况照片，安卓叫动态照片，都是各自相册里的叫法 */
+/** 导出按钮按设备说人话：安卓叫动态照片（相册里的叫法），iPhone 存的是 GIF 动图 */
 const platform = detectPlatform();
 const EXPORT_LABEL: Record<Platform, MessageKey> = {
-  ios: 'export.live',
+  ios: 'export.gif',
   android: 'export.motion',
   desktop: 'export.apng',
 };
@@ -230,7 +230,7 @@ function show(set: LayerSet, id: string | null = null): void {
   shareResult.hidden = true;
   shareBtn.disabled = false;
   setText(shareBtn, 'share.create');
-  // 导出不限于卡的主人：别人分享过来的卡也能存成实况照片、当壁纸
+  // 导出不限于卡的主人：别人分享过来的卡也能存成动图
   exportBox.hidden = id === null || route.mode === 'render';
   if (!exporting) resetExport();
   // 只有手上有这张卡口令的人才看得到删除入口
@@ -482,7 +482,7 @@ async function doDelete(): Promise<void> {
  * 导出动图，格式按设备定（见 export.ts）。
  *
  * iPhone 分两步：第一次点生成并把文件取到手上，按钮变成「保存到相册」；
- * 第二次点直接唤起系统分享面板，在里面存储，两个文件进相册后自动合成一张实况照片。
+ * 第二次点直接唤起系统分享面板，在里面「存储图像」进相册。
  * 安卓和电脑生成好就直接下载。
  */
 async function doExport(): Promise<void> {
@@ -536,10 +536,10 @@ async function doExport(): Promise<void> {
         setText(exportBtn, 'export.save');
         return;
       }
-      // 不支持分享文件的老系统：两个文件都下载下来，让用户在「文件」里一起存
+      // 不支持分享文件的老系统：下载到「文件」App，让用户从那里存进相册
       files.forEach(download);
       resetExport();
-      setText(exportHint, 'export.downloadedTwo');
+      setText(exportHint, 'export.downloaded');
       return;
     }
 
@@ -670,7 +670,7 @@ function renderPose(): { x: number; y: number } {
 
 /**
  * 导出动图时渲染页的版式（服务端 export.ts 用）：
- *   phone    手机竖屏、深色底，给实况照片和动态照片
+ *   phone    手机竖屏、深色底，给动态照片和 GIF
  *   sticker  只有卡片、透明底，给电脑上下载的 APNG
  * 不带这个参数就是分享图的版式。
  */

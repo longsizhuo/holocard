@@ -13,7 +13,7 @@ The foil effects and the interaction feel are ported from [pokemon-cards-css](ht
 what HoloCard adds is **generating that mask automatically with a layering algorithm**, so any photo can become a holo card.
 
 > Status: early. The renderer, the layering pipeline, edge refinement and server-side processing all work and are live: https://holocard.longsizhuo.com
-> The site is available in Chinese, English and Japanese; finished cards can be saved as an iPhone Live Photo, an Android Motion Photo, or an animated PNG on desktop.
+> The site is available in Chinese, English and Japanese; finished cards can be saved as a GIF on iPhone, an Android Motion Photo, or an animated PNG on desktop.
 
 ## What a card is made of
 
@@ -229,7 +229,7 @@ pnpm og --watch            # re-render on save when styles or code under src/ ch
 pnpm og --pose 20,80       # look at the foil and halo from another angle
 pnpm og --size 1280x640    # the size of a GitHub repository social preview
 pnpm og --lang en          # English copy on the right (en / ja)
-pnpm og --export live      # export a Live Photo (or motion / apng) to out/export/
+pnpm og --export gif       # export the iPhone GIF (or motion / apng) to out/export/
 ```
 
 It is the same rendering as production: the frontend is built on the spot and the screenshot calls the server's `renderPreview`, so what you see here is exactly what gets shared.

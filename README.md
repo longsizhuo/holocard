@@ -13,7 +13,7 @@ https://github.com/longsizhuo/holocard ｜ 线上 https://holocard.longsizhuo.co
 HoloCard 做的事情是**用分层算法自动生成这张遮罩**，于是任意一张照片都能变成闪卡。
 
 > 状态：早期。渲染器、分层流水线、边缘精修、服务端处理都已跑通并上线：https://holocard.longsizhuo.com
-> 页面有中文、英文、日文；做好的卡可以存成 iPhone 实况照片、安卓动态照片，电脑上存成 APNG 动图。
+> 页面有中文、英文、日文；做好的卡可以存成动图：iPhone 上是 GIF，安卓上是动态照片，电脑上是 APNG。
 
 ## 一张卡由什么叠成
 
@@ -229,7 +229,7 @@ pnpm og --watch            # 改了 src/ 下的样式或代码，保存即重出
 pnpm og --pose 20,80       # 换个角度看箔面和炫光
 pnpm og --size 1280x640    # GitHub 仓库社交预览图的尺寸
 pnpm og --lang en          # 右边那段字用英文（en / ja）
-pnpm og --export live      # 出一张实况照片（或 motion / apng），写到 out/export/
+pnpm og --export gif       # 出一张 iPhone 的 GIF（或 motion / apng），写到 out/export/
 ```
 
 和线上是同一套渲染：前端现构建，截图直接调服务端的 `renderPreview`，这里看到什么，分享出去就是什么。

@@ -192,20 +192,23 @@ id 就是公开的。这个站没有账号，「所有者」就是「手上有�
 
 | 设备 | 格式 | 卡片目录里的文件 |
 |---|---|---|
-| iPhone / iPad | 实况照片 | `live-v1.jpg` + `live-v1.mov`，靠同一个 UUID 配对 |
-| 安卓 | 动态照片（Motion Photo 1.0，另写老版 MicroVideo 字段） | `motion-v1.jpg`，JPEG 末尾接 MP4 |
-| 电脑 | APNG | `sticker-v1.png`，透明底，无限循环 |
+| iPhone / iPad | GIF，手机竖屏画面 | `gif-v2.gif`，分享面板里「存储图像」进相册 |
+| 安卓 | 动态照片（Motion Photo 1.0，另写老版 MicroVideo 字段） | `motion-v2.jpg`，JPEG 末尾接 MP4 |
+| 电脑 | APNG | `sticker-v2.png`，透明底，无限循环 |
 
-`POST /api/cards/{id}/export/{live|motion|apng}` 排队生成，`GET` 同一地址轮询状态。
+iPhone 起初给的是实况照片（JPEG + MOV 一对），真机实测走不通：网页只能经分享面板存文件，
+「照片」不会把分开存进去的一对合成实况照片，MOV 还被分享面板当成了「文稿」，所以换成了 GIF。
+
+`POST /api/cards/{id}/export/{gif|motion|apng}` 排队生成，`GET` 同一地址轮询状态。
 文件随卡片过期、删除一起清掉；manifest 改过之后会重新生成。
-文件名里的 `v1` 是 `server/export.ts` 的 `EXPORT_VERSION`：改了画面或封装参数就加一，存量自动作废。
+文件名里的 `v2` 是 `server/export.ts` 的 `EXPORT_VERSION`：改了画面或封装参数就加一，存量自动作废。
 
 依赖服务器上的 `ffmpeg`（要带 libx264，路径可用 `HOLOCARD_FFMPEG` 指定）。
 单并发，排队上限 `HOLOCARD_MAX_EXPORT_QUEUE`（默认 6），
 每个 IP 10 分钟最多导出 `HOLOCARD_EXPORT_RATE_LIMIT`（默认 8）次。
-这台机器上（2 核额度、没有显卡）一张实况照片或动态照片约 30 秒，APNG 约 25 秒。
+这台机器上（2 核额度、没有显卡）一张动态照片约 30 秒，APNG 约 25 秒。
 
-本地看效果：`pnpm og --export live`（或 `motion` / `apng`），产物在 `out/export/`。
+本地看效果：`pnpm og --export gif`（或 `motion` / `apng`），产物在 `out/export/`。
 
 ## 埋点
 

@@ -1,7 +1,7 @@
 /**
  * 导出动图：看用户在什么设备上，给能直接进相册的格式
- *   iPhone / iPad  实况照片：一张 JPEG + 一段 MOV，交给系统分享面板「存储」，
- *                  「照片」按两个文件里相同的标识把它们合成一张实况照片
+ *   iPhone / iPad  GIF 动图：交给系统分享面板，「存储图像」进相册，「照片」里直接能播。
+ *                  原先给的是实况照片，但网页存进去的一对文件「照片」不会合成（见 server/export.ts）
  *   安卓            动态照片：一个 JPEG（末尾接着视频），直接下载
  *   电脑            APNG，后缀 .png，直接下载
  * 文件都在服务端生成（server/export.ts），这里只负责提交、等待、交到用户手上。
@@ -10,7 +10,7 @@
 import { apiError, apiHeaders, ApiError } from './api';
 import type { MessageKey } from '../i18n';
 
-export type ExportFormat = 'live' | 'motion' | 'apng';
+export type ExportFormat = 'gif' | 'motion' | 'apng';
 
 export type Platform = 'ios' | 'android' | 'desktop';
 
@@ -23,7 +23,7 @@ export function detectPlatform(): Platform {
 }
 
 export const FORMAT_FOR: Record<Platform, ExportFormat> = {
-  ios: 'live',
+  ios: 'gif',
   android: 'motion',
   desktop: 'apng',
 };

@@ -1,20 +1,24 @@
 /**
  * 导出动图：按设备给不同的格式
- *   live    iPhone：实况照片（JPEG + MOV 两个文件，靠 UUID 配对）
+ *   gif     iPhone：GIF 动图，手机竖屏画面。「照片」原生能播，分享面板里「存储图像」一步进相册
  *   motion  安卓：  动态照片（JPEG 末尾接一段 MP4，一个文件）
  *   apng    电脑：  透明底的 APNG，后缀就是 .png，浏览器和大多数看图软件直接能播
  *
+ * iPhone 原先给的是实况照片（JPEG + MOV 一对），真机上走不通：网页只能经分享面板把文件存进相册，
+ * 「照片」不会把分开存进去的一对合成实况照片（导入 Mac 上的「照片」才会）；
+ * 实测 MOV 还被分享面板认成了「文稿」，连存到相册的选项都没有。所以换成 GIF。
+ *
  * 画面和分享图是同一套渲染：无头浏览器打开 /render/<id>?export=…，
- * 逐帧摆姿态、截图，帧交给 ffmpeg（视频）或 UPNG.js（APNG）编码，最后按格式封装。
+ * 逐帧摆姿态、截图，帧交给 ffmpeg（视频、GIF）或 UPNG.js（APNG）编码，最后按格式封装。
  *
  * 动作：指针绕卡面中心转一整圈，卡片跟着转，箔面和炫光随角度流动。
  * 起点和终点都落在分享图的那个姿态（炫光峰值），所以首尾相接、可以无缝循环；
- * 实况照片和动态照片的封面就取最后一帧——相册从播放切回封面时画面不跳。
+ * 动态照片的封面就取最后一帧——相册从播放切回封面时画面不跳。
  *
  * 性能是这里的主要约束：服务器没有显卡，箔面的混合模式和滤镜全靠 CPU 软件光栅化，
  * 1080×1920 一帧要 1.3 秒，其中七成花在箔面上。所以：
  *   - 视频帧按 2 倍截（720×1280），只有封面按 3 倍截（1080×1920）。
- *     真机也是这样：实况照片、动态照片的静态图分辨率都远高于里面的视频
+ *     真机也是这样：动态照片的静态图分辨率远高于里面的视频
  *   - 两个页面并行截，单个页面吃不满两个核（实测快 1.5 倍）
  *   - 截图前不等浏览器自己画一遍：captureScreenshot 会按指定倍率重新光栅化，
  *     等 rAF 只会让页面在屏幕上白画一次（实测两种截法逐像素一致）
@@ -28,14 +32,13 @@ import { join } from 'node:path';
 import sharp from 'sharp';
 import type { Page } from 'playwright-core';
 import { withRenderPage } from './preview';
-import { packLivePhotoJpeg, packLivePhotoMov } from './livephoto';
 import { packMotionPhoto } from './motionphoto';
 // upng-js 是 CommonJS（module.exports = UPNG），在 Node 的 ESM 里只能按默认导出取
 import UPNG from 'upng-js';
 
-export type ExportFormat = 'live' | 'motion' | 'apng';
+export type ExportFormat = 'gif' | 'motion' | 'apng';
 
-export const EXPORT_FORMATS: readonly ExportFormat[] = ['live', 'motion', 'apng'];
+export const EXPORT_FORMATS: readonly ExportFormat[] = ['gif', 'motion', 'apng'];
 
 /**
  * 导出的版本号，写在文件名里。改了画面、动作或封装参数就加一：
@@ -64,17 +67,13 @@ export interface ExportFile {
  *
  * 动态照片的文件名按 Google 规范的建议以「MP.jpg」结尾，再带上 MVIMG_ 前缀——
  * 那是老版 MicroVideo 的命名，有的相册先看文件名再决定要不要去解析 XMP。
- * 实况照片两个文件同名不同后缀，在「文件」App 里一眼看得出是一对。
  */
 export function exportFiles(format: ExportFormat, id: string): ExportFile[] {
   const base = `HoloCard_${id.slice(0, 8)}`;
   const v = EXPORT_VERSION;
   switch (format) {
-    case 'live':
-      return [
-        { file: `live-v${v}.jpg`, type: 'image/jpeg', download: `${base}.jpg` },
-        { file: `live-v${v}.mov`, type: 'video/quicktime', download: `${base}.mov` },
-      ];
+    case 'gif':
+      return [{ file: `gif-v${v}.gif`, type: 'image/gif', download: `${base}.gif` }];
     case 'motion':
       return [{ file: `motion-v${v}.jpg`, type: 'image/jpeg', download: `MVIMG_${base}.MP.jpg` }];
     case 'apng':
@@ -83,7 +82,7 @@ export function exportFiles(format: ExportFormat, id: string): ExportFile[] {
 }
 
 /** 层文件路由要放行的导出文件名 */
-export const EXPORT_FILE = /^(?:live-v\d+\.(?:jpg|mov)|motion-v\d+\.jpg|sticker-v\d+\.png)$/;
+export const EXPORT_FILE = /^(?:gif-v\d+\.gif|motion-v\d+\.jpg|sticker-v\d+\.png)$/;
 
 /**
  * 这种格式的导出是否已经有了、而且比 manifest 新。
@@ -298,12 +297,35 @@ const TO_BT709 =
 // ---------- 各格式 ----------
 
 /**
- * 手机竖屏的两种格式共用的画面参数。画布 360×640（CSS 像素）：
- * 封面按 3 倍截成 1080×1920，视频帧按 2 倍截成 720×1280。
- * 25 帧/秒、一圈 1.6 秒，共 41 帧（首尾各一帧落在峰值姿态上）。
+ * 手机竖屏画面，安卓的动态照片和 iPhone 的 GIF 共用。画布 360×640（CSS 像素）：
+ * 动态照片的封面按 3 倍截成 1080×1920，视频帧按 2 倍截成 720×1280。
+ * 25 帧/秒、一圈 1.6 秒分 40 步。
  * 最初按 3 倍、61 帧、HEVC 编，服务器上一张要两分多钟。
  */
 const PHONE = { width: 360, height: 640, stillScale: 3, videoScale: 2, fps: 25, steps: 40 };
+
+/**
+ * iPhone 的 GIF：还是竖屏画面，20 帧/秒、一圈 1.6 秒共 32 帧。
+ *
+ * GIF 每帧都是调色板图，LZW 又远不如视频压得动；卡片一转每帧整块都在变，
+ * 体积基本就是「卡片面积 × 帧数」。按 1.5 倍、25 帧/秒截，横卡 3MB、竖卡 6MB（实测）。
+ * 所以和 APNG 一样按面积定倍率：卡片一帧最多 10 万像素，横卡还能按 1.5 倍截（540×960），
+ * 竖卡差不多只能 1 倍（342×608 上下），两种都是两 MB 多一点，和 APNG 一个量级。
+ * 抖动方式对体积影响不大：有序抖动、不抖动、误差扩散之间只差一两成。
+ */
+const GIF = { maxScale: 1.5, cardPixels: 100_000, fps: 20, steps: 32 };
+
+/**
+ * GIF 按几倍截。竖屏画面里卡片宽 min(78vw, 60vh × 宽高比)——和 style.css 里
+ * body.is-export-phone .hc 的写法一致，那边改了这里要跟着改。
+ * 倍率取 1/40 的整数倍：画布 360×640 是 9:16，乘出来的宽高都是整数。
+ */
+function gifScale(ratio: number): number {
+  const cardWidth = Math.min(PHONE.width * 0.78, PHONE.height * 0.6 * ratio);
+  const cardArea = (cardWidth * cardWidth) / ratio;
+  const scale = Math.min(GIF.maxScale, Math.sqrt(GIF.cardPixels / cardArea));
+  return Math.floor(scale * 40) / 40;
+}
 
 /**
  * 透明底贴纸的画面参数。APNG 每一帧都是一整张图，体积涨得很快：
@@ -323,25 +345,43 @@ async function readManifestRatio(dir: string): Promise<number> {
   return w > 0 && h > 0 ? w / h : 0.718;
 }
 
+/** 竖屏画面的一次渲染 */
+interface PhoneOptions {
+  /** 帧按几倍截 */
+  scale: number;
+  /** 帧率，和一圈分几步 */
+  fps: number;
+  steps: number;
+  /**
+   * 首尾是否各留一帧（都落在峰值姿态上）。动态照片要：封面取最后一帧，时刻按帧序号算。
+   * GIF 不要：无限循环时首尾两帧一模一样，接缝处会顿一下
+   */
+  closed: boolean;
+  /** 要不要另截一张 3 倍的完整画面当封面 */
+  cover: boolean;
+  /** 卡片叠到背景上之后接的滤镜 */
+  filter: string;
+  /** ffmpeg 的编码和输出参数 */
+  output: string[];
+}
+
 /**
- * 渲染竖屏视频（H.264，按 output 指定的格式写出），并给出封面的完整画面（PNG）。
+ * 渲染竖屏画面，交给 ffmpeg 按 options 编码写出；要封面时另给出封面的完整画面（PNG）。
  *
  * 分两遍截：背景（照片糊开的底色）是静的，只截一次；卡片每帧截，透明底，
  * 由 ffmpeg 叠到背景上。卡片自成一个隔离的合成层（带 transform 和 filter），
  * 和背景之间没有混合模式，分开截再叠回去和一次截出来是等价的。
  * 背景那张模糊了 90px，每帧重算一遍的话，光它就比卡片还贵。
- *
- * 不开 B 帧：封面帧的时刻要能直接从帧序号算出来（实况照片的 still-image-time、
- * 动态照片的 PresentationTimestampUs 都指着它）。
  */
 async function renderPhone(
   baseUrl: string,
   id: string,
   tmp: string,
-  output: string[],
+  options: PhoneOptions,
   signal: AbortSignal,
-): Promise<{ cover: Buffer; frames: number }> {
-  const poses = Array.from({ length: PHONE.steps + 1 }, (_, i) => poseAt(i, PHONE.steps));
+): Promise<{ cover: Buffer | null; frames: number }> {
+  const count = options.closed ? options.steps + 1 : options.steps;
+  const poses = Array.from({ length: count }, (_, i) => poseAt(i, options.steps));
   const background = `${tmp}-bg.png`;
   // 编码器要等背景截好、落了盘才能起（背景是它的第 0 路输入），所以在 before 里创建
   const state: { encoder: Encoder | null; cover: Buffer | null } = { encoder: null, cover: null };
@@ -354,30 +394,32 @@ async function renderPhone(
       height: PHONE.height,
       query: { export: 'phone' },
       poses,
-      scale: PHONE.videoScale,
+      scale: options.scale,
       signal,
       async before(page, shot) {
         await setLayer(page, 'background');
-        const bg = await shot(PHONE.stillScale);
+        // 背景只截一次：要封面就按封面的倍率截，再缩给帧用
+        const bg = await shot(options.cover ? PHONE.stillScale : options.scale);
         await setLayer(page, 'card');
-        await setPose(page, PEAK);
-        state.cover = await sharp(bg)
-          .composite([{ input: await shot(PHONE.stillScale) }])
-          .png()
-          .toBuffer();
+        if (options.cover) {
+          await setPose(page, PEAK);
+          state.cover = await sharp(bg)
+            .composite([{ input: await shot(PHONE.stillScale) }])
+            .png()
+            .toBuffer();
+        }
         await sharp(bg)
-          .resize(PHONE.width * PHONE.videoScale, PHONE.height * PHONE.videoScale)
+          .resize(PHONE.width * options.scale, PHONE.height * options.scale)
           .png()
           .toFile(background);
         state.encoder = new Encoder(
           [
-            ...['-framerate', String(PHONE.fps), '-loop', '1', '-i', background],
-            ...['-f', 'image2pipe', '-framerate', String(PHONE.fps), '-c:v', 'png', '-i', 'pipe:0'],
-            // 在 RGB 下把卡片叠到背景上，再转色彩空间
-            ...['-filter_complex', `[0:v][1:v]overlay=format=rgb:shortest=1,${TO_BT709}[v]`, '-map', '[v]'],
-            ...['-c:v', 'libx264', '-preset', 'medium', '-crf', '20', '-profile:v', 'high', '-bf', '0'],
+            ...['-framerate', String(options.fps), '-loop', '1', '-i', background],
+            ...['-f', 'image2pipe', '-framerate', String(options.fps), '-c:v', 'png', '-i', 'pipe:0'],
+            // 在 RGB 下把卡片叠到背景上，再接各格式自己的处理
+            ...['-filter_complex', `[0:v][1:v]overlay=format=rgb:shortest=1,${options.filter}[v]`, '-map', '[v]'],
             ...['-map_metadata', '-1', '-fflags', '+bitexact'],
-            ...output,
+            ...options.output,
           ],
           signal,
         );
@@ -396,40 +438,77 @@ async function renderPhone(
   } finally {
     await rm(background, { force: true });
   }
-  if (!state.cover) throw new Error('没有截到封面');
   return { cover: state.cover, frames: poses.length };
 }
 
-/** 封面 JPEG。手机相册里看到的静态图就是它，给足质量 */
-function coverJpeg(png: Buffer): Promise<Buffer> {
-  return sharp(png).jpeg({ quality: 92 }).toBuffer();
-}
-
-async function exportLive(baseUrl: string, id: string, tmp: string, signal: AbortSignal): Promise<Buffer[]> {
-  const mov = `${tmp}.mov`;
-  /*
-   * H.264 的 MOV。iPhone 的相机设成「兼容性最佳」时拍的实况照片就是这样，
-   * 真机默认的 HEVC 在服务器上编得太慢（同样的帧 x265 要 30 秒，x264 7 秒）。
-   * moov 放在末尾（不加 faststart）：livephoto.ts 要在它前面插一段新的 mdat。
-   * 时间刻度和真机一样用 600。
-   */
-  const output = ['-video_track_timescale', '600', '-movie_timescale', '600', '-f', 'mov', mov];
+/**
+ * iPhone 的 GIF。
+ *
+ * 先把所有帧统计成一张共用的调色板（palettegen 的 full 模式），再按它上色：
+ * 每帧各用各的调色板的话，箔面的颜色一帧一个样，循环起来会闪。
+ * 抖动用有序抖动（bayer）：误差扩散的噪点每帧落在不同的位置，播起来满屏沙沙地动，体积也大。
+ * 背景是静的，diff_mode=rectangle 让每帧只重编卡片动了的那一块。
+ * GIF 的透明只有全透、不透两档，透明底的卡片一转，边缘全是锯齿，所以整张画面都不透明。
+ */
+async function exportGif(
+  baseUrl: string,
+  id: string,
+  dir: string,
+  tmp: string,
+  signal: AbortSignal,
+): Promise<Buffer[]> {
+  const gif = `${tmp}.gif`;
   try {
-    const { cover, frames } = await renderPhone(baseUrl, id, tmp, output, signal);
-    const contentId = randomUUID().toUpperCase();
-    const video = packLivePhotoMov(await readFile(mov), contentId, frames - 1);
-    const still = packLivePhotoJpeg(await coverJpeg(cover), contentId);
-    return [still, video];
+    await renderPhone(
+      baseUrl,
+      id,
+      tmp,
+      {
+        scale: gifScale(await readManifestRatio(dir)),
+        fps: GIF.fps,
+        steps: GIF.steps,
+        closed: false,
+        cover: false,
+        filter:
+          'split[a][b];[a]palettegen=stats_mode=full[p];' +
+          '[b][p]paletteuse=dither=bayer:bayer_scale=3:diff_mode=rectangle',
+        // -loop 0 是无限循环
+        output: ['-loop', '0', '-f', 'gif', gif],
+      },
+      signal,
+    );
+    return [await readFile(gif)];
   } finally {
-    await rm(mov, { force: true });
+    await rm(gif, { force: true });
   }
 }
 
+/**
+ * 安卓的动态照片。里面那段视频是 H.264，不开 B 帧：封面帧的时刻要能直接从帧序号算出来
+ * （XMP 里的 PresentationTimestampUs 指着它）。
+ */
 async function exportMotion(baseUrl: string, id: string, tmp: string, signal: AbortSignal): Promise<Buffer[]> {
   const mp4 = `${tmp}.mp4`;
   try {
-    const output = ['-movflags', '+faststart', '-f', 'mp4', mp4];
-    const { cover, frames } = await renderPhone(baseUrl, id, tmp, output, signal);
+    const { cover, frames } = await renderPhone(
+      baseUrl,
+      id,
+      tmp,
+      {
+        scale: PHONE.videoScale,
+        fps: PHONE.fps,
+        steps: PHONE.steps,
+        closed: true,
+        cover: true,
+        filter: TO_BT709,
+        output: [
+          ...['-c:v', 'libx264', '-preset', 'medium', '-crf', '20', '-profile:v', 'high', '-bf', '0'],
+          ...['-movflags', '+faststart', '-f', 'mp4', mp4],
+        ],
+      },
+      signal,
+    );
+    if (!cover) throw new Error('没有截到封面');
     const presentationUs = ((frames - 1) / PHONE.fps) * 1_000_000;
     return [await packMotionPhoto(cover, await readFile(mp4), presentationUs)];
   } finally {
@@ -525,15 +604,14 @@ export async function runExport(
 
   try {
     const outputs =
-      format === 'live'
-        ? await exportLive(baseUrl, id, tmp, signal)
+      format === 'gif'
+        ? await exportGif(baseUrl, id, dir, tmp, signal)
         : format === 'motion'
           ? await exportMotion(baseUrl, id, tmp, signal)
           : await exportApng(baseUrl, id, dir, signal);
-    const files = exportFiles(format, id);
     await Promise.all(outputs.map((data, i) => writeFile(`${tmp}-${i}`, data)));
-    // 同一格式的几个文件依次改名。实况照片是两个文件，缺了任何一个 exportReady 都判成没好
-    for (const [i, f] of files.entries()) {
+    // 一种格式要是有几个文件，依次改名；缺了任何一个 exportReady 都判成没好
+    for (const [i, f] of exportFiles(format, id).entries()) {
       await rename(`${tmp}-${i}`, join(dir, f.file));
     }
   } catch (error) {
@@ -541,6 +619,8 @@ export async function runExport(
     throw signal.aborted ? signal.reason : error;
   } finally {
     clearTimeout(timer);
-    await Promise.all([0, 1].map((i) => rm(`${tmp}-${i}`, { force: true }).catch(() => undefined)));
+    await Promise.all(
+      exportFiles(format, id).map((_, i) => rm(`${tmp}-${i}`, { force: true }).catch(() => undefined)),
+    );
   }
 }
