@@ -2,6 +2,8 @@
 
 [中文](README.md) | English
 
+[![HoloCard](public/og-en.jpg)](https://holocard.longsizhuo.com/?lang=en)
+
 https://github.com/longsizhuo/holocard ｜ Live: https://holocard.longsizhuo.com
 
 Upload a photo: it is split into foreground, midground and background, each layer gets its own holographic foil, and the result is an interactive holo card.
