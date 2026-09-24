@@ -81,6 +81,10 @@ export class Spring<T extends Record<string, number>> {
       const seconds = options.soft === true ? 0.5 : options.soft;
       this.#invMassRecoveryPerFrame = 1 / (seconds * 60);
       this.#invMass = 0;
+      // 从静止起步。质量无穷大时弹簧力和阻尼都不起作用，手上还带着速度的话
+      // 会在「迟疑」的那一秒里一路滑出去——60 帧时上一段动画早就停稳了看不出来，
+      // 低帧率的手机上上一段还没停稳，卡片就会冲过头转到二十几度
+      this.#last = { ...this.#value };
     }
   }
 
@@ -89,12 +93,12 @@ export class Spring<T extends Record<string, number>> {
    * 返回 true 表示所有分量都已静止，持有者可以据此停掉循环。
    */
   tick(dt: number): boolean {
-    this.#invMass = Math.min(this.#invMass + this.#invMassRecoveryPerFrame, 1);
-
     // 只有正的 dt 才算数。dt 可能是 0（同一帧重复 tick），也可能是负的——
     // 指针事件里记的 performance.now() 会晚于 rAF 回调拿到的帧起始时间戳。
     // 写成 `dt || 1/60` 的话负数是真值，会原样用上，弹簧朝远离目标的方向走。
     const step = dt > 0 ? dt : 1 / 60;
+    // 按实际经过的帧数恢复，而不是每 tick 恢复一格：低帧率下「迟疑 1 秒」不能变成迟疑好几秒
+    this.#invMass = Math.min(this.#invMass + this.#invMassRecoveryPerFrame * step, 1);
     const next: Record<string, number> = {};
     let settled = true;
 

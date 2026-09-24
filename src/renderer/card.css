@@ -37,8 +37,9 @@
   --hc-nx: 0;
   --hc-ny: 0;
   --hc-halo: 0;
-  /* 视差振幅：位移量相对卡片宽度的比例。百分比位移天然分辨率无关 */
-  --hc-amp: 6%;
+  /* 视差振幅：最近层和最远层的相对位移占卡片宽度的比例。百分比位移天然分辨率无关 */
+  --hc-amp: 10%;
+  --hc-scale: 1;
   --hc-radius: 4.55% / 3.5%;
 }
 
@@ -100,14 +101,13 @@
   inset: 0;
 
   --hc-parallax: 0;
-  --hc-scale: 1;
 
   /*
    * 负号：指针在右侧时卡片右缘朝观察者抬起，相当于观察者站到了右边，
    * 此时近处的东西相对远处向左移，所以近层的位移方向与指针相反。
    *
    * scale 是必须的：某一层平移 d 像素后，另一侧边缘会露出空白。
-   * 系数由渲染器按 1 + 2d/宽度 算出来写进 --hc-scale。
+   * 系数由渲染器按位移最大的那一层算出来，写在 .hc 上所有层共用（为什么必须共用见 card.ts 的 #scale）。
    */
   transform:
     translate3d(
@@ -139,6 +139,23 @@
 
   -webkit-mask-image: var(--hc-mask);
   mask-image: var(--hc-mask);
+  -webkit-mask-size: 100% 100%;
+  mask-size: 100% 100%;
+  -webkit-mask-repeat: no-repeat;
+  mask-repeat: no-repeat;
+}
+
+/* ---------- 整卡炫光与高光的高光保护 ---------- */
+
+/*
+ * 两者都铺满卡面、压在所有层之上，亮部同样会被推成纯白。
+ * --hc-card-mask 是按整张画面亮度算的遮罩（亮处透得少，见 renderer/highlight.ts），
+ * 算好之前是 none，也就是不遮，和以前一样。
+ */
+.hc__halo,
+.hc__glare {
+  -webkit-mask-image: var(--hc-card-mask, none);
+  mask-image: var(--hc-card-mask, none);
   -webkit-mask-size: 100% 100%;
   mask-size: 100% 100%;
   -webkit-mask-repeat: no-repeat;

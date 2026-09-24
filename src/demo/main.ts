@@ -211,6 +211,8 @@ function buildFoilControls(set: LayerSet): void {
       layer.foil = { type: select.value as FoilType, intensity: Number(strength.value) };
       strength.disabled = layer.foil.type === 'none';
       card.setLayerFoil(index, layer.foil);
+      // 静止的卡片上箔面是透明的，转过去才看得见调了什么
+      card.preview();
     };
     select.addEventListener('change', apply);
     strength.addEventListener('input', apply);
@@ -259,11 +261,14 @@ function applyHalo(): void {
   card.setHalo(halo);
 }
 
-/** 把渲染器算出来的炫光强度显示出来，纯读数 */
+/**
+ * 把此刻炫光实际有多亮显示出来，纯读数：角度决定的那部分（渲染器算的 --hc-halo）× 炫光强度。
+ * 乘上强度，拖强度滑块时读数条才会跟着动
+ */
 function pollHalo(): void {
   const root = card.element;
   if (root) {
-    const value = Number(root.style.getPropertyValue('--hc-halo')) || 0;
+    const value = (Number(root.style.getPropertyValue('--hc-halo')) || 0) * Number(ctlIntensity.value);
     outHalo.value = value.toFixed(2);
     haloFill.style.width = `${Math.round(value * 100)}%`;
   }
@@ -389,20 +394,28 @@ async function processImage(file: File): Promise<void> {
   }
 }
 
+/*
+ * 这三个滑块拖动时都让卡片转到炫光最亮的角度（card.preview）。
+ * 手指在滑块上时卡片是静止的，而视差要歪过去才看得出、炫光要转到那个角度才出来，
+ * 不转的话拖滑块画面上什么都不变（issue #3 第 3、4 条说的「感知不明显」就是这个）。
+ */
 ctlAmp.addEventListener('input', () => {
   const pct = Number(ctlAmp.value);
   outAmp.value = `${pct}%`;
   card.setOptions({ amplitude: pct / 100 });
+  card.preview();
 });
 
 ctlIntensity.addEventListener('input', () => {
   outIntensity.value = Number(ctlIntensity.value).toFixed(2);
   applyHalo();
+  card.preview();
 });
 
 ctlSharp.addEventListener('input', () => {
   outSharp.value = ctlSharp.value;
   applyHalo();
+  card.preview();
 });
 
 drop.addEventListener('click', () => filePicker.click());
@@ -788,6 +801,7 @@ async function boot(): Promise<void> {
           ),
         );
         await preloadTextures();
+        await card.ready;
         card.setPose(renderPose());
         exposeExportHooks();
         // 给截图脚本一个明确的信号，别靠猜时间

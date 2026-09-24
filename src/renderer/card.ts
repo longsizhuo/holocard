@@ -19,13 +19,15 @@
 import './card.css';
 import './foils.css';
 import type { HaloEffect, HaloLight, LayerFoil, LayerSet } from '../format/types';
+import { cardMask, layerMask } from './highlight';
 import { Spring } from './spring';
 import { ensureTextures } from './textures';
 
 export interface HoloCardOptions {
   /**
-   * 视差振幅：最近层相对卡片宽度的最大位移比例。
-   * 0.06 表示视差系数为 1 的层最多平移 6% 卡宽。0 即关闭视差，卡面完全平。
+   * 视差振幅：最近层和最远层之间最大的相对位移，占卡片宽度的比例。
+   * 0.1 表示卡片转到头时，主体和背景错开 10% 卡宽（各朝相反方向挪一半，见 setLayerSet）。
+   * 0 即关闭视差，卡面完全平。
    */
   amplitude: number;
   /** 倾斜幅度倍率。1 与上游一致，最大转角约 14° */
@@ -33,7 +35,8 @@ export interface HoloCardOptions {
 }
 
 const DEFAULT_OPTIONS: HoloCardOptions = {
-  amplitude: 0.06,
+  // 以前是 0.06、而且只有主体在动，用户反馈分层感太弱（issue #3 第 3 条）
+  amplitude: 0.1,
   tiltScale: 1,
 };
 
@@ -43,6 +46,8 @@ const INTERACT_SPRING = { stiffness: 0.066, damping: 0.25 };
 const SNAP_SPRING = { stiffness: 0.01, damping: 0.06 };
 /** 指针离开后多久才开始回正，毫秒 */
 const SNAP_DELAY_MS = 500;
+/** preview() 摆好姿态后停多久再回正。比松手回正久一些，给人看清调了什么 */
+const PREVIEW_HOLD_MS = 1200;
 /** 指针位置 → 转角的除数。50 / 3.5 ≈ 14.3°，即最大转角 */
 const ROTATE_DIVISOR = 3.5;
 
@@ -144,6 +149,10 @@ export class HoloCard {
 
   /** 当前持有的 object URL，切换卡片和销毁时必须全部 revoke，否则内存泄漏 */
   #objectUrls: string[] = [];
+  /** 各层相对焦平面的最大视差偏移，放大补偿按它算（见 #scale） */
+  #maxOffset = 0;
+  /** 当前这组层的高光保护遮罩全部换上了（失败的保持原遮罩，也算完成） */
+  #ready: Promise<void> = Promise.resolve();
 
   readonly #rotate = new Spring({ x: 0, y: 0 }, INTERACT_SPRING);
   readonly #glare = new Spring({ x: 50, y: 50, o: 0 }, INTERACT_SPRING);
@@ -159,6 +168,14 @@ export class HoloCard {
   constructor(host: HTMLElement, options: Partial<HoloCardOptions> = {}) {
     this.#host = host;
     this.#options = { ...DEFAULT_OPTIONS, ...options };
+  }
+
+  /**
+   * 高光保护遮罩都算好、换上了。截图（分享图、导出动图）前要等它，
+   * 否则可能截到亮部还没收住的那一版
+   */
+  get ready(): Promise<void> {
+    return this.#ready;
   }
 
   /** 当前卡片的根节点，供演示页读调试数值。未挂载时为 null */
@@ -194,7 +211,19 @@ export class HoloCard {
     const stack = document.createElement('div');
     stack.className = 'hc__stack';
 
+    /*
+     * 视差的「焦平面」取最远层和最近层的正中间：近处的往外飘，远处的往里退，两头一起动。
+     * 以前是最远层钉死不动、只有近处在动，同样的立体感全压在主体上，
+     * 主体要挪得多、放大补偿也大，边缘被裁掉一圈。现在每层只挪一半，放大也减半。
+     * 所有层视差相同（整张图是一个刚体）时焦平面就落在它们上面，照旧完全不动。
+     */
+    const parallaxes = manifest.layers.map((layer) => layer.parallax);
+    const focus = (Math.min(...parallaxes) + Math.max(...parallaxes)) / 2;
+    this.#maxOffset = Math.max(...parallaxes.map((p) => Math.abs(p - focus)));
+    root.style.setProperty('--hc-scale', String(this.#scale()));
+
     // 景深层：由远及近，每层 = 画面 + 这一层自己的箔面
+    const masks: Promise<void>[] = [];
     manifest.layers.forEach((layer, index) => {
       const blob = images[index];
       if (!blob) return; // 上面已校验过长度，这里只为满足类型收窄
@@ -204,8 +233,7 @@ export class HoloCard {
 
       const plane = document.createElement('div');
       plane.className = 'hc__plane';
-      plane.style.setProperty('--hc-parallax', String(layer.parallax));
-      plane.style.setProperty('--hc-scale', String(this.#scaleFor(layer.parallax)));
+      plane.style.setProperty('--hc-parallax', String(layer.parallax - focus));
 
       const art = document.createElement('img');
       art.className = 'hc__art';
@@ -214,10 +242,13 @@ export class HoloCard {
       art.decoding = 'async';
       art.draggable = false;
 
-      // 箔面用这一层自己的图当遮罩，于是箔只出现在该层的 alpha 形状里
+      // 箔面用这一层自己的图当遮罩，于是箔只出现在该层的 alpha 形状里。
+      // 先直接用层图，高光保护遮罩（亮部箔面减弱，见 highlight.ts）异步算好再换上。
+      // 静止时箔面本来就是透明的，换的那一下看不出来
       const shine = document.createElement('div');
       shine.className = 'hc__shine';
       shine.style.setProperty('--hc-mask', `url("${url}")`);
+      masks.push(this.#applyMask(root, layerMask(blob), shine, '--hc-mask'));
       this.#applyFoil(shine, layer.foil);
       this.#shines.push(shine);
 
@@ -247,6 +278,9 @@ export class HoloCard {
     root.append(translater);
     this.#host.append(root);
     this.#root = root;
+    // 整卡炫光、高光也按画面亮度收一收，变量挂在 .hc 上，两者共用（见 card.css）
+    masks.push(this.#applyMask(root, cardMask(images), root, '--hc-card-mask'));
+    this.#ready = Promise.all(masks).then(() => undefined);
 
     this.#writeVars();
     this.#bind(rotator);
@@ -283,12 +317,8 @@ export class HoloCard {
     if (!root) return;
 
     root.style.setProperty('--hc-amp', `${this.#options.amplitude * 100}%`);
-
-    // 振幅变了，每层的缩放补偿要跟着重算
-    for (const plane of root.querySelectorAll<HTMLElement>('.hc__plane')) {
-      const parallax = Number(plane.style.getPropertyValue('--hc-parallax')) || 0;
-      plane.style.setProperty('--hc-scale', String(this.#scaleFor(parallax)));
-    }
+    // 振幅变了，放大补偿要跟着重算
+    root.style.setProperty('--hc-scale', String(this.#scale()));
     this.#writeVars();
   }
 
@@ -323,13 +353,58 @@ export class HoloCard {
     this.#writeVars();
   }
 
+  /**
+   * 把卡片平滑转到炫光最亮的角度，停一会儿再缓缓回正。
+   *
+   * 给调参面板用：拖滑块时手指不在卡片上，卡片是静止的——而箔面、炫光要转起来才显，
+   * 视差要歪过去才看得出，静止时这些全是 0，拖滑块看不到任何变化（issue #3 第 3、4 条）。
+   * 连续拖动时反复调用，每次都会把回正往后推。
+   */
+  preview(): void {
+    const halo = this.#halo;
+    if (!this.#root || !halo) return;
+    this.#aim(50 + halo.light.peakAt[0] * 50, 50 + halo.light.peakAt[1] * 50);
+    this.#interactEnd(PREVIEW_HOLD_MS);
+  }
+
   destroy(): void {
     this.#teardownDom();
   }
 
-  /** 位移会让层的边缘露白，按最大位移量反推需要放大多少 */
-  #scaleFor(parallax: number): number {
-    return 1 + 2 * Math.abs(parallax) * this.#options.amplitude;
+  /**
+   * 高光保护遮罩算好后写到 el 的 variable 上。
+   * 算不出来（解不开图、拿不到 canvas）就保持原样：效果照常，只是亮部没有保护
+   */
+  async #applyMask(
+    root: HTMLDivElement,
+    mask: Promise<string>,
+    el: HTMLElement,
+    variable: string,
+  ): Promise<void> {
+    try {
+      const url = await mask;
+      // 算的功夫卡片已经换掉了
+      if (this.#root !== root) {
+        URL.revokeObjectURL(url);
+        return;
+      }
+      this.#objectUrls.push(url);
+      el.style.setProperty(variable, `url("${url}")`);
+    } catch {
+      // 见上
+    }
+  }
+
+  /**
+   * 位移会让层的边缘露白，按位移最大的那一层反推需要放大多少。
+   *
+   * 所有层必须用同一个倍数。以前是各层按自己的位移各放各的（主体 1.12、背景 1.0），
+   * 放大又是绕卡片中心，结果卡片静止时主体就比它在背景里留下的那个坑大一圈、偏出去一截：
+   * 狗头和狗身子对不上、人的肩膀接不上，一张卡还没转就已经断了（issue #3 第 2 条的「分层断裂」）。
+   * 统一放大之后，静止时整张卡就是原图等比放大，层与层严丝合缝。
+   */
+  #scale(): number {
+    return 1 + 2 * this.#maxOffset * this.#options.amplitude;
   }
 
   #applyFoil(shine: HTMLDivElement, foil: LayerFoil): void {
@@ -372,12 +447,15 @@ export class HoloCard {
     const rect = root.getBoundingClientRect();
     if (rect.width === 0 || rect.height === 0) return;
 
-    window.clearTimeout(this.#snapTimer);
+    this.#aim(
+      clamp(round((100 / rect.width) * (event.clientX - rect.left))),
+      clamp(round((100 / rect.height) * (event.clientY - rect.top))),
+    );
+  }
 
-    const percent = {
-      x: clamp(round((100 / rect.width) * (event.clientX - rect.left))),
-      y: clamp(round((100 / rect.height) * (event.clientY - rect.top))),
-    };
+  /** 让卡片跟着弹簧转向「指针停在卡面 (x, y) 百分比处」的姿态 */
+  #aim(x: number, y: number): void {
+    window.clearTimeout(this.#snapTimer);
 
     for (const spring of [this.#rotate, this.#glare, this.#background]) {
       spring.stiffness = INTERACT_SPRING.stiffness;
@@ -386,11 +464,11 @@ export class HoloCard {
 
     // 背景位移量故意收窄到中间一小段，箔面花纹只是微微游动而不是满屏乱扫
     this.#background.set({
-      x: adjust(percent.x, 0, 100, 37, 63),
-      y: adjust(percent.y, 0, 100, 33, 67),
+      x: adjust(x, 0, 100, 37, 63),
+      y: adjust(y, 0, 100, 33, 67),
     });
-    this.#rotate.set(rotationFromPointer(percent.x, percent.y, this.#options.tiltScale));
-    this.#glare.set({ x: round(percent.x), y: round(percent.y), o: 1 });
+    this.#rotate.set(rotationFromPointer(x, y, this.#options.tiltScale));
+    this.#glare.set({ x: round(x), y: round(y), o: 1 });
 
     this.#ensureLoop();
   }
@@ -470,7 +548,7 @@ export class HoloCard {
 
     // 视差吃的是过了弹簧的指针位置，所以层的滑动和转卡是同一种手感。
     // 必须钳到 [-1, 1]：glare 弹簧是欠阻尼的，快速划过时会过冲出界，
-    // 而 #scaleFor 的缩放补偿是按 |n| ≤ 1 推的，过冲时层的边缘会缩进卡面里露边。
+    // 而 #scale 的缩放补偿是按 |n| ≤ 1 推的，过冲时层的边缘会缩进卡面里露边。
     style.setProperty('--hc-nx', String(round(clamp((glare.x - 50) / 50, -1, 1), 4)));
     style.setProperty('--hc-ny', String(round(clamp((glare.y - 50) / 50, -1, 1), 4)));
 
