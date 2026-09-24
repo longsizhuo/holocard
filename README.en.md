@@ -63,9 +63,14 @@ Cutting through content splits an object in two. The number of layers is compute
 the "middle layer" range, forming a thin misclassified ring around the object that separates into a ghost as soon as it moves.
 Morphological toggle mapping squashes steep slopes into steps; gentle surfaces with a small drop are left alone, since that is exactly where a smooth transition is wanted.
 
-**The foreground grows outward a little.** Depth boundaries are always a few pixels off from real object edges, and usually shrink into the object;
+**The foreground grows outward, but only a little.** Depth boundaries are always a few pixels off from real object edges, and usually shrink into the object;
 the ring that shrinks in stays behind in the layer below, so when the object moves, its own outline is left in place.
-Growing every nearer region outward by a few pixels makes object edges always travel with the object.
+Growing nearer regions outward makes object edges travel with the object. But the background pixels swallowed by that growth are opaque,
+which gives subjects in front of white walls or sky a bright rim, so the growth is only 2 pixels; keeping object edges out of the background is done instead by widening the occluded area of the background layer before filling it.
+
+**Soft edges have the background colour removed.** A semi-transparent edge pixel mixes foreground and background: `C = a·F + (1 − a)·B`.
+Storing C as-is makes hair and fur edges carry the colour of the old background along when they move. Compositing far to near, B is whatever currently sits behind the layer,
+and F is solved for and stored: stacked back together at rest the layers still reproduce the original exactly, while in motion the soft edge carries only the foreground's own colour.
 
 **Every layer except the front one is completed, not just the bottom one.** When the foreground moves away, what shows through should be a continuation of the layer right behind it.
 How: for each covered pixel, find which layer the nearest visible pixel belongs to, and treat that layer as extending to it.
@@ -74,6 +79,8 @@ Completing only the bottom layer would make the middle layer end abruptly at the
 **The fill needs texture.** Foil uses `color-dodge` to light up bright pixels of the underlying image, and flat color patches do not light up.
 So the fill mirrors real pixels from the other side of the boundary around the nearest source pixel; a push-pull smooth fill is only the fallback.
 No neural network is involved: parallax offsets are only a few dozen pixels, so what gets revealed are thin strips, not big holes.
+LaMa (Apache-2.0) was tried for server-side fill: 10 s and 900 MB on two cores, and when the subject fills most of the frame it extends the subject's colour into the hole,
+producing a dark smudge that is itself a ghost. Not worth it.
 
 ## Edge refinement
 
@@ -113,6 +120,9 @@ all four routes were tried:
 
 To reproduce: `node scripts/probe-matte.mjs --image path/to/photo`.
 
+After layering moved to the server it was measured again: onnxruntime-node on two ARM cores takes 20 s at 1024 input with a 12 GB memory peak,
+while the service is capped at 3 GB, so it is still out.
+
 Actually using it would require re-exporting the model: split that wide Concat into two levels, or free up the input size. `src/segmenter/matte.ts` is kept,
 with a capability check that decides **before downloading any weights** whether this machine can run it, and refuses right away if not, so no bandwidth is wasted.
 
@@ -140,13 +150,32 @@ The parts that are our own:
 
 **Parallax does not use `translateZ`.** It introduces perspective scaling and the layer sizes stop matching. Instead each layer gets its own 2D offset,
 proportional to that layer's parallax factor. Near layers move opposite to the pointer: lifting the right edge is like the viewer stepping to the right,
-so nearby things shift left relative to far ones. A layer shifted by d pixels reveals a gap on the other side, so each layer is scaled up by `1 + 2d/width` to compensate.
+so nearby things shift left relative to far ones.
+
+**The focal plane sits in the middle, and every layer shares one scale factor.** The midpoint between the farthest and nearest layer stays still: near layers drift out, far layers recede,
+so each layer only moves half as much for the same sense of depth. By default the subject and background separate by up to 10% of the card width.
+Shifting reveals a gap on the other side, so layers are scaled up to compensate, but **all layers must use the same factor** (taken from the layer that moves most).
+Previously each layer was scaled by its own amount around the card centre, so at rest the subject was bigger than the hole it left in the background and a dog's head no longer met its body.
+With one shared factor the card at rest matches the original photo pixel for pixel.
+
+**Highlight protection.** Most foils use `color-dodge` (base ÷ (1 − foil)) and the card-wide glare uses `overlay`, so bright areas clip to pure white and the texture of white clothes or fur disappears.
+Every foil mask, and the masks of the halo and glare, are therefore attenuated by image brightness: unchanged below luminance 0.6, easing down to 0.2 at pure white (`renderer/highlight.ts`).
+Shadows and midtones keep the full effect; only what is about to clip is held back.
+
+**Tuning previews at the peak.** While a slider is being dragged the pointer is not on the card, so the card is at rest, and foils and halo only show when it tilts, parallax only when it leans.
+`preview()` therefore turns the card to the halo's brightest angle while any slider moves, holds it briefly, then eases back.
 
 **The card-wide halo is an angle event.** The card's surface normal is derived from the current rotation and dotted with the orientation that "reflects the light into the eye",
 with a wide and a narrow lobe added together. With the default parameters the intensity is 0.12 at rest, 1.00 at the peak tilt, 0.01 at the opposite tilt.
 
 **`setPose({x, y})`** puts the card straight into a pose without animation, for rendering static previews
 or driving it from external input such as a gyroscope.
+
+## Albums
+
+Cards you made and cards shared with you can be collected into albums, and one card can sit in several albums. Albums live only in this device's browser (localStorage),
+just like delete tokens, since the site has no accounts. An album stores card ids only; the cards themselves live on the server and show as "Expired" once they are gone.
+Grid thumbnails are made by the server from the original on first request (`/api/layers/<id>/thumb.jpg`, longest side 480). Code: `src/demo/albums*.ts`.
 
 ## The `.layers` format
 

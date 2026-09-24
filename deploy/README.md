@@ -47,7 +47,7 @@ ssh oracle 'cd /srv/holocard-web && ln -sfn releases/<版本> current.new && mv 
 | `/opt/holocard/node_modules/` | transformers.js + onnxruntime-node + sharp，约 483MB |
 | `/srv/holocard-models/` | Depth Anything V2-Small 权重（q8，27MB） |
 | `/srv/holocard-web/` | 前端 releases + current 软链 |
-| `/srv/holocard-layers/` | 每张卡一个目录：原图（去掉 EXIF）+ 层 PNG + manifest + 预览图 |
+| `/srv/holocard-layers/` | 每张卡一个目录：原图（去掉 EXIF）+ 层 PNG + manifest + 预览图 + 卡册缩略图 `thumb.jpg`（第一次有人要时现做） |
 | `/srv/holocard-data/holocard.db` | 卡片数据库（SQLite），每张卡的状态、原图地址、结果地址、保留期、删除口令 |
 | `/opt/holocard/browsers/` | Playwright 的 arm64 Chromium，渲染 OG 预览图用，662MB |
 
