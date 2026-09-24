@@ -510,6 +510,183 @@ select {
 .danger__btn:hover { background: rgba(190, 70, 90, 0.08); border-color: rgba(190, 70, 90, 0.5); }
 .danger__btn:disabled { opacity: 0.5; cursor: default; }
 
+/* ---------- 卡册 ---------- */
+
+/* 页头入口：和语言切换同一套小胶囊，不和珠光的 GitHub 按钮抢 */
+.albums-open {
+  flex: none;
+  padding: 6px 12px;
+  border-radius: 999px;
+  border: 1px solid var(--line);
+  background: var(--surface);
+  color: var(--fg);
+  font: inherit;
+  font-size: 12.5px;
+  font-weight: 600;
+  white-space: nowrap;
+  cursor: pointer;
+}
+.albums-open:hover { border-color: rgba(123, 95, 208, 0.45); }
+
+/* 原生 dialog：遮罩、Esc、焦点都归浏览器管。body 不滚，窗口自己滚 */
+.albums {
+  width: min(640px, calc(100vw - 24px));
+  max-height: min(86vh, 900px);
+  padding: 0;
+  border: 1px solid rgba(255, 255, 255, 0.9);
+  border-radius: 18px;
+  background: var(--surface-solid);
+  color: var(--fg);
+  box-shadow: 0 24px 60px -20px rgba(40, 30, 70, 0.5);
+}
+.albums::backdrop { background: rgba(35, 32, 43, 0.35); backdrop-filter: blur(3px); }
+.albums__close {
+  position: sticky;
+  top: 10px;
+  float: right;
+  margin: 10px 10px 0 0;
+  width: 32px;
+  height: 32px;
+  border-radius: 999px;
+  border: 1px solid var(--line);
+  background: var(--surface-solid);
+  color: var(--muted);
+  font-size: 18px;
+  line-height: 1;
+  cursor: pointer;
+  z-index: 1;
+}
+.albums__body { padding: 18px 20px 20px; }
+.albums__body h2 { margin: 0 0 6px; font-size: 18px; letter-spacing: -0.01em; overflow-wrap: anywhere; }
+.albums__head { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin: 0 40px 14px 0; }
+.albums__head h2 { margin: 0; }
+.albums__meta { margin: 0 0 8px; font-size: 12px; color: var(--muted); }
+.albums__intro { margin: 0 0 12px; font-size: 13px; white-space: pre-line; overflow-wrap: anywhere; }
+.albums__note { margin: 14px 0 0; font-size: 11px; color: var(--muted); }
+.albums__empty { margin: 18px 0; font-size: 13px; color: var(--muted); }
+.albums__error { color: #a63b53; min-height: 1.5em; }
+.albums__actions { display: flex; flex-wrap: wrap; gap: 8px; margin: 10px 0 14px; }
+
+/* 按钮：默认白底描边；主按钮珠光；危险操作红字；链接样式；卡片上的小按钮 */
+.abtn {
+  padding: 7px 12px;
+  border-radius: 10px;
+  border: 1px solid var(--line);
+  background: var(--surface-solid);
+  color: var(--fg);
+  font: inherit;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+}
+.abtn:hover { border-color: rgba(123, 95, 208, 0.45); }
+.abtn.is-primary {
+  margin-left: auto;
+  border-color: rgba(255, 255, 255, 0.9);
+  background: linear-gradient(120deg, var(--p5), var(--p2) 50%, var(--p3));
+  box-shadow: 0 1px 0 rgba(255, 255, 255, 0.9) inset;
+}
+.abtn.is-danger { color: #a63b53; border-color: rgba(190, 70, 90, 0.3); background: transparent; }
+.abtn.is-link { padding: 4px 0; border: 0; background: none; color: var(--accent); font-weight: 500; }
+.abtn.is-mini { padding: 3px 7px; border-radius: 7px; font-size: 11px; font-weight: 500; }
+
+/* 缩略图：固定竖卡比例，照片 cover 进去；没有封面时就是一块珠光 */
+.athumb {
+  position: relative;
+  aspect-ratio: 3 / 4;
+  border-radius: 10px;
+  overflow: hidden;
+  background: linear-gradient(135deg, var(--p5), var(--p2) 45%, var(--p3) 75%, var(--p4));
+}
+.athumb img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.athumb.is-gone { display: grid; place-items: center; background: var(--line); }
+.athumb.is-gone span { font-size: 12px; color: var(--muted); }
+
+.albums__grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(132px, 1fr)); gap: 14px; }
+
+.atile {
+  display: grid;
+  gap: 4px;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--fg);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.atile strong { font-size: 13px; overflow-wrap: anywhere; }
+.atile span { font-size: 11px; color: var(--muted); }
+.atile:hover .athumb { box-shadow: 0 8px 20px -10px rgba(60, 50, 90, 0.7); }
+.atile.is-archived .athumb { opacity: 0.55; }
+
+.acard { display: grid; gap: 6px; }
+.acard a { display: block; border-radius: 10px; }
+.acard__tools { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; }
+.acard__cover { font-size: 11px; color: var(--accent); font-weight: 600; padding: 3px 0; }
+
+/* 加入卡册：一行一个卡册，整行都能点 */
+.albums__picks { display: grid; gap: 8px; margin: 12px 0; }
+.apick {
+  display: grid;
+  grid-template-columns: auto 44px 1fr;
+  align-items: center;
+  gap: 12px;
+  padding: 8px 10px;
+  border-radius: 12px;
+  border: 1px solid var(--line);
+  cursor: pointer;
+}
+.apick:has(input:checked) { border-color: rgba(123, 95, 208, 0.55); background: rgba(123, 95, 208, 0.06); }
+.apick input { width: 18px; height: 18px; accent-color: var(--accent); }
+.apick > span { display: grid; min-width: 0; }
+.apick strong { font-size: 13px; overflow-wrap: anywhere; }
+.apick small { font-size: 11px; color: var(--muted); }
+
+/* 表单 */
+.albums__form input[type='text'],
+.albums__form textarea,
+.albums__form select {
+  width: 100%;
+  padding: 8px 10px;
+  border-radius: 9px;
+  border: 1px solid var(--line);
+  background: #fff;
+  color: var(--fg);
+  font: inherit;
+  font-size: 14px; /* 手机上改成 16px，见下面的媒体查询 */
+}
+.albums__form select + input { margin-top: 8px; }
+.albums__form textarea { resize: vertical; }
+.acovers { display: grid; grid-template-columns: repeat(auto-fill, minmax(64px, 1fr)); gap: 8px; }
+.acovers__item {
+  padding: 0;
+  border: 2px solid transparent;
+  border-radius: 12px;
+  background: none;
+  cursor: pointer;
+}
+.acovers__item.is-on { border-color: var(--accent); }
+.acovers__item > span {
+  display: grid;
+  place-items: center;
+  aspect-ratio: 3 / 4;
+  border-radius: 10px;
+  background: var(--line);
+  font-size: 11px;
+  color: var(--muted);
+}
+
+@media (max-width: 900px) {
+  .albums-open { font-size: 12px; padding: 5px 10px; }
+  .albums__body { padding: 16px 14px 18px; }
+  .albums__grid { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+  /* iOS 上输入框字号小于 16px，一聚焦整页就被放大，退出后还缩不回来 */
+  .albums__form input[type='text'],
+  .albums__form textarea,
+  .albums__form select { font-size: 16px; }
+}
+
 /* ---------- 页脚 ---------- */
 
 /*

@@ -5,6 +5,7 @@
  * 它比 canvas 那条路快得多，而且不需要任何原生图形栈。
  */
 
+import { rename } from 'node:fs/promises';
 import sharp from 'sharp';
 // HEIC 用现成的库解（libheif 的 WASM 版，自带 HEVC 解码器），见 normalizeOriginal
 import decodeHeic from 'heic-decode';
@@ -176,4 +177,21 @@ async function normalizeHeic(input: Buffer): Promise<StoredOriginal> {
  */
 export function layerToWebp(png: Buffer): Promise<Buffer> {
   return sharp(png).webp({ quality: 88, alphaQuality: 100, effort: 4 }).toBuffer();
+}
+
+/** 卡册缩略图的最长边。手机上一行两张，480 在三倍屏上也够清楚 */
+const THUMB_SIDE = 480;
+
+/**
+ * 卡册网格用的缩略图。原图动辄几 MB，分享图（preview.jpg）右半边又是一大段文案，都不适合放进网格。
+ * 原图存盘前已经摆正方向、去掉了 EXIF（见 normalizeOriginal），这里只管缩。
+ * 先写临时文件再改名：同一张卡的两个请求同时来，谁都不会读到写了一半的文件。
+ */
+export async function makeThumb(source: string, target: string): Promise<void> {
+  const temp = `${target}.${process.pid}.${Date.now()}.tmp`;
+  await sharp(source)
+    .resize(THUMB_SIDE, THUMB_SIDE, { fit: 'inside', withoutEnlargement: true })
+    .jpeg({ quality: 80, mozjpeg: true })
+    .toFile(temp);
+  await rename(temp, target);
 }

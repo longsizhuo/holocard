@@ -15,6 +15,7 @@ import {
   rememberOwned,
   segmentOnServer,
 } from './api';
+import { albumCountFor, initAlbums, openAlbums, openPicker } from './albums-ui';
 import { initTracking, pageView, track } from './track';
 import { parseRoute, shareUrl } from './route';
 import {
@@ -54,6 +55,9 @@ const FOIL_LABEL: Record<FoilType, MessageKey> = {
 const stage = need<HTMLDivElement>('#stage');
 const status = need<HTMLParagraphElement>('#status');
 const foilList = need<HTMLDivElement>('#foil-list');
+
+const collectBox = need<HTMLDivElement>('#collect');
+const collectHint = need<HTMLElement>('#collect-hint');
 
 const ctlAmp = need<HTMLInputElement>('#ctl-amp');
 const ctlIntensity = need<HTMLInputElement>('#ctl-intensity');
@@ -239,6 +243,9 @@ function show(set: LayerSet, id: string | null = null): void {
   if (!exporting) resetExport();
   // 只有手上有这张卡口令的人才看得到删除入口
   ownerBox.hidden = id === null || ownedToken(id) === null;
+  // 卡册收的是服务端的卡：自己做的、别人分享来的都行，手工素材没有 id 收不了
+  collectBox.hidden = id === null || route.mode === 'render';
+  updateCollectHint();
   deleteBtn.disabled = false;
   setText(deleteBtn, 'delete.button');
 
@@ -488,6 +495,19 @@ async function doShare(auto = false): Promise<void> {
  *
  * 二次确认是必须的：这个操作不可撤销，而且已经分享出去的链接会立刻失效。
  */
+/** 「加入卡册」下面那行：这张卡已经在几个卡册里 */
+function updateCollectHint(): void {
+  const n = currentId ? albumCountFor(currentId) : 0;
+  if (n > 0) setText(collectHint, 'albums.inAlbums', { n });
+  else clearText(collectHint);
+}
+
+initAlbums(need<HTMLDialogElement>('#albums'), updateCollectHint);
+need<HTMLButtonElement>('#albums-open').addEventListener('click', openAlbums);
+need<HTMLButtonElement>('#collect-btn').addEventListener('click', () => {
+  if (currentId) openPicker(currentId);
+});
+
 async function doDelete(): Promise<void> {
   if (!currentId) return;
   if (!confirm(t('delete.confirm'))) return;
@@ -502,6 +522,7 @@ async function doDelete(): Promise<void> {
     ownerBox.hidden = true;
     shareBox.hidden = true;
     exportBox.hidden = true;
+    collectBox.hidden = true;
     setText(status, 'delete.done');
   } catch (error) {
     deleteBtn.disabled = false;

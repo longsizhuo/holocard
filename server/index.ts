@@ -25,7 +25,7 @@ import { randomUUID, timingSafeEqual } from 'node:crypto';
 import { basename, dirname, extname, join, resolve, sep } from 'node:path';
 import { env } from '@huggingface/transformers';
 import { segmentToLayerSet } from '../src/segmenter';
-import { sharpImages, normalizeOriginal, layerToWebp, ImageError } from './images';
+import { sharpImages, normalizeOriginal, layerToWebp, makeThumb, ImageError } from './images';
 import {
   LANG_TAG,
   LANGS,
@@ -542,7 +542,7 @@ const SPA_ROUTES = [
  * 导出的动图另见 export.ts 的 EXPORT_FILE
  */
 const LAYER_FILE =
-  /^(?:manifest\.json|layer-\d{1,2}\.(?:png|webp)|preview(?:-(?:en|ja))?\.jpg|original\.(?:jpg|png|webp))$/;
+  /^(?:manifest\.json|layer-\d{1,2}\.(?:png|webp)|preview(?:-(?:en|ja))?\.jpg|thumb\.jpg|original\.(?:jpg|png|webp))$/;
 
 /** HTML 属性转义。卡片 id 是我们自己生成的 UUID，但注入前仍然一律转义 */
 function escapeAttr(value: string): string {
@@ -1071,6 +1071,17 @@ const server = createServer((req, res) => {
       (LAYER_FILE.test(fileName) || EXPORT_FILE.test(fileName))
     ) {
       const [, id, name] = fileMatch;
+      // 卡册缩略图第一次有人要的时候现做（见 makeThumb）。卡已经过期、被删的，原图也没了，照常落到下面的 404
+      if (name === 'thumb.jpg') {
+        const target = join(OUT_DIR, id ?? '', name);
+        const card = db.get(id ?? '');
+        const source = card?.status === 'done' ? originalFile(card) : null;
+        if (source && !(await stat(target).catch(() => null))) {
+          await makeThumb(source, target).catch((error: unknown) => {
+            console.warn(`[thumb] ${id} 生成失败：`, error instanceof Error ? error.message : error);
+          });
+        }
+      }
       // 导出的动图按下载处理，文件名用给用户看的那个（HoloCard_xxxx.jpg 之类）
       const exported = EXPORT_FORMATS
         .flatMap((format) => exportFiles(format, id ?? ''))
