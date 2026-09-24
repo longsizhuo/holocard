@@ -10,10 +10,10 @@ import {
   apiError,
   apiHeaders,
   deleteCard,
+  NoBackendError,
   ownedToken,
   rememberOwned,
   segmentOnServer,
-  ServerUnavailableError,
 } from './api';
 import { initTracking, pageView, track } from './track';
 import { parseRoute, shareUrl } from './route';
@@ -313,8 +313,9 @@ async function shrinkIfHuge(file: File): Promise<Blob> {
 }
 
 /**
- * 分层：优先让服务端做，浏览器一个字节的模型都不用下。
- * 服务端没部署或忙不过来时回退到浏览器端流水线——自托管的纯静态部署走的就是这条路。
+ * 分层：交给服务端做，浏览器一个字节的模型都不用下。
+ * 只有部署里压根没有分层服务时才回退到浏览器端流水线——自托管的纯静态部署走的就是这条路。
+ * 服务端临时不行就报错让人稍后再试，不回退，原因见 api.ts 开头。
  *
  * stage 记着走到了哪一步，失败时随埋点一起报上去：只看错误原文分不清是上传断了、
  * 服务端失败，还是结果下载到一半断了（之前排查时只能拿服务端数据库一条条对）。
@@ -346,9 +347,9 @@ async function processImage(file: File): Promise<void> {
       track('segment-ok', { where: 'server', layers: set.manifest.layers.length });
       setText(status, 'status.done', { n: set.manifest.layers.length, generator: set.manifest.generator ?? '' });
     } catch (serverError) {
-      if (!(serverError instanceof ServerUnavailableError)) throw serverError;
+      if (!(serverError instanceof NoBackendError)) throw serverError;
 
-      // 回退：在浏览器里跑。首次要下约 50MB 权重，所以只在服务端指望不上时才走
+      // 回退：在浏览器里跑。首次要下约 50MB 权重，所以只在根本没有服务端时才走
       console.info('[holocard] 服务端不可用，回退到浏览器端：', serverError.message);
       stage = 'browser';
       showProgress('progress.fallback');

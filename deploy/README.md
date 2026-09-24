@@ -159,6 +159,7 @@ ssh oracle "cd /opt/holocard && node22/bin/node db.mjs \"SELECT ...\""  # 任意
   超过 16MB 的图前端先在浏览器里缩到 4096 以内再传
 - **层图**：存成 WebP（画面有损 q88、alpha 无损），体积约为 PNG 的十分之一。老卡的 PNG 照常能用
 - **权重**：服务端本来就有的 q8 权重在 `/models/` 下原样发出去，给浏览器端退回处理用（国内连不上 huggingface.co）。
+  现在有后端的部署不会再退回浏览器端（见文末），线上这个路由暂时用不到
   只发三个文件，其余 404
 - upng-js、heic-decode、libheif-js 是纯 JS/WASM，打进了服务端的包（`vite.server.config.ts` 的 `ssr.noExternal`），
   服务器上的 `node_modules` 不用动
@@ -311,8 +312,18 @@ sudo docker exec global-caddy-gateway caddy reload  --config /etc/caddy/Caddyfil
 
 **模型权重和推理运行时都不再下发给浏览器**。改造前每个新访客首次使用要下 47MB 权重 + 5.3MB wasm。
 
-浏览器端的流水线代码仍然保留，只在服务端不可用时作为回退（自托管的纯静态部署走这条路），
-那时才会按需下载模型。
+浏览器端的流水线代码仍然保留，但**只在部署里压根没有分层服务时**才回退过去（自托管的纯静态部署，
+`POST /api/jobs` 回 404/405；开发时没起 `pnpm dev:server`，Vite 代理回 502），那时才会按需下载约 50MB 模型。
+
+线上服务端临时不行时一律不回退，因为用户大多在手机上，50MB 模型的流量和内存都扛不住：
+
+| 情况 | 前端的反应 |
+|---|---|
+| 发版重启（502）、Cloudflare 回源失败（52x）、网络断开 | 自动重试 3 次（间隔 1s / 3s / 6s），还不行就报「稍后再试」 |
+| 排队满（503 `queue_full`） | 直接报错。自动重试要把整张照片重传一遍，手机上不划算 |
+| 提交成功后轮询连续失败 60 秒，或总共等了 5 分钟 | 报「稍后再试」 |
+
+改这块逻辑后跑一遍 `pnpm build && node scripts/verify-fallback.mjs`：它起一个假服务端，逐个场景核对前端提交了几次、有没有去下模型。
 
 ## 整个撤掉
 

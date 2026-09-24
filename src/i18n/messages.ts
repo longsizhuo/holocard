@@ -108,6 +108,7 @@ export const zh = {
   'error.export_busy': '现在导出的人太多，稍后再试',
   'error.job_not_found': '任务不存在或已过期',
   'error.network': '网络连接断了，稍后再试',
+  'error.server_unavailable': '服务器暂时处理不了，稍后再试',
 
   // ---------- 分享图（服务端截的 OG 图）与分享卡片 ----------
   'og.headlineHtml': '会发光的<br />分层闪卡',
@@ -224,6 +225,7 @@ export const en: Messages = {
   'error.export_busy': 'Too many exports right now, please try again later',
   'error.job_not_found': 'This job does not exist or has expired',
   'error.network': 'The connection dropped, please try again',
+  'error.server_unavailable': "The server can't take this right now, please try again later",
 
   'og.headlineHtml': 'Holo cards<br />that glow',
   'og.body': 'Each layer gets its own foil. Tilt the card and the foils shift with the angle.',
@@ -337,6 +339,7 @@ export const ja: Messages = {
   'error.export_busy': '書き出しが混み合っています。しばらくしてからお試しください',
   'error.job_not_found': 'この処理は存在しないか、期限切れです',
   'error.network': '接続が切れました。もう一度お試しください',
+  'error.server_unavailable': 'サーバーが一時的に処理できません。しばらくしてからお試しください',
 
   // 一行放不下「レイヤーキラカード」（56px 九个字超出文案栏），在这里断开
   'og.headlineHtml': '光るレイヤー<br />キラカード',

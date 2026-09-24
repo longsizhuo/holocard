@@ -4,8 +4,9 @@
  * 服务端跑完整条流水线，浏览器一个字节的模型都不用下。
  * 接口是「提交 + 轮询」：处理要几秒到几十秒，长连接容易被中间层掐断。
  *
- * 服务不可用时抛 ServerUnavailableError，调用方据此回退到浏览器端流水线
- * （自托管、纯静态部署的场景下本来就没有后端）。
+ * 只有部署里压根没有分层服务（纯静态自托管）时才抛 NoBackendError，调用方据此回退到浏览器端流水线。
+ * 服务端临时不行（发版重启、排队满、网络抖动）一律报错让人稍后再试，不回退：
+ * 回退要下约 50MB 模型，用户大多在手机上，流量和内存都吃不消，而服务端过一会儿就好了。
  *
  * 这里不产出任何给人看的文字：进度给的是文案的键，错误带服务端的 code，
  * 由界面按当前语言翻译（见 src/i18n）。
@@ -13,11 +14,11 @@
 
 import { lang, type MessageKey } from '../i18n';
 
-/** 服务端不可用——没部署、掉线、或者忙不过来。调用方应当回退，而不是报错 */
-export class ServerUnavailableError extends Error {
+/** 这个部署没有分层服务。只有这种情况调用方才回退到浏览器端 */
+export class NoBackendError extends Error {
   constructor(message: string) {
     super(message);
-    this.name = 'ServerUnavailableError';
+    this.name = 'NoBackendError';
   }
 }
 
@@ -82,6 +83,8 @@ const POLL_INTERVAL_MS = 1000;
 const TIMEOUT_MS = 5 * 60 * 1000;
 /** 轮询连续失败多久才放弃，见 segmentOnServer 里的说明 */
 const POLL_GIVE_UP_MS = 60 * 1000;
+/** 提交遇到网络断开或 5xx 时的重试间隔。发版重启一两秒就好，合计约 10 秒够了 */
+const SUBMIT_RETRY_MS = [1000, 3000, 6000];
 
 function sleep(ms: number, signal?: AbortSignal): Promise<void> {
   return new Promise((resolve, reject) => {
@@ -107,6 +110,46 @@ export interface SegmentResult {
 }
 
 /**
+ * 提交图片。网络断开、5xx 这类一会儿就好的失败自动重试几次，还不行就抛错。
+ * 排队满不重试：每次重试都要把整张照片重传一遍（Cloudflare 先收完请求体才回源），
+ * 手机上几次下来的流量和下模型差不多了，不如直接告诉人稍后再试。
+ */
+async function submitJob(
+  file: Blob,
+  onProgress?: (p: ServerProgress) => void,
+  signal?: AbortSignal,
+): Promise<Response> {
+  for (let attempt = 0; ; attempt++) {
+    let failure: unknown;
+    try {
+      const res = await fetch(`${import.meta.env.BASE_URL}api/jobs`, {
+        method: 'POST',
+        body: file,
+        headers: apiHeaders(),
+        ...(signal ? { signal } : {}),
+      });
+      // 纯静态托管对 POST 回 404/405；开发时没起 pnpm dev:server，Vite 的代理回 502
+      if (res.status === 404 || res.status === 405 || (import.meta.env.DEV && res.status === 502)) {
+        throw new NoBackendError(`没有分层服务（HTTP ${res.status}）`);
+      }
+      if (res.status < 502) return res;
+      const error = await apiError(res, `分层服务暂时不可用（HTTP ${res.status}）`);
+      // Caddy / Cloudflare 回的 502、52x 没有 code，补一个，界面才翻译得了
+      failure = error.code ? error : new ApiError(error.message, 'server_unavailable');
+    } catch (error) {
+      if (error instanceof NoBackendError || signal?.aborted) throw error;
+      // 网络层失败：离线，或者手机信号抖了一下
+      failure = error;
+    }
+
+    const wait = SUBMIT_RETRY_MS[attempt];
+    if (wait === undefined || (failure instanceof ApiError && failure.code === 'queue_full')) throw failure;
+    onProgress?.({ key: 'progress.reconnecting' });
+    await sleep(wait, signal);
+  }
+}
+
+/**
  * 把图片交给服务端分层。
  */
 export async function segmentOnServer(
@@ -117,29 +160,9 @@ export async function segmentOnServer(
   const base = import.meta.env.BASE_URL;
 
   onProgress?.({ key: 'progress.uploading' });
-
-  let created: Response;
-  try {
-    created = await fetch(`${base}api/jobs`, {
-      method: 'POST',
-      body: file,
-      headers: apiHeaders(),
-      ...(signal ? { signal } : {}),
-    });
-  } catch (error) {
-    // 网络层就失败了：没部署后端，或者离线
-    throw new ServerUnavailableError(
-      `连不上分层服务：${error instanceof Error ? error.message : String(error)}`,
-    );
-  }
-
-  if (created.status === 404 || created.status === 502 || created.status === 503) {
-    const error = await apiError(created, `分层服务不可用（HTTP ${created.status}）`);
-    // 排队满了是服务端明确说「忙」，照样回退；但带上原因，回退也失败时能显示出来
-    throw new ServerUnavailableError(error.message);
-  }
+  const created = await submitJob(file, onProgress, signal);
   if (!created.ok) {
-    // 4xx 是这张图本身的问题（太大、格式不认），回退到浏览器端也一样会失败
+    // 剩下的是这张图本身的问题（太大、格式不认）或提交太频繁，重试也没用
     throw await apiError(created, `上传失败（HTTP ${created.status}）`);
   }
 
@@ -151,7 +174,7 @@ export async function segmentOnServer(
    * 任务已经交出去了，服务端在处理——轮询偶尔失败一次（网络抖一下、发版重启那几秒、
    * Cloudflare 回源超时）不代表服务端没了。以前一次失败就退回浏览器端，
    * 用户白下 50MB 模型，服务端做好的卡也扔了（埋点里查到过好几次）。
-   * 现在连续失败超过 POLL_GIVE_UP_MS 才放弃；任务在服务端是持久化的，重启后会接着做。
+   * 现在连续失败超过 POLL_GIVE_UP_MS 才报错（也不再回退）；任务在服务端是持久化的，重启后会接着做。
    */
   let failingSince: number | null = null;
 
@@ -174,7 +197,7 @@ export async function segmentOnServer(
     if (failure || !res) {
       failingSince ??= Date.now();
       if (Date.now() - failingSince > POLL_GIVE_UP_MS) {
-        throw new ServerUnavailableError(`轮询中断：${failure}`);
+        throw new ApiError(`轮询中断：${failure}`, 'server_unavailable');
       }
       onProgress?.({ key: 'progress.reconnecting' });
       continue;
@@ -196,7 +219,7 @@ export async function segmentOnServer(
     }
   }
 
-  throw new ServerUnavailableError('服务端处理超时');
+  throw new ApiError('服务端处理超时', 'server_unavailable');
 }
 
 /*
