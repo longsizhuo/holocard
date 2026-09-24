@@ -225,8 +225,10 @@ function buildFoilControls(set: LayerSet): void {
 function show(set: LayerSet, id: string | null = null): void {
   current = set;
   currentId = id;
-  // 只有服务端产出的卡才能分享；换卡时把上一张的链接收起来
-  shareBox.hidden = id === null || route.mode !== 'demo';
+  // 只有服务端产出的卡才能分享；换卡时把上一张的链接收起来。
+  // 卡片页（/c/<id>）上只给卡的主人：做完卡地址栏就换成了卡片链接，主人刷新后落在这里
+  shareBox.hidden =
+    id === null || route.mode === 'render' || (route.mode === 'card' && ownedToken(id) === null);
   shareResult.hidden = true;
   shareBtn.disabled = false;
   setText(shareBtn, 'share.create');
@@ -369,6 +371,13 @@ async function processImage(file: File): Promise<void> {
 
     show(set, serverId);
     progress.hidden = true;
+    if (serverId) {
+      // 地址栏换成这张卡的链接：用浏览器菜单分享、复制地址、刷新，拿到的都是这张卡而不是首页。
+      // replaceState 只改地址，不刷新页面，也不多一条后退记录
+      history.replaceState(history.state, '', shareUrl(serverId, lang()));
+      // 同时转成分享状态，地址栏里的链接发出去就是正式链接：保留期按访问量延长，预览图提前渲染好
+      void doShare(true);
+    }
   } catch (error) {
     progress.hidden = true;
     const message = error instanceof Error ? error.message : String(error);
@@ -426,29 +435,38 @@ drop.addEventListener('drop', (event) => {
  * 把这张卡转为永久保留，并拿到分享链接。
  * 请求头带着当前语言：服务端按它渲染这个语言的分享图，链接上也带上语言，
  * 发到群里别人点开看到的标题、描述、分享图都是分享人的语言。
+ *
+ * auto：做完卡时自动调的。不算用户的分享动作，不选中输入框（手机上会弹出选择手柄、把页面滚过去），
+ * 失败也不提示——按钮还在，用户自己点一下就行。
  */
-async function doShare(): Promise<void> {
-  if (!currentId) return;
+async function doShare(auto = false): Promise<void> {
+  const id = currentId;
+  if (!id) return;
   shareBtn.disabled = true;
   setText(shareBtn, 'share.creating');
 
   try {
-    const res = await fetch(`${import.meta.env.BASE_URL}api/cards/${currentId}/share`, {
+    const res = await fetch(`${import.meta.env.BASE_URL}api/cards/${id}/share`, {
       method: 'POST',
       headers: apiHeaders(),
     });
     if (!res.ok) throw await apiError(res, `HTTP ${res.status}`);
-    shareUrlInput.value = shareUrl(currentId, lang());
+    // 等待期间换了卡，这个结果就不是当前这张的了
+    if (id !== currentId) return;
+    shareUrlInput.value = shareUrl(id, lang());
     shareResult.hidden = false;
     setText(shareBtn, 'share.created');
-    track('share');
     // 成功不用多说，链接出现在输入框里本身就是反馈
     clearText(shareHint);
-    shareUrlInput.select();
+    if (!auto) {
+      track('share');
+      shareUrlInput.select();
+    }
   } catch (error) {
+    if (id !== currentId) return;
     shareBtn.disabled = false;
     setText(shareBtn, 'share.create');
-    setText(shareHint, 'share.failed', { message: describeError(error) });
+    if (!auto) setText(shareHint, 'share.failed', { message: describeError(error) });
   }
 }
 
@@ -466,6 +484,8 @@ async function doDelete(): Promise<void> {
   try {
     await deleteCard(currentId);
     track('delete');
+    // 卡没了，地址栏退回首页，别留着一个打开就是 404 的链接
+    history.replaceState(history.state, '', `${import.meta.env.BASE_URL}${location.search}`);
     ownerBox.hidden = true;
     shareBox.hidden = true;
     exportBox.hidden = true;
@@ -564,6 +584,8 @@ shareCopy.addEventListener('click', () => {
   shareUrlInput.select();
   // clipboard API 在非安全上下文下不可用，退回老办法
   navigator.clipboard?.writeText(shareUrlInput.value).catch(() => document.execCommand('copy'));
+  // 链接现在做完卡就自动生成，「分享」按钮基本没人点了，复制才是用户真的想发出去
+  track('share-copy');
   setText(shareCopy, 'share.copied');
   setTimeout(() => setText(shareCopy, 'share.copy'), 1500);
 });
@@ -743,7 +765,10 @@ async function boot(): Promise<void> {
     // /c/<uuid> 归一成 /c，否则页面列表会被几千个 uuid 撑爆
     pageView(route.mode === 'card' ? '/c' : '/');
     // 哪张卡带来的流量另走一个事件——pageview 的 payload 塞不下自定义字段
-    if (route.mode === 'card' && route.id) track('card-view', { card: route.id });
+    // 主人自己刷新不算：做完卡地址栏就是卡片链接，刷一下不该算成「分享出去有人点开」
+    if (route.mode === 'card' && route.id && ownedToken(route.id) === null) {
+      track('card-view', { card: route.id });
+    }
   }
 
   if (route.id) {
