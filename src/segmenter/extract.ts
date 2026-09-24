@@ -13,6 +13,8 @@
  *    画面和箔面都会在前景的原始轮廓处断掉。
  * 4. 镜像纹理填充：补进去的颜色用边界外的真实纹理镜像而来，而不是抹成平滑色块。
  *    箔面靠 color-dodge 点亮底图里的亮像素，平滑色块上箔面是点不亮的。
+ * 5. 软边去背景色：半透明边缘像素的颜色里混着身后的背景，跟着层一起动就成了一圈白边。
+ *    按合成公式把背景成分减掉，见 decontaminate。
  */
 
 import type { BBox } from '../format/types';
@@ -56,7 +58,13 @@ export const DEFAULT_EXTRACT_OPTIONS: ExtractOptions = {
   maxDimension: 1400,
   snapRadius: 0.01,
   snapThreshold: 0.12,
-  foregroundGrow: 0.004,
+  /*
+   * 以前是 0.004（1400 宽时约 6 像素）。膨胀吃进来的那圈背景是不透明的，去背景色也救不了，
+   * 白墙、天空前的主体因此都带一道亮边（issue #3 第 2 条的「白边」）。
+   * 背景层那边另有 fringe 在遮挡区外扩一圈再补，物体边缘不会留在背景里，所以这里只留 2 像素兜底。
+   * 8 张测试照片（人像、宠物、逆光）对比过：白边明显变窄，运动时没有多出残影
+   */
+  foregroundGrow: 0.0015,
   fringe: 0.005,
   mirrorReach: 0.12,
   images: browserImages,
@@ -442,7 +450,10 @@ export async function extractLayers(
   const fringePx = Math.max(1, Math.round(width * opts.fringe));
   const reachPx = Math.max(8, width * opts.mirrorReach);
 
-  const images: Blob[] = [];
+  const layerPixels: Uint8ClampedArray[] = [];
+  const layerAlphas: Float32Array[] = [];
+  /** 每层颜色是补出来的（原图在那里被更近的层挡住）的像素，去背景色时要跳过 */
+  const layerFilled: (Uint8Array | null)[] = [];
   const stats: LayerStat[] = [];
 
   for (let i = 0; i < layerCount; i++) {
@@ -451,6 +462,7 @@ export async function extractLayers(
 
     const out = new Uint8ClampedArray(src);
     let finalAlpha = own;
+    let filled: Uint8Array | null = null;
 
     if (i < layerCount - 1) {
       // 更近的层在每个像素上盖了多少
@@ -527,12 +539,13 @@ export async function extractLayers(
       // 本层一个可用的源像素都没有就别填了，保持原图
       if (sources.includes(1)) {
         fillColors(out, src, sources, unknown, width, height, reachPx);
+        filled = unknown;
       }
     }
 
-    for (let p = 0; p < pixelCount; p++) {
-      out[p * 4 + 3] = Math.round((finalAlpha[p] ?? 0) * 255);
-    }
+    layerPixels.push(out);
+    layerAlphas.push(finalAlpha);
+    layerFilled.push(filled);
 
     // 深度中位数只看「看得见的部分」；包围盒要用补全之后的范围
     const samplesInLayer: number[] = [];
@@ -561,9 +574,74 @@ export async function extractLayers(
         ? [0, 0, width, height]
         : [minX, minY, maxX - minX + 1, maxY - minY + 1];
 
-    images.push(await opts.images.encodePng({ data: out, width, height }));
     stats.push({ depth: median, bbox });
   }
 
+  decontaminate(src, layerPixels, layerAlphas, layerFilled);
+
+  const images: Blob[] = [];
+  for (let i = 0; i < layerPixels.length; i++) {
+    const out = layerPixels[i];
+    const alpha = layerAlphas[i];
+    if (!out || !alpha) continue;
+    for (let p = 0; p < pixelCount; p++) out[p * 4 + 3] = Math.round((alpha[p] ?? 0) * 255);
+    images.push(await opts.images.encodePng({ data: out, width, height }));
+  }
+
   return { images, stats, width, height };
+}
+
+/** alpha 低于它的像素几乎透明，颜色是什么都看不出来，不值得算；高于 1 − 它就当不透明 */
+const DECONTAMINATE_EPS = 0.02;
+
+/**
+ * 软边去背景色（issue #3 第 2 条的「白边」）。
+ *
+ * 半透明边缘像素的颜色是前景和身后背景的混合：C = a·F + (1 − a)·B。
+ * 以前层里存的就是原图的 C，于是每层的软边都带着一圈背景色——白墙前的头发带着白边，
+ * 天空前的肩膀带着一圈天蓝。静止时看不出来（身后正好就是那块背景），
+ * 一做视差，前景挪到别的背景上，这圈颜色就跟着走了。
+ *
+ * 做法：由远及近逐层合成，B 取「这一层身后此刻实际垫着的颜色」（更远各层叠出来的结果），
+ * 反解出 F = (C − (1 − a)·B) / a 存进层里。有两个好处：
+ *   1. 静止时逐层叠回去恰好还是原图 C（不被截断的地方严格相等），不会因为去色把画面改了
+ *   2. 身后垫着的是紧挨着的真实背景镜像过来的补全色，和真正的 B 很接近，F 就接近真正的前景色
+ * 颜色是补出来的像素（被更近的层挡住的部分）不参与：那里本来就看不见，也没有原图 C 可反解。
+ */
+export function decontaminate(
+  src: Uint8ClampedArray,
+  pixels: Uint8ClampedArray[],
+  alphas: Float32Array[],
+  filled: (Uint8Array | null)[],
+): void {
+  const base = pixels[0];
+  if (!base || pixels.length < 2) return;
+  const pixelCount = src.length / 4;
+  // 身后此刻垫着的颜色。最远层 alpha 恒为 1，从它开始
+  const backdrop = new Float32Array(pixelCount * 3);
+  for (let p = 0; p < pixelCount; p++) {
+    for (let c = 0; c < 3; c++) backdrop[p * 3 + c] = base[p * 4 + c] ?? 0;
+  }
+
+  for (let i = 1; i < pixels.length; i++) {
+    const out = pixels[i];
+    const alpha = alphas[i];
+    if (!out || !alpha) continue;
+    const fill = filled[i];
+    for (let p = 0; p < pixelCount; p++) {
+      const a = alpha[p] ?? 0;
+      if (a < DECONTAMINATE_EPS) continue;
+      const soft = a < 1 - DECONTAMINATE_EPS && !fill?.[p];
+      for (let c = 0; c < 3; c++) {
+        const k = p * 3 + c;
+        const behind = backdrop[k] ?? 0;
+        let color = out[p * 4 + c] ?? 0;
+        if (soft) {
+          color = Math.min(255, Math.max(0, ((src[p * 4 + c] ?? 0) - (1 - a) * behind) / a));
+          out[p * 4 + c] = color;
+        }
+        backdrop[k] = a * color + (1 - a) * behind;
+      }
+    }
+  }
 }

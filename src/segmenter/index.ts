@@ -180,6 +180,7 @@ export async function segmentToLayerSet(
     stats.map((s) => s.depth),
     rigid,
   );
+  const nearest = parallax[stats.length - 1] ?? 0;
   const layers: LayerEntry[] = stats.map((stat, i) => ({
     file: `layer-${i}.png`,
     depth: stat.depth,
@@ -187,8 +188,16 @@ export async function segmentToLayerSet(
     bbox: stat.bbox,
     // 除最前层外，每一层都向遮挡它的层身后做了补全
     inpainted: i < stats.length - 1,
-    // 按真实闪卡的印法给默认箔面：最远层上箔，最近层（主体）哑光
-    foil: defaultFoilFor(i, stats.length),
+    /*
+     * 按真实闪卡的印法给默认箔面：最远层上箔，最近层（主体）哑光。
+     * 和最近层视差相同的层（被刚性边界连着，见 toParallax）是同一个物体切下来的，也当主体哑光。
+     * 否则一张脸被切成三层时，中间那层按层序会上 holo，脸上凭空多出几道竖条光栅，
+     * 箔面在同一张脸上断成几截（issue #3 第 2 条的「分层断裂」）。
+     */
+    foil:
+      i > 0 && (parallax[i] ?? 0) === nearest
+        ? { type: 'none', intensity: 1 }
+        : defaultFoilFor(i, stats.length),
   }));
 
   report('done');
