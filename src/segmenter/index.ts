@@ -180,6 +180,8 @@ export async function segmentToLayerSet(
     stats.map((s) => s.depth),
     rigid,
   );
+  const nearest = parallax[stats.length - 1] ?? 0;
+  const farthest = parallax[0] ?? 0;
   const layers: LayerEntry[] = stats.map((stat, i) => ({
     file: `layer-${i}.png`,
     depth: stat.depth,
@@ -187,8 +189,18 @@ export async function segmentToLayerSet(
     bbox: stat.bbox,
     // 除最前层外，每一层都向遮挡它的层身后做了补全
     inpainted: i < stats.length - 1,
-    // 按真实闪卡的印法给默认箔面：最远层上箔，最近层（主体）哑光
-    foil: defaultFoilFor(i, stats.length),
+    /*
+     * 按真实闪卡的印法给默认箔面：最远层上箔，最近层（主体）哑光。
+     * 视差相同的层是被刚性边界连着的同一个物体（见 toParallax），箔面要跟着组走，不能按层序各给各的：
+     * 和最近层一组的当主体哑光，和最远层一组的跟最远层用同一种箔。
+     * 否则一张脸被切成三层时，中间那层会上 holo，脸上凭空多出几道竖条光栅；
+     * 背景被切成两层时，同一面墙一半日柱一半 holo（issue #3 第 2 条的「分层断裂」）。
+     * 整张图是一个刚体时两条都成立，主体优先：只有最远层上箔。
+     */
+    foil:
+      i > 0 && (parallax[i] ?? 0) === nearest
+        ? { type: 'none', intensity: 1 }
+        : defaultFoilFor((parallax[i] ?? 0) === farthest ? 0 : i, stats.length),
   }));
 
   report('done');

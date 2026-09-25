@@ -15,6 +15,7 @@ import {
   rememberOwned,
   segmentOnServer,
 } from './api';
+import { albumCountFor, initAlbums, openAlbums, openPicker } from './albums-ui';
 import { initTracking, pageView, track } from './track';
 import { parseRoute, shareUrl } from './route';
 import {
@@ -54,6 +55,9 @@ const FOIL_LABEL: Record<FoilType, MessageKey> = {
 const stage = need<HTMLDivElement>('#stage');
 const status = need<HTMLParagraphElement>('#status');
 const foilList = need<HTMLDivElement>('#foil-list');
+
+const collectBox = need<HTMLDivElement>('#collect');
+const collectHint = need<HTMLElement>('#collect-hint');
 
 const ctlAmp = need<HTMLInputElement>('#ctl-amp');
 const ctlIntensity = need<HTMLInputElement>('#ctl-intensity');
@@ -211,6 +215,8 @@ function buildFoilControls(set: LayerSet): void {
       layer.foil = { type: select.value as FoilType, intensity: Number(strength.value) };
       strength.disabled = layer.foil.type === 'none';
       card.setLayerFoil(index, layer.foil);
+      // 静止的卡片上箔面是透明的，转过去才看得见调了什么
+      card.preview();
     };
     select.addEventListener('change', apply);
     strength.addEventListener('input', apply);
@@ -225,8 +231,10 @@ function buildFoilControls(set: LayerSet): void {
 function show(set: LayerSet, id: string | null = null): void {
   current = set;
   currentId = id;
-  // 只有服务端产出的卡才能分享；换卡时把上一张的链接收起来
-  shareBox.hidden = id === null || route.mode !== 'demo';
+  // 只有服务端产出的卡才能分享；换卡时把上一张的链接收起来。
+  // 卡片页（/c/<id>）上只给卡的主人：做完卡地址栏就换成了卡片链接，主人刷新后落在这里
+  shareBox.hidden =
+    id === null || route.mode === 'render' || (route.mode === 'card' && ownedToken(id) === null);
   shareResult.hidden = true;
   shareBtn.disabled = false;
   setText(shareBtn, 'share.create');
@@ -235,6 +243,9 @@ function show(set: LayerSet, id: string | null = null): void {
   if (!exporting) resetExport();
   // 只有手上有这张卡口令的人才看得到删除入口
   ownerBox.hidden = id === null || ownedToken(id) === null;
+  // 卡册收的是服务端的卡：自己做的、别人分享来的都行，手工素材没有 id 收不了
+  collectBox.hidden = id === null || route.mode === 'render';
+  updateCollectHint();
   deleteBtn.disabled = false;
   setText(deleteBtn, 'delete.button');
 
@@ -257,11 +268,14 @@ function applyHalo(): void {
   card.setHalo(halo);
 }
 
-/** 把渲染器算出来的炫光强度显示出来，纯读数 */
+/**
+ * 把此刻炫光实际有多亮显示出来，纯读数：角度决定的那部分（渲染器算的 --hc-halo）× 炫光强度。
+ * 乘上强度，拖强度滑块时读数条才会跟着动
+ */
 function pollHalo(): void {
   const root = card.element;
   if (root) {
-    const value = Number(root.style.getPropertyValue('--hc-halo')) || 0;
+    const value = (Number(root.style.getPropertyValue('--hc-halo')) || 0) * Number(ctlIntensity.value);
     outHalo.value = value.toFixed(2);
     haloFill.style.width = `${Math.round(value * 100)}%`;
   }
@@ -369,6 +383,13 @@ async function processImage(file: File): Promise<void> {
 
     show(set, serverId);
     progress.hidden = true;
+    if (serverId) {
+      // 地址栏换成这张卡的链接：用浏览器菜单分享、复制地址、刷新，拿到的都是这张卡而不是首页。
+      // replaceState 只改地址，不刷新页面，也不多一条后退记录
+      history.replaceState(history.state, '', shareUrl(serverId, lang()));
+      // 同时转成分享状态，地址栏里的链接发出去就是正式链接：保留期按访问量延长，预览图提前渲染好
+      void doShare(true);
+    }
   } catch (error) {
     progress.hidden = true;
     const message = error instanceof Error ? error.message : String(error);
@@ -380,20 +401,28 @@ async function processImage(file: File): Promise<void> {
   }
 }
 
+/*
+ * 这三个滑块拖动时都让卡片转到炫光最亮的角度（card.preview）。
+ * 手指在滑块上时卡片是静止的，而视差要歪过去才看得出、炫光要转到那个角度才出来，
+ * 不转的话拖滑块画面上什么都不变（issue #3 第 3、4 条说的「感知不明显」就是这个）。
+ */
 ctlAmp.addEventListener('input', () => {
   const pct = Number(ctlAmp.value);
   outAmp.value = `${pct}%`;
   card.setOptions({ amplitude: pct / 100 });
+  card.preview();
 });
 
 ctlIntensity.addEventListener('input', () => {
   outIntensity.value = Number(ctlIntensity.value).toFixed(2);
   applyHalo();
+  card.preview();
 });
 
 ctlSharp.addEventListener('input', () => {
   outSharp.value = ctlSharp.value;
   applyHalo();
+  card.preview();
 });
 
 drop.addEventListener('click', () => filePicker.click());
@@ -426,29 +455,38 @@ drop.addEventListener('drop', (event) => {
  * 把这张卡转为永久保留，并拿到分享链接。
  * 请求头带着当前语言：服务端按它渲染这个语言的分享图，链接上也带上语言，
  * 发到群里别人点开看到的标题、描述、分享图都是分享人的语言。
+ *
+ * auto：做完卡时自动调的。不算用户的分享动作，不选中输入框（手机上会弹出选择手柄、把页面滚过去），
+ * 失败也不提示——按钮还在，用户自己点一下就行。
  */
-async function doShare(): Promise<void> {
-  if (!currentId) return;
+async function doShare(auto = false): Promise<void> {
+  const id = currentId;
+  if (!id) return;
   shareBtn.disabled = true;
   setText(shareBtn, 'share.creating');
 
   try {
-    const res = await fetch(`${import.meta.env.BASE_URL}api/cards/${currentId}/share`, {
+    const res = await fetch(`${import.meta.env.BASE_URL}api/cards/${id}/share`, {
       method: 'POST',
       headers: apiHeaders(),
     });
     if (!res.ok) throw await apiError(res, `HTTP ${res.status}`);
-    shareUrlInput.value = shareUrl(currentId, lang());
+    // 等待期间换了卡，这个结果就不是当前这张的了
+    if (id !== currentId) return;
+    shareUrlInput.value = shareUrl(id, lang());
     shareResult.hidden = false;
     setText(shareBtn, 'share.created');
-    track('share');
     // 成功不用多说，链接出现在输入框里本身就是反馈
     clearText(shareHint);
-    shareUrlInput.select();
+    if (!auto) {
+      track('share');
+      shareUrlInput.select();
+    }
   } catch (error) {
+    if (id !== currentId) return;
     shareBtn.disabled = false;
     setText(shareBtn, 'share.create');
-    setText(shareHint, 'share.failed', { message: describeError(error) });
+    if (!auto) setText(shareHint, 'share.failed', { message: describeError(error) });
   }
 }
 
@@ -457,6 +495,19 @@ async function doShare(): Promise<void> {
  *
  * 二次确认是必须的：这个操作不可撤销，而且已经分享出去的链接会立刻失效。
  */
+/** 「加入卡册」下面那行：这张卡已经在几个卡册里 */
+function updateCollectHint(): void {
+  const n = currentId ? albumCountFor(currentId) : 0;
+  if (n > 0) setText(collectHint, 'albums.inAlbums', { n });
+  else clearText(collectHint);
+}
+
+initAlbums(need<HTMLDialogElement>('#albums'), updateCollectHint);
+need<HTMLButtonElement>('#albums-open').addEventListener('click', openAlbums);
+need<HTMLButtonElement>('#collect-btn').addEventListener('click', () => {
+  if (currentId) openPicker(currentId);
+});
+
 async function doDelete(): Promise<void> {
   if (!currentId) return;
   if (!confirm(t('delete.confirm'))) return;
@@ -466,9 +517,12 @@ async function doDelete(): Promise<void> {
   try {
     await deleteCard(currentId);
     track('delete');
+    // 卡没了，地址栏退回首页，别留着一个打开就是 404 的链接
+    history.replaceState(history.state, '', `${import.meta.env.BASE_URL}${location.search}`);
     ownerBox.hidden = true;
     shareBox.hidden = true;
     exportBox.hidden = true;
+    collectBox.hidden = true;
     setText(status, 'delete.done');
   } catch (error) {
     deleteBtn.disabled = false;
@@ -564,6 +618,8 @@ shareCopy.addEventListener('click', () => {
   shareUrlInput.select();
   // clipboard API 在非安全上下文下不可用，退回老办法
   navigator.clipboard?.writeText(shareUrlInput.value).catch(() => document.execCommand('copy'));
+  // 链接现在做完卡就自动生成，「分享」按钮基本没人点了，复制才是用户真的想发出去
+  track('share-copy');
   setText(shareCopy, 'share.copied');
   setTimeout(() => setText(shareCopy, 'share.copy'), 1500);
 });
@@ -743,7 +799,10 @@ async function boot(): Promise<void> {
     // /c/<uuid> 归一成 /c，否则页面列表会被几千个 uuid 撑爆
     pageView(route.mode === 'card' ? '/c' : '/');
     // 哪张卡带来的流量另走一个事件——pageview 的 payload 塞不下自定义字段
-    if (route.mode === 'card' && route.id) track('card-view', { card: route.id });
+    // 主人自己刷新不算：做完卡地址栏就是卡片链接，刷一下不该算成「分享出去有人点开」
+    if (route.mode === 'card' && route.id && ownedToken(route.id) === null) {
+      track('card-view', { card: route.id });
+    }
   }
 
   if (route.id) {
@@ -763,6 +822,7 @@ async function boot(): Promise<void> {
           ),
         );
         await preloadTextures();
+        await card.ready;
         card.setPose(renderPose());
         exposeExportHooks();
         // 给截图脚本一个明确的信号，别靠猜时间

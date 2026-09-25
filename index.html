@@ -29,6 +29,8 @@
         -->
         <!-- GitHub 按钮和语言切换放一组，一起靠右；分开放的话副标题一长，切换就被挤到下一行最左边 -->
         <div class="page__actions">
+        <!-- 卡册只存在本机浏览器里，见 src/demo/albums.ts -->
+        <button type="button" class="albums-open" id="albums-open" data-i18n="albums.open">我的卡册</button>
         <a
           class="gh"
           href="https://github.com/longsizhuo/holocard"
@@ -93,6 +95,12 @@
             <small class="field__hint" id="export-hint"></small>
           </div>
 
+          <!-- 加入卡册：有服务端 id 的卡才有，自己做的、别人分享来的都能收 -->
+          <div class="export" id="collect" hidden>
+            <button type="button" class="export__btn" id="collect-btn" data-i18n="albums.add">加入卡册</button>
+            <small class="field__hint" id="collect-hint"></small>
+          </div>
+
           <div class="danger" id="owner" hidden>
             <button type="button" class="danger__btn" id="delete-btn" data-i18n="delete.button">删除这张卡</button>
             <small class="field__hint" id="delete-hint"></small>
@@ -108,8 +116,8 @@
               <summary class="more__head" data-i18n="panel.more">景深与炫光</summary>
 
               <label class="field">
-                <span class="field__label"><span data-i18n="panel.amp">视差振幅</span> <output id="out-amp">6%</output></span>
-                <input id="ctl-amp" type="range" min="0" max="16" step="0.5" value="6" />
+                <span class="field__label"><span data-i18n="panel.amp">视差振幅</span> <output id="out-amp">10%</output></span>
+                <input id="ctl-amp" type="range" min="0" max="16" step="0.5" value="10" />
                 <small class="field__hint" data-i18n="panel.ampHint">拉到 0 卡面就是完全平的</small>
               </label>
 
@@ -135,6 +143,12 @@
           </div>
         </aside>
       </section>
+
+      <!-- 卡册窗口：管理卡册和「加入卡册」共用，内容由 src/demo/albums-ui.ts 画 -->
+      <dialog class="albums" id="albums" aria-labelledby="albums-title">
+        <button type="button" class="albums__close" aria-label="关闭" data-i18n-aria="albums.close">×</button>
+        <div class="albums__body"></div>
+      </dialog>
 
       <footer class="page__foot" data-i18n-html="foot.creditHtml">箔面配方与交互手感移植自 <a href="https://github.com/simeydotme/pokemon-cards-css" target="_blank" rel="noreferrer">pokemon-cards-css</a>（Simon Goellner，GPL-3.0）。本项目同样以 GPL-3.0 发布，源码在 <a href="https://github.com/longsizhuo/holocard" target="_blank" rel="noreferrer">GitHub</a>。</footer>
     </main>

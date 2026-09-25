@@ -47,7 +47,7 @@ ssh oracle 'cd /srv/holocard-web && ln -sfn releases/<版本> current.new && mv 
 | `/opt/holocard/node_modules/` | transformers.js + onnxruntime-node + sharp，约 483MB |
 | `/srv/holocard-models/` | Depth Anything V2-Small 权重（q8，27MB） |
 | `/srv/holocard-web/` | 前端 releases + current 软链 |
-| `/srv/holocard-layers/` | 每张卡一个目录：原图（去掉 EXIF）+ 层 PNG + manifest + 预览图 |
+| `/srv/holocard-layers/` | 每张卡一个目录：原图（去掉 EXIF）+ 层 PNG + manifest + 预览图 + 卡册缩略图 `thumb.jpg`（分层完成时做好；早期没存原图的卡在第一次有人要时用各层叠出来现做） |
 | `/srv/holocard-data/holocard.db` | 卡片数据库（SQLite），每张卡的状态、原图地址、结果地址、保留期、删除口令 |
 | `/opt/holocard/browsers/` | Playwright 的 arm64 Chromium，渲染 OG 预览图用，662MB |
 
@@ -138,15 +138,20 @@ ssh oracle "cd /opt/holocard && node22/bin/node db.mjs \"SELECT ...\""  # 任意
 
 - **页面**：服务端发 index.html 时按语言把标了 `data-i18n` 的静态文字、标题、描述都换好（`localizeHtml`），
   页面一出来就是对的语言，不会先闪一下中文。HTML 响应带 `Vary: Accept-Language, Cookie`。
-  页头切换语言是就地换，不刷新页面——刷新会丢掉刚做好、还没分享的卡
+  页头切换语言是就地换，不刷新页面——刷新会丢掉面板上还没保存的调参
 - **接口报错**：返回 `code`（`rate_limited`、`card_not_found`…）和参数，前端按当前语言翻译；`error` 字段仍是中文原文
 - **分享链接**：带分享人的语言（`/c/<id>?lang=en`，中文不带），对方看到的预览标题、描述、分享图和打开后的界面都是这个语言
+- **做完卡自动分享**：服务端分层一完成，前端就用 `history.replaceState` 把地址栏换成这张卡的分享链接（不刷新页面），
+  同时在后台调一次分享接口，分享框直接显示链接。原来要点「生成分享链接」，只有 28% 的人点；现在手机用户
+  用浏览器菜单分享、复制地址栏，发出去的都是这张卡而不是首页，刷新也不会丢卡。
+  刷新后落在 `/c/<id>`，卡的主人（本机有删除口令）照样看得到分享和删除入口；删卡后地址栏退回首页
 - **首页分享图**：`public/og.jpg`、`og-en.jpg`、`og-ja.jpg`，都用 `pnpm og --lang <语言> --out public/og-<语言>.jpg` 从同一张测试图出。
   某个语言的图缺了就用中文那张
 
 ## 分享图
 
 每张分享过的卡、每种语言一张（`preview.jpg`、`preview-en.jpg`、`preview-ja.jpg`），用无头浏览器截。
+做完卡会自动分享（见上文），所以现在服务端产出的卡几乎每张都会截一张。
 
 渲染排队，一次一张，失败隔 30 秒、60 秒再试，共三次；截图超时 90 秒。
 以前分享那一下直接在后台渲染、失败就算了：上线头一天高峰期截图超时 18 次，32 张分享过的卡有 23 张一直没图。
@@ -176,6 +181,7 @@ ssh oracle "cd /opt/holocard && node22/bin/node db.mjs \"SELECT ...\""  # 任意
 档位：1 次 → 7 天，2-3 次 → 14 天，4-7 次 → 28 天，8-15 次 → 56 天，16 次以上 → 112 天。
 关键是分享过的卡从「最后一次访问」起算：一直有人看就不断续期，等于长期保留；
 彻底没人看了才开始倒计时。热门的留得久、冷的自然退场，磁盘占用有上界。
+做完卡会自动分享，所以现在几乎所有卡都走第二行；没人看的卡和以前一样 7 天后清掉。
 
 访问计数按 IP 做一小时去重（自己反复刷不会把保留期刷上去），`HEAD` 不计
 （那多半是抓取工具和监控）。计数在内存里累计、每分钟合并写盘一次，
@@ -223,7 +229,9 @@ id 通过 `.env.production` 里的 `VITE_UMAMI_ID` 在构建时注入。
 上报的内容：页面浏览（`/c/<uuid>` 归一成 `/c`，具体哪张卡放在事件数据里，
 否则页面列表会被几千个 uuid 撑爆）、`upload`（只带体积档位）、`segment-ok`、
 `segment-fail`（错误信息前 120 字，外加走到哪一步 `stage`：upload / server / download / browser）、
-`share`、`delete`、`export` / `export-fail` / `export-share`（带格式）、`lang`（手动切换语言）。不带文件名。
+`share`（手动点分享按钮；做完卡的自动分享不计）、`share-copy`（点「复制」）、
+`card-view`（打开卡片页，卡的主人自己刷新不计）、`delete`、`export` / `export-fail` / `export-share`（带格式）、
+`lang`（手动切换语言）。不带文件名。
 
 本机和局域网地址（localhost、127.x、10.x、192.168.x…）上不加载统计：本地用生产配置构建时站点 id 也在，
 以前在 127.0.0.1 上的测试全进了线上统计。查数据时照样加 `hostname = 'holocard.longsizhuo.com'`。
