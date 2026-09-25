@@ -11,7 +11,8 @@ staging 跑的是还没评审的代码，要是随便什么人开个 PR 就能�
 
 用拉而不是推：服务器主动去问 GitHub，不用对外开任何口子，也不用往 GitHub 上放服务器的密钥。
 状态记在 /var/lib/holocard-staging/seen.json：每个 PR 上次看到的提交。部署失败也算看过，
-同一个提交不会每分钟重试一遍，推一个新提交才会再试。
+同一个提交不会每分钟重试一遍，推一个新提交才会再试（失败时 deploy.sh 会切回上一版，staging 不会挂着）。
+查 GitHub 出错（限流、断网）时这一轮整个中止、什么都不记，下一分钟重来。
 """
 
 import json
@@ -38,8 +39,12 @@ def trusted(login: str, cache: dict[str, bool]) -> bool:
     if login not in cache:
         try:
             permission = json.loads(gh('api', f'repos/{REPO}/collaborators/{login}/permission'))['permission']
-        except subprocess.CalledProcessError:
-            # 查不到（不是协作者会 404）一律当不可信
+        except subprocess.CalledProcessError as error:
+            # 公开仓库里非协作者会返回 read（照常判不可信），只有用户不存在（比如已注销）才是 404。
+            # 除此之外的错误——限流、断网——要让这一轮整个中止：
+            # 当成不可信的话，这个提交会被记成「看过」，以后再也不会部署
+            if 'HTTP 404' not in (error.stderr or ''):
+                raise
             permission = 'none'
         cache[login] = permission in TRUSTED
     return cache[login]
@@ -51,7 +56,7 @@ def touches_app(number: str) -> bool:
 
 
 def main() -> int:
-    prs = json.loads(gh('pr', 'list', '-R', REPO, '--state', 'open', '--limit', '50',
+    prs = json.loads(gh('pr', 'list', '-R', REPO, '--state', 'open', '--limit', '1000',
                         '--json', 'number,headRefOid,isCrossRepository,author'))
     seen: dict[str, str] = json.loads(SEEN.read_text()) if SEEN.exists() else {}
     cache: dict[str, bool] = {}

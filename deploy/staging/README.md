@@ -11,7 +11,8 @@ PR 页面的 Deployments 里会显示「部署中 / 已部署 / 失败」和访�
 - **只改了文档、`deploy/`、`.github/` 的 PR 不部署**：它们不影响站点，部署了只会把正在测的 PR 顶掉
 - **只有一条泳道**：后推送的覆盖先推送的。想测哪个 PR，往它上面推一次，或者手动：
   `/usr/local/lib/holocard-staging/deploy.sh <PR 号>`（以 ubuntu 身份）
-- 构建失败不影响正在跑的 staging（成功后才切换）；同一个提交失败了不会每分钟重试，推新提交才会再试
+- 前端和服务端都按版本放目录（各留 3 个），`current` 软链指当前版本。构建失败不影响正在跑的 staging；
+  新版本起来了但健康检查不过，自动切回上一版。同一个提交失败了不会每分钟重试，推新提交才会再试
 - 用拉而不是推：服务器去问 GitHub，不对外开口子，GitHub 上也不放服务器的密钥
 
 ## 和线上怎么隔开
@@ -19,10 +20,17 @@ PR 页面的 Deployments 里会显示「部署中 / 已部署 / 失败」和访�
 | | 线上 | staging |
 |---|---|---|
 | 服务 / 端口 | `holocard` / 8791 | `holocard-staging` / 8793 |
-| 运行用户 | ubuntu | `holocard-stg`（专用，systemd 沙箱：文件系统只读、看不见 /home） |
+| 运行用户 | ubuntu | `holocard-stg`（专用，见下） |
 | 数据 | `/srv/holocard-*` | `/srv/holocard-staging/`，没人看的卡 2 天清掉 |
 | 资源上限 | 3G 内存 / 2 核 | 1.5G / 1 核，队列上限 4 |
 | 统计、收录 | umami、允许收录 | 都不带（构建时没有 `.env.production`；网关加 noindex） |
+
+staging 跑的是没评审过的代码，所以**构建和运行都不以 ubuntu 的身份执行 PR 里的代码**：
+
+- 取代码由 ubuntu 做（git fetch / archive，不执行仓库里的任何东西），装依赖、构建、运行都是 `holocard-stg`，在 systemd 沙箱里
+- 文件：看不见 /home（gh 凭证、各种密钥）；/srv 和 /opt 换成空目录，只挂回用得到的几个——光「只读」不够，线上的卡片目录和数据库是所有人可读的
+- 网络：`holocard-staging-firewall` 用 nftables 按用户拦出站，只放行公网（装依赖）、本机 DNS 和自己的 8793；
+  线上服务、数据库、本机其他端口、内网、云元数据一律拒绝。只管这一个用户，别的进程不受影响
 
 Node 运行时、`node_modules`、无头浏览器、模型权重和线上共用一份（只读）。
 **已知限制**：PR 要是改了服务端依赖（transformers / sharp / playwright-core）的版本，staging 用的仍是线上那份，得临时改成单独装。
