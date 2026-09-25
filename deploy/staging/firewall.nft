@@ -1,0 +1,29 @@
+#!/usr/sbin/nft -f
+#
+# staging 的出站限制：只管 holocard-stg 这个用户（staging 服务本身和它的构建），别的进程一律不受影响。
+# staging 跑的是没评审过的代码，不能让它碰到本机的线上服务（8791、数据库、各种只在本机监听的管理接口）
+# 和内网、云厂商的元数据地址。公网放行：构建要从 npm 装依赖。
+# 由 holocard-staging-firewall.service 加载；重复加载是安全的（先建再删再建）。
+
+table inet holocard_staging
+delete table inet holocard_staging
+
+table inet holocard_staging {
+	chain output {
+		type filter hook output priority filter; policy accept;
+
+		meta skuid != "holocard-stg" accept
+		# 别人连进来的回包（Caddy 转进来的请求）
+		ct state established,related accept
+
+		# 自己的端口：无头浏览器截分享图、导出动图时从本服务取渲染页
+		ip daddr 127.0.0.1 tcp dport 8793 accept
+		ip6 daddr ::1 tcp dport 8793 accept
+		# 本机的 DNS（systemd-resolved）
+		ip daddr 127.0.0.53 meta l4proto { tcp, udp } th dport 53 accept
+
+		# 本机、内网、链路本地（含云厂商元数据 169.254.169.254）一律拒绝
+		ip daddr { 127.0.0.0/8, 10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16, 169.254.0.0/16, 100.64.0.0/10 } reject
+		ip6 daddr { ::1, fc00::/7, fe80::/10 } reject
+	}
+}

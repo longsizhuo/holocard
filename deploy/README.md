@@ -20,6 +20,10 @@
 给它加一个目录挂载要重建容器，会让同机所有站点瞬断。让服务自己发更安全，
 副作用是它变得自包含——别人 clone 下来跑一个 Node 进程就是完整的站点，不需要任何反向代理。
 
+## staging
+
+PR 有新推送时自动部署到 https://holocard.staging.longsizhuo.com ，给人线上测试。怎么运作、和线上怎么隔开，见 [staging/README.md](staging/README.md)。
+
 ## 日常发版
 
 ```bash

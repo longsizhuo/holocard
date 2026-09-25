@@ -1,0 +1,56 @@
+[Unit]
+Description=HoloCard staging（跑 PR 版本，供线上测试）
+After=network-online.target holocard-staging-firewall.service
+Wants=network-online.target
+# 出站限制没加载上就别起：没有它，PR 代码能直接连本机的线上服务
+Requires=holocard-staging-firewall.service
+
+[Service]
+Type=simple
+# 专门的系统用户：staging 跑的是还没评审的 PR 代码，还要处理任何人上传的图片，
+# 不能让它碰到 ubuntu 家目录里的密钥和这台机器上别的服务
+User=holocard-stg
+Group=holocard-stg
+# current 指向当前版本的目录，部署脚本切换它；回滚就是切回上一个
+WorkingDirectory=/opt/holocard-staging/current
+# node 运行时、依赖、浏览器、模型权重都和线上共用一份（只读）
+ExecStart=/opt/holocard/node22/bin/node /opt/holocard-staging/current/holocard-server.mjs
+Environment=NODE_ENV=production
+Environment=HOME=/srv/holocard-staging/data
+Environment=HOLOCARD_PORT=8793
+Environment=HOLOCARD_PUBLIC_ORIGIN=https://holocard.staging.longsizhuo.com
+Environment=HOLOCARD_OUT_DIR=/srv/holocard-staging/layers
+Environment=HOLOCARD_DB=/srv/holocard-staging/data/holocard.db
+Environment=HOLOCARD_MODEL_DIR=/srv/holocard-models
+Environment=HOLOCARD_WEB_DIR=/srv/holocard-staging/web/current
+Environment=PLAYWRIGHT_BROWSERS_PATH=/opt/holocard/browsers
+Environment=HOLOCARD_CONCURRENCY=1
+Environment=HOLOCARD_MAX_QUEUE=4
+# 测试数据不用留久：没人看的卡 2 天就清
+Environment=HOLOCARD_TTL_MS=172800000
+Restart=on-failure
+RestartSec=5s
+
+# 比线上收得更紧，别和线上、Minecraft、数据库抢资源
+MemoryMax=1536M
+CPUQuota=100%
+
+# 沙箱：整个文件系统只读，看不见 /home，拿不到新权限。
+# /srv 和 /opt 换成空目录，只把用得到的挂回来——光「只读」不够，线上的卡片目录和数据库是所有人可读的，
+# 只读挡不住 PR 代码把它们读出去。出站网络另有 holocard-staging-firewall 管
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+TemporaryFileSystem=/srv:ro /opt:ro
+BindReadOnlyPaths=/opt/holocard/node22 /opt/holocard/node_modules /opt/holocard/browsers /opt/holocard-staging /srv/holocard-models /srv/holocard-staging/web
+BindPaths=/srv/holocard-staging/layers /srv/holocard-staging/data
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+RestrictSUIDSGID=yes
+LockPersonality=yes
+
+[Install]
+WantedBy=multi-user.target

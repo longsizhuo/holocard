@@ -1,0 +1,13 @@
+[Unit]
+Description=HoloCard staging 的出站限制（nftables，只管 holocard-stg 用户）
+Before=holocard-staging.service
+After=nftables.service netfilter-persistent.service
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/sbin/nft -f /usr/local/lib/holocard-staging/firewall.nft
+ExecStop=/usr/sbin/nft delete table inet holocard_staging
+
+[Install]
+WantedBy=multi-user.target

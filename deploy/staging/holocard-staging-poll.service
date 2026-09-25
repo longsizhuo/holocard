@@ -1,0 +1,12 @@
+[Unit]
+Description=HoloCard staging：检查 PR 有没有新推送，有就部署
+After=network-online.target
+
+[Service]
+Type=oneshot
+# ubuntu 用户：要用它的 gh 登录态，以及免密 sudo 重启 holocard-staging
+User=ubuntu
+Environment=HOME=/home/ubuntu
+ExecStart=/usr/local/lib/holocard-staging/poll.py
+# 一次部署（装依赖 + 两次构建）一两分钟，给足时间；卡死了也别永远占着
+TimeoutStartSec=15min
