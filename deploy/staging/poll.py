@@ -15,6 +15,7 @@ staging 跑的是还没评审的代码，要是随便什么人开个 PR 就能�
 """
 
 import json
+import re
 import subprocess
 import sys
 from pathlib import Path
@@ -24,6 +25,9 @@ STATE = Path('/var/lib/holocard-staging')
 SEEN = STATE / 'seen.json'
 DEPLOY = Path(__file__).with_name('deploy.sh')
 TRUSTED = {'admin', 'maintain', 'write'}
+# 只动了这些路径的 PR 不影响站点本身（文档、部署脚本、CI 配置），不部署：
+# 否则它一推送就把正在测的 PR 顶掉，换上一个和 main 没区别的版本
+NOT_APP = re.compile(r'^(?:deploy/|docs/|\.github/)|\.md$')
 
 
 def gh(*args: str) -> str:
@@ -41,6 +45,11 @@ def trusted(login: str, cache: dict[str, bool]) -> bool:
     return cache[login]
 
 
+def touches_app(number: str) -> bool:
+    files = json.loads(gh('pr', 'view', number, '-R', REPO, '--json', 'files'))['files']
+    return any(not NOT_APP.search(f['path']) for f in files)
+
+
 def main() -> int:
     prs = json.loads(gh('pr', 'list', '-R', REPO, '--state', 'open', '--limit', '50',
                         '--json', 'number,headRefOid,isCrossRepository,author'))
@@ -55,6 +64,9 @@ def main() -> int:
         seen[number] = sha
         if pr['isCrossRepository'] or not trusted(pr['author']['login'], cache):
             print(f'[staging] 跳过 PR #{number}：不是本仓库分支，或作者没有写权限')
+            continue
+        if not touches_app(number):
+            print(f'[staging] 跳过 PR #{number}：只改了文档、部署脚本这类不影响站点的文件')
             continue
         date = json.loads(gh('api', f'repos/{REPO}/commits/{sha}'))['commit']['committer']['date']
         changed.append((date, number, sha))
