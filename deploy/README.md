@@ -22,7 +22,7 @@
 
 ## staging
 
-PR 有新推送时自动部署到 https://holocard.staging.longsizhuo.com ，给人线上测试。怎么运作、和线上怎么隔开，见 [staging/README.md](staging/README.md)。
+PR 有新推送时自动部署到 https://holocard-staging.longsizhuo.com ，给人线上测试。怎么运作、和线上怎么隔开，见 [staging/README.md](staging/README.md)。
 
 ## 日常发版
 
