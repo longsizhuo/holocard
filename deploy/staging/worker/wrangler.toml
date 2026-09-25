@@ -1,0 +1,9 @@
+# holocard.staging.longsizhuo.com 的转发 Worker，说明见 src/index.js 和 ../README.md
+# 部署：cd deploy/staging/worker && CLOUDFLARE_API_TOKEN=… CLOUDFLARE_ACCOUNT_ID=… npx wrangler@4 deploy
+name = "holocard-staging-proxy"
+main = "src/index.js"
+compatibility_date = "2026-09-01"
+# 只挂自有域名，不要 *.workers.dev 那个地址
+workers_dev = false
+# 挂成自定义域名：Cloudflare 会自动建 DNS 记录并免费签一张覆盖它的证书，二级子域名也行
+routes = [{ pattern = "holocard.staging.longsizhuo.com", custom_domain = true }]

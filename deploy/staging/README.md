@@ -1,6 +1,6 @@
 # staging
 
-给人线上测试 PR 的环境：https://holocard-staging.longsizhuo.com （为什么是这个域名见文末）。
+给人线上测试 PR 的环境：https://holocard.staging.longsizhuo.com （域名怎么接的见文末）。
 
 ## 怎么更新
 
@@ -38,7 +38,7 @@ Node 运行时、`node_modules`、无头浏览器、模型权重和线上共用�
 ## 为什么不做泳道（每个 PR 一个独立环境）
 
 - 每条泳道都是一个完整的分层服务，加载模型后常驻 1G 上下，这台机器还跑着 Minecraft、数据库和别的生产服务
-- 每个 PR 一个子域名（`pr-4.holocard-staging...`）是二级域名，需要付费证书（见文末）
+- 证书倒不是问题：Worker 自动签的那张证书带着 `*.holocard.staging.longsizhuo.com`，`pr-4.holocard.staging...` 这类地址直接能用
 - 眼下同时开着的 PR 就一两个、测的人就两三个，一条泳道 + 「最后推送的生效」够用
 
 同时要测的 PR 多起来、互相覆盖成了问题时再做。最省的升级是按标签选：只部署打了 `staging` 标签的 PR。
@@ -56,9 +56,17 @@ sudo bash deploy/staging/install.sh
 
 ## 域名
 
-用的是一级子域名 `holocard-staging.longsizhuo.com`，而不是 `holocard.staging.longsizhuo.com`：
-后者是二级子域名，Cloudflare 免费的通用证书只覆盖根域名和一级子域名，橙云代理下会 TLS 握手失败，
-要覆盖得买高级证书（Advanced Certificate Manager，这个 zone 是免费套餐，没开）。
+`holocard.staging.longsizhuo.com` 是二级子域名，Cloudflare 免费的通用证书只覆盖根域名和一级子域名，
+直接用橙云代理会 TLS 握手失败；这个 zone 是免费套餐，没开高级证书（ACM）。
+但 **Worker 的自定义域名 Cloudflare 会自动免费签证书**（calendar、ant 两个站用的也是这个），所以接成了这样：
 
-DNS：CNAME `holocard-staging` → `holocard.longsizhuo.com`，橙云代理。指向线上的域名而不是写源站 IP，
-源站 IP 不出现在任何地方，线上换了机器它也跟着走；Caddy 按 Host 头分到 staging 那一段。
+```
+浏览器 → holocard.staging.longsizhuo.com（Worker：holocard-staging-proxy，见 worker/）
+       → 原样转发到 holocard-staging.longsizhuo.com（DNS：CNAME → holocard.longsizhuo.com，橙云）
+       → 服务器上的 Caddy（按 Host 分到 staging 那一段）→ 127.0.0.1:8793
+```
+
+- Worker 只做原样转发，方法、路径、请求头、请求体、响应都不动；源站看到的 `CF-Connecting-IP` 仍是真实访客的 IP（实测过），按 IP 限流照常
+- `holocard-staging.longsizhuo.com` 本身也能直接打开，它是 Worker 的上游，不能删
+- 改 Worker：`cd deploy/staging/worker && CLOUDFLARE_API_TOKEN=… CLOUDFLARE_ACCOUNT_ID=… npx wrangler@4 deploy`。
+  要用带 longsizhuo.com 这个 zone 权限的令牌（挂自定义域名要改路由）；只有 Workers 权限的令牌能传脚本、挂不上域名
