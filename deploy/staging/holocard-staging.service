@@ -1,0 +1,49 @@
+[Unit]
+Description=HoloCard staging（跑 PR 版本，供线上测试）
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+# 专门的系统用户：staging 跑的是还没评审的 PR 代码，还要处理任何人上传的图片，
+# 不能让它碰到 ubuntu 家目录里的密钥和这台机器上别的服务
+User=holocard-stg
+Group=holocard-stg
+WorkingDirectory=/opt/holocard-staging
+# node 运行时、依赖、浏览器、模型权重都和线上共用一份（只读）
+ExecStart=/opt/holocard/node22/bin/node /opt/holocard-staging/holocard-server.mjs
+Environment=NODE_ENV=production
+Environment=HOME=/srv/holocard-staging/data
+Environment=HOLOCARD_PORT=8793
+Environment=HOLOCARD_PUBLIC_ORIGIN=https://holocard.staging.longsizhuo.com
+Environment=HOLOCARD_OUT_DIR=/srv/holocard-staging/layers
+Environment=HOLOCARD_DB=/srv/holocard-staging/data/holocard.db
+Environment=HOLOCARD_MODEL_DIR=/srv/holocard-models
+Environment=HOLOCARD_WEB_DIR=/srv/holocard-staging/web/current
+Environment=PLAYWRIGHT_BROWSERS_PATH=/opt/holocard/browsers
+Environment=HOLOCARD_CONCURRENCY=1
+Environment=HOLOCARD_MAX_QUEUE=4
+# 测试数据不用留久：没人看的卡 2 天就清
+Environment=HOLOCARD_TTL_MS=172800000
+Restart=on-failure
+RestartSec=5s
+
+# 比线上收得更紧，别和线上、Minecraft、数据库抢资源
+MemoryMax=1536M
+CPUQuota=100%
+
+# 沙箱：整个文件系统只读，只有自己的数据目录可写；看不见 /home；拿不到新权限
+NoNewPrivileges=yes
+ProtectSystem=strict
+ReadWritePaths=/srv/holocard-staging/layers /srv/holocard-staging/data
+ProtectHome=yes
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+RestrictSUIDSGID=yes
+LockPersonality=yes
+
+[Install]
+WantedBy=multi-user.target

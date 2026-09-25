@@ -1,0 +1,10 @@
+[Unit]
+Description=每分钟检查一次 HoloCard 的 PR
+
+[Timer]
+OnBootSec=2min
+OnUnitActiveSec=1min
+# 上一次部署还没跑完时，这一次自动跳过，不会叠着跑
+
+[Install]
+WantedBy=timers.target
