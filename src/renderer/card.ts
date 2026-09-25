@@ -383,6 +383,11 @@ export class HoloCard {
   ): Promise<void> {
     try {
       const url = await mask;
+      // 先解码再换上：ready 要保证截图时遮罩已经真正生效，而不只是 CSS 变量写进去了。
+      // 解码过的 blob 图，CSS 再引用同一个地址时直接用缓存
+      const probe = new Image();
+      probe.src = url;
+      await probe.decode();
       // 算的功夫卡片已经换掉了
       if (this.#root !== root) {
         URL.revokeObjectURL(url);

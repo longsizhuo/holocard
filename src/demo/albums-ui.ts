@@ -30,12 +30,22 @@ type View =
   | { kind: 'pick'; cardId: string };
 
 const BASE = import.meta.env.BASE_URL;
+/** 每个视图的标题都用这个 id，dialog 的 aria-labelledby 指向它，读屏软件打开窗口时能念出名字 */
+const TITLE_ID = 'albums-title';
 
 let dialog: HTMLDialogElement | null = null;
 let body: HTMLElement | null = null;
 let view: View = { kind: 'list' };
 /** 列表里要不要把归档的卡册也列出来 */
 let showArchived = false;
+/** 上一次写入失败了（隐私模式、配额满），在窗口顶上提示；换视图或下一次写成功就清掉 */
+let failed = false;
+
+/** 包一层写入：失败就记下来，界面据此提示。返回原结果，调用方照常判断 */
+function saved<T>(result: T): T {
+  failed = !result;
+  return result;
+}
 
 /** 挂到页面上已有的 <dialog>。onClose：窗口关掉时（加入卡册之后面板要刷新提示） */
 export function initAlbums(el: HTMLDialogElement, onClose: () => void): void {
@@ -69,6 +79,7 @@ export function albumCountFor(cardId: string): number {
 
 function show(next: View): void {
   view = next;
+  failed = false;
   render();
   body?.scrollTo(0, 0);
 }
@@ -78,7 +89,10 @@ function render(): void {
   const v = view;
   const nodes =
     v.kind === 'list' ? listView() : v.kind === 'detail' ? detailView(v.id) : v.kind === 'edit' ? editView(v) : pickView(v);
-  body.replaceChildren(...nodes.filter((node): node is Node | string => Boolean(node)));
+  body.replaceChildren(
+    ...(failed ? [el('p', { className: 'albums__error', role: 'alert', textContent: t('albums.saveFailed') })] : []),
+    ...nodes.filter((node): node is Node | string => Boolean(node)),
+  );
 }
 
 // ---------- 小工具 ----------
@@ -132,7 +146,7 @@ function listView(): Child[] {
   const head = el(
     'div',
     { className: 'albums__head' },
-    el('h2', { textContent: t('albums.title') }),
+    el('h2', { id: TITLE_ID, textContent: t('albums.title') }),
     button(t('albums.new'), () => show({ kind: 'edit', id: null, back: { kind: 'list' } }), 'is-primary'),
   );
   if (albums.length === 0) return [head, el('p', { className: 'albums__empty', textContent: t('albums.empty') }), note()];
@@ -183,42 +197,44 @@ function detailView(id: string): Child[] {
     { className: 'albums__actions' },
     button(t('albums.edit'), () => show({ kind: 'edit', id, back: { kind: 'detail', id } })),
     button(t('albums.duplicate'), () => {
-      const copy = duplicateAlbum(id, t('albums.copySuffix'));
+      const copy = saved(duplicateAlbum(id, t('albums.copySuffix')));
       if (copy) show({ kind: 'detail', id: copy.id });
+      else render();
     }),
     button(t(album.archived ? 'albums.unarchive' : 'albums.archive'), () => {
-      updateAlbum(id, { archived: !album.archived });
+      saved(updateAlbum(id, { archived: !album.archived }));
       render();
     }),
     button(
       t('albums.delete'),
       () => {
         if (!confirm(t('albums.deleteConfirm', { name: album.name }))) return;
-        deleteAlbum(id);
-        show({ kind: 'list' });
+        if (saved(deleteAlbum(id))) show({ kind: 'list' });
+        else render();
       },
       'is-danger',
     ),
   );
 
   const cover = coverOf(album);
-  const cards = album.cards.map((cardId) =>
+  const cards = album.cards.map((cardId, index) =>
     el(
       'div',
       { className: 'acard' },
       // 点进去就是这张卡的页面；主人在那里照样能分享、导出、删除
-      el('a', { href: `${BASE}c/${cardId}` }, thumb(cardId)),
+      // 链接里只有一张装饰性的缩略图，要给个名字，读屏软件才念得出这是什么
+      el('a', { href: `${BASE}c/${cardId}`, ariaLabel: t('albums.cardN', { n: index + 1 }) }, thumb(cardId)),
       el(
         'div',
         { className: 'acard__tools' },
         cardId === cover
           ? el('span', { className: 'acard__cover', textContent: t('albums.isCover') })
           : button(t('albums.setCover'), () => {
-              updateAlbum(id, { cover: cardId });
+              saved(updateAlbum(id, { cover: cardId }));
               render();
             }, 'is-mini'),
         button(t('albums.remove'), () => {
-          setCardInAlbum(id, cardId, false);
+          saved(setCardInAlbum(id, cardId, false));
           render();
         }, 'is-mini'),
       ),
@@ -227,7 +243,7 @@ function detailView(id: string): Child[] {
 
   return [
     button(`← ${t('albums.back')}`, () => show({ kind: 'list' }), 'is-link'),
-    el('h2', { textContent: album.name }),
+    el('h2', { id: TITLE_ID, textContent: album.name }),
     el('p', {
       className: 'albums__meta',
       textContent: [albumMeta(album), album.author && t('albums.by', { author: album.author })].filter(Boolean).join(' · '),
@@ -285,15 +301,23 @@ function editView(v: Extract<View, { kind: 'edit' }>): Child[] {
           el(
             'div',
             { className: 'acovers' },
-            ...[null, ...album.cards].map((cardId) => {
+            ...[null, ...album.cards].map((cardId, index) => {
               const pick = el(
                 'button',
-                { type: 'button', className: `acovers__item${cover === cardId ? ' is-on' : ''}` },
+                {
+                  type: 'button',
+                  className: `acovers__item${cover === cardId ? ' is-on' : ''}`,
+                  ariaPressed: String(cover === cardId),
+                  ...(cardId ? { ariaLabel: t('albums.cardN', { n: index }) } : {}),
+                },
                 cardId ? thumb(cardId) : el('span', { textContent: t('albums.coverAuto') }),
               );
               pick.addEventListener('click', () => {
                 cover = cardId;
-                for (const other of pick.parentElement?.children ?? []) other.classList.toggle('is-on', other === pick);
+                for (const other of pick.parentElement?.children ?? []) {
+                  other.classList.toggle('is-on', other === pick);
+                  other.setAttribute('aria-pressed', String(other === pick));
+                }
               });
               return pick;
             }),
@@ -346,17 +370,23 @@ function editView(v: Extract<View, { kind: 'edit' }>): Child[] {
       hint.textContent = t('albums.saveFailed');
       return;
     }
-    track('album-create');
     if (v.addCard) {
-      setCardInAlbum(created.id, v.addCard, true);
+      // 建卡册和放卡是两次写入，第二次也可能存不下。失败就把刚建的删掉，
+      // 别留一个用户以为装了这张卡、其实是空的卡册
+      if (!setCardInAlbum(created.id, v.addCard, true)) {
+        deleteAlbum(created.id);
+        hint.textContent = t('albums.saveFailed');
+        return;
+      }
       track('album-add');
     }
+    track('album-create');
     show(v.back.kind === 'pick' ? v.back : { kind: 'detail', id: created.id });
   });
 
   // 新建时直接把光标放进名称框，手机上键盘跟着弹出来
   if (!album) queueMicrotask(() => name.focus());
-  return [el('h2', { textContent: t(album ? 'albums.editTitle' : 'albums.new') }), form];
+  return [el('h2', { id: TITLE_ID, textContent: t(album ? 'albums.editTitle' : 'albums.new') }), form];
 }
 
 // ---------- 加入卡册 ----------
@@ -367,7 +397,7 @@ function pickView(v: Extract<View, { kind: 'pick' }>): Child[] {
   const rows = albums.map((album) => {
     const box = el('input', { type: 'checkbox', checked: album.cards.includes(v.cardId) });
     box.addEventListener('change', () => {
-      if (setCardInAlbum(album.id, v.cardId, box.checked) && box.checked) track('album-add');
+      if (saved(setCardInAlbum(album.id, v.cardId, box.checked)) && box.checked) track('album-add');
       render();
     });
     return el(
@@ -380,7 +410,7 @@ function pickView(v: Extract<View, { kind: 'pick' }>): Child[] {
   });
 
   return [
-    el('h2', { textContent: t('albums.addTitle') }),
+    el('h2', { id: TITLE_ID, textContent: t('albums.addTitle') }),
     rows.length
       ? el('div', { className: 'albums__picks' }, ...rows)
       : el('p', { className: 'albums__empty', textContent: t('albums.pickEmpty') }),

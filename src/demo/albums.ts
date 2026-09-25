@@ -31,10 +31,42 @@ export const CATEGORIES = ['idol', 'pet', 'travel', 'original'] as const;
 
 const KEY = 'holocard:albums';
 
+/** 卡片 id 就是服务端生成的 UUID。卡片 id 会拼进图片地址和链接里，格式不对的一律丢掉 */
+const CARD_ID = /^[0-9a-f-]{36}$/;
+
+/**
+ * 把读出来的一条按当前结构规范一遍。数据存在用户的浏览器里，旧版本写的、被手改坏的都可能出现：
+ * 缺的字段补默认值，连 id 都没有的整条丢掉——不能因为一条坏数据让整个卡册窗口打不开。
+ */
+function normalize(raw: unknown): Album | null {
+  if (typeof raw !== 'object' || raw === null) return null;
+  const a = raw as Record<string, unknown>;
+  const id = a['id'];
+  if (typeof id !== 'string' || id === '') return null;
+  const text = (v: unknown): string => (typeof v === 'string' ? v : '');
+  const time = (v: unknown): number => (typeof v === 'number' && Number.isFinite(v) ? v : 0);
+  const cards = Array.isArray(a['cards'])
+    ? a['cards'].filter((c): c is string => typeof c === 'string' && CARD_ID.test(c))
+    : [];
+  const cover = a['cover'];
+  return {
+    id,
+    name: text(a['name']),
+    author: text(a['author']),
+    intro: text(a['intro']),
+    category: text(a['category']),
+    cover: typeof cover === 'string' && cards.includes(cover) ? cover : null,
+    archived: a['archived'] === true,
+    cards: [...new Set(cards)],
+    createdAt: time(a['createdAt']),
+    updatedAt: time(a['updatedAt']),
+  };
+}
+
 export function loadAlbums(): Album[] {
   try {
     const parsed: unknown = JSON.parse(localStorage.getItem(KEY) ?? '[]');
-    return Array.isArray(parsed) ? (parsed as Album[]) : [];
+    return Array.isArray(parsed) ? parsed.map(normalize).filter((album): album is Album => album !== null) : [];
   } catch {
     // 隐私模式下 localStorage 可能直接抛；数据被改坏了也当没有
     return [];

@@ -184,13 +184,21 @@ const THUMB_SIDE = 480;
 
 /**
  * 卡册网格用的缩略图。原图动辄几 MB，分享图（preview.jpg）右半边又是一大段文案，都不适合放进网格。
- * 原图存盘前已经摆正方向、去掉了 EXIF（见 normalizeOriginal），这里只管缩。
- * 先写临时文件再改名：同一张卡的两个请求同时来，谁都不会读到写了一半的文件。
+ *
+ * sources 是由远及近的几张图，叠起来再缩：有原图时就只有原图一张（存盘前已经摆正、去掉 EXIF，
+ * 见 normalizeOriginal）；早期的卡没存原图，就拿各层叠——静止时各层叠起来就是原图的样子。
+ * 先叠成一张再缩，是因为 sharp 在同一条管线里先缩放后叠加，叠上去的层会和缩小后的底图尺寸对不上。
+ * 先写临时文件再改名：写到一半的文件不会被发出去。
  */
-export async function makeThumb(source: string, target: string): Promise<void> {
+export async function makeThumb(sources: string[], target: string): Promise<void> {
+  const [base, ...rest] = sources;
+  if (!base) throw new Error('没有可用的图');
+  const flat = rest.length > 0 ? await sharp(base).composite(rest.map((input) => ({ input }))).png().toBuffer() : base;
   const temp = `${target}.${process.pid}.${Date.now()}.tmp`;
-  await sharp(source)
+  await sharp(flat)
     .resize(THUMB_SIDE, THUMB_SIDE, { fit: 'inside', withoutEnlargement: true })
+    // 带透明的 PNG 原图转 JPEG 会落成黑底，垫成白的
+    .flatten({ background: '#ffffff' })
     .jpeg({ quality: 80, mozjpeg: true })
     .toFile(temp);
   await rename(temp, target);

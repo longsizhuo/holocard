@@ -221,6 +221,50 @@ function pumpPreviews(): void {
 const queue: string[] = [];
 let running = 0;
 
+/*
+ * 卡册缩略图（图怎么做见 images.ts 的 makeThumb）。
+ * 新卡在分层完成时顺手做好；早期的卡（没存原图的，线上有一百多张）第一次有人要时再做。
+ * 这是公开接口，所以同一张卡同时来多个请求只做一次，所有卡排成一队、一次只做一张，
+ * 不让一堆首次请求同时把这台小机器的 CPU 吃满。每张卡做完就存盘，至多做一次，排队的总量有上界。
+ */
+const thumbJobs = new Map<string, Promise<void>>();
+let thumbChain: Promise<void> = Promise.resolve();
+
+function ensureThumb(id: string): Promise<void> {
+  const pending = thumbJobs.get(id);
+  if (pending) return pending;
+  const job = thumbChain
+    .then(async () => {
+      const target = join(OUT_DIR, id, 'thumb.jpg');
+      if (await stat(target).catch(() => null)) return;
+      const card = db.get(id);
+      if (card?.status !== 'done') return;
+      const sources = await thumbSources(card);
+      if (sources.length > 0) await makeThumb(sources, target);
+    })
+    .catch((error: unknown) => {
+      console.warn(`[thumb] ${id} 生成失败：`, error instanceof Error ? error.message : error);
+    })
+    .finally(() => thumbJobs.delete(id));
+  thumbJobs.set(id, job);
+  thumbChain = job;
+  return job;
+}
+
+/** 做缩略图用哪几张图：有原图用原图；没有就用各层，由远及近 */
+async function thumbSources(card: CardRow): Promise<string[]> {
+  const original = originalFile(card);
+  if (original && (await stat(original).catch(() => null))) return [original];
+  const dir = join(OUT_DIR, card.id);
+  const manifest = JSON.parse(await readFile(join(dir, 'manifest.json'), 'utf8')) as {
+    layers?: { file?: unknown }[];
+  };
+  // manifest 是自己写的，文件名仍按层文件的格式核一遍再拼路径，不给目录穿越留口子
+  return (manifest.layers ?? []).flatMap((layer) =>
+    typeof layer.file === 'string' && /^layer-\d{1,2}\.(?:png|webp)$/.test(layer.file) ? [join(dir, layer.file)] : [],
+  );
+}
+
 /** 原图在磁盘上的位置。扩展名由存盘时的格式决定 */
 function originalFile(card: Pick<CardRow, 'id' | 'original_type'>): string | null {
   const ext =
@@ -405,6 +449,8 @@ async function runJob(id: string): Promise<void> {
       layer_count: set.manifest.layers.length,
       result_url: `${PUBLIC_ORIGIN}/c/${id}`,
     });
+    // 缩略图顺手做掉，卡册里第一次打开时就不用现做了。不等它，也不让它的失败影响这张卡
+    void ensureThumb(id);
   } catch (error) {
     db.update(id, {
       status: 'error',
@@ -1071,17 +1117,8 @@ const server = createServer((req, res) => {
       (LAYER_FILE.test(fileName) || EXPORT_FILE.test(fileName))
     ) {
       const [, id, name] = fileMatch;
-      // 卡册缩略图第一次有人要的时候现做（见 makeThumb）。卡已经过期、被删的，原图也没了，照常落到下面的 404
-      if (name === 'thumb.jpg') {
-        const target = join(OUT_DIR, id ?? '', name);
-        const card = db.get(id ?? '');
-        const source = card?.status === 'done' ? originalFile(card) : null;
-        if (source && !(await stat(target).catch(() => null))) {
-          await makeThumb(source, target).catch((error: unknown) => {
-            console.warn(`[thumb] ${id} 生成失败：`, error instanceof Error ? error.message : error);
-          });
-        }
-      }
+      // 卡册缩略图还没有就先做（见 ensureThumb）。卡已经过期、被删的做不出来，照常落到下面的 404
+      if (name === 'thumb.jpg') await ensureThumb(id ?? '');
       // 导出的动图按下载处理，文件名用给用户看的那个（HoloCard_xxxx.jpg 之类）
       const exported = EXPORT_FORMATS
         .flatMap((format) => exportFiles(format, id ?? ''))
