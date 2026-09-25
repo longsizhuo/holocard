@@ -175,7 +175,7 @@ or driving it from external input such as a gyroscope.
 
 Cards you made and cards shared with you can be collected into albums, and one card can sit in several albums. Albums live only in this device's browser (localStorage),
 just like delete tokens, since the site has no accounts. An album stores card ids only; the cards themselves live on the server and show as "Expired" once they are gone.
-Grid thumbnails are made by the server from the original on first request (`/api/layers/<id>/thumb.jpg`, longest side 480). Code: `src/demo/albums*.ts`.
+Grid thumbnails (`/api/layers/<id>/thumb.jpg`, longest side 480) are made when layering finishes; early cards that never stored an original get one on first request, stacked from their layers, made once per card and queued one at a time. Code: `src/demo/albums*.ts`.
 
 ## The `.layers` format
 
