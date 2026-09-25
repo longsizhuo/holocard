@@ -18,7 +18,7 @@ ExecStart=/opt/holocard/node22/bin/node /opt/holocard-staging/current/holocard-s
 Environment=NODE_ENV=production
 Environment=HOME=/srv/holocard-staging/data
 Environment=HOLOCARD_PORT=8793
-Environment=HOLOCARD_PUBLIC_ORIGIN=https://holocard.staging.longsizhuo.com
+Environment=HOLOCARD_PUBLIC_ORIGIN=https://holocard-staging.longsizhuo.com
 Environment=HOLOCARD_OUT_DIR=/srv/holocard-staging/layers
 Environment=HOLOCARD_DB=/srv/holocard-staging/data/holocard.db
 Environment=HOLOCARD_MODEL_DIR=/srv/holocard-models

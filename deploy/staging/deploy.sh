@@ -19,7 +19,7 @@ WEB_ROOT="/srv/holocard-staging/web"
 APP_ROOT="/opt/holocard-staging"
 PORT=8793
 # 对外地址，写进 GitHub 的部署记录里，PR 页面上会出现「View deployment」按钮
-PUBLIC_URL="${HOLOCARD_STAGING_URL:-https://holocard.staging.longsizhuo.com}"
+PUBLIC_URL="${HOLOCARD_STAGING_URL:-https://holocard-staging.longsizhuo.com}"
 KEEP=3
 
 PR="${1:?用法：deploy.sh <PR 号> [提交 sha]}"
