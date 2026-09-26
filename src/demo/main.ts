@@ -286,17 +286,27 @@ function applyHalo(): void {
 
 /**
  * 把此刻炫光实际有多亮显示出来，纯读数：角度决定的那部分（渲染器算的 --hc-halo）× 炫光强度。
- * 乘上强度，拖强度滑块时读数条才会跟着动
+ * 乘上强度，拖强度滑块时读数条才会跟着动。
+ *
+ * 只在「景深与炫光」展开时每帧读：读数就在那个默认折叠的面板里，折着时看不见。
+ * 以前是无条件每帧跑，页面永远闲不下来，每秒按屏幕刷新率（60～240 次）白白提交一帧
  */
+const moreBox = need<HTMLDetailsElement>('details.more');
+let haloRaf = 0;
 function pollHalo(): void {
+  haloRaf = 0;
+  if (!moreBox.open) return;
   const root = card.element;
   if (root) {
     const value = (Number(root.style.getPropertyValue('--hc-halo')) || 0) * Number(ctlIntensity.value);
     outHalo.value = value.toFixed(2);
     haloFill.style.width = `${Math.round(value * 100)}%`;
   }
-  requestAnimationFrame(pollHalo);
+  haloRaf = requestAnimationFrame(pollHalo);
 }
+moreBox.addEventListener('toggle', () => {
+  if (moreBox.open && !haloRaf) pollHalo();
+});
 
 function showProgress(key: MessageKey, params?: Record<string, string | number>, ratio?: number): void {
   progress.hidden = false;
