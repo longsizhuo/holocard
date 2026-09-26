@@ -112,6 +112,18 @@
             <div id="foil-list"></div>
 
             <!-- 调参是次要动作，默认折起来，省下的高度留给卡片 -->
+            <!--
+              立体视差开关。pokemon-cards-css 的作者 Simon 的意见：真卡是平的，视差会破坏实物感。
+              所以做成开关放在明面上，不藏进下面的折叠面板；选择记在本机
+            -->
+            <label class="toggle">
+              <span class="toggle__text">
+                <span data-i18n="panel.parallax">立体视差</span>
+                <small data-i18n="panel.parallaxHint">关掉就是一张平的实体卡</small>
+              </span>
+              <input type="checkbox" id="ctl-parallax" role="switch" checked />
+            </label>
+
             <details class="more">
               <summary class="more__head" data-i18n="panel.more">景深与炫光</summary>
 
