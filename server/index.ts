@@ -25,6 +25,7 @@ import { randomUUID, timingSafeEqual } from 'node:crypto';
 import { basename, dirname, extname, join, resolve, sep } from 'node:path';
 import { env } from '@huggingface/transformers';
 import { segmentToLayerSet } from '../src/segmenter';
+import { SERVER_REFINE_OPTIONS } from '../src/segmenter/refine';
 import { sharpImages, normalizeOriginal, layerToWebp, makeThumb, ImageError } from './images';
 import {
   LANG_TAG,
@@ -426,7 +427,7 @@ async function runJob(id: string): Promise<void> {
     const bytes = await readFile(file);
     // 拷一份到独立的 ArrayBuffer：Node 的 Buffer 可能落在共享池上，Blob 不接受那种视图
     const set = await segmentToLayerSet(new Blob([new Uint8Array(bytes)]), {
-      extract: { images: sharpImages },
+      extract: { images: sharpImages, refine: SERVER_REFINE_OPTIONS },
       onProgress: (p) => db.update(id, { stage: p.stage }),
     });
 

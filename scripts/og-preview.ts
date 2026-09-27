@@ -32,6 +32,7 @@ import { fileURLToPath } from 'node:url';
 import { build } from 'vite';
 import { env } from '@huggingface/transformers';
 import { segmentToLayerSet } from '../src/segmenter';
+import { SERVER_REFINE_OPTIONS } from '../src/segmenter/refine';
 import { sharpImages } from '../server/images';
 import { renderPreview, closeBrowser } from '../server/preview';
 import { EXPORT_FORMATS, exportFiles, runExport, type ExportFormat } from '../server/export';
@@ -148,7 +149,8 @@ async function ensureLayers(image: string): Promise<string> {
   console.log('分层：第一次用这张图，跑一遍模型（之后走缓存）…');
   const started = Date.now();
   const set = await segmentToLayerSet(new Blob([new Uint8Array(bytes)]), {
-    extract: { images: sharpImages },
+    // 和线上分层服务同一套参数，出来的层才和用户拿到的一样
+    extract: { images: sharpImages, refine: SERVER_REFINE_OPTIONS },
   });
   await mkdir(dir, { recursive: true });
   await Promise.all(
