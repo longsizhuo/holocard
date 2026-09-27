@@ -90,7 +90,23 @@ const exportHint = need<HTMLElement>('#export-hint');
 const langButtons = [...document.querySelectorAll<HTMLButtonElement>('.lang [data-lang]')];
 
 const route = parseRoute();
-const card = new HoloCard(stage, { amplitude: Number(ctlAmp.value) / 100 });
+const ctlParallax = need<HTMLInputElement>('#ctl-parallax');
+
+/** 立体视差开关记在本机。隐私模式下读写 localStorage 会抛，当作没记过 */
+const PARALLAX_KEY = 'holocard:parallax';
+try {
+  ctlParallax.checked = localStorage.getItem(PARALLAX_KEY) !== 'off';
+} catch {
+  // 同上
+}
+
+/** 当前该用的视差振幅：开关关着就是 0（平面卡），开着按滑块 */
+function amplitude(): number {
+  return ctlParallax.checked ? Number(ctlAmp.value) / 100 : 0;
+}
+ctlAmp.disabled = !ctlParallax.checked;
+
+const card = new HoloCard(stage, { amplitude: amplitude() });
 
 /** 当前这张卡在服务端的 id。只有服务端产出的卡才有，手工素材没有 */
 let currentId: string | null = null;
@@ -407,10 +423,22 @@ async function processImage(file: File): Promise<void> {
  * 不转的话拖滑块画面上什么都不变（issue #3 第 3、4 条说的「感知不明显」就是这个）。
  */
 ctlAmp.addEventListener('input', () => {
-  const pct = Number(ctlAmp.value);
-  outAmp.value = `${pct}%`;
-  card.setOptions({ amplitude: pct / 100 });
+  outAmp.value = `${ctlAmp.value}%`;
+  card.setOptions({ amplitude: amplitude() });
   card.preview();
+});
+
+// 关掉视差：振幅归零，放大补偿也跟着变成 1，照片完整显示、不再被裁掉一圈
+ctlParallax.addEventListener('change', () => {
+  ctlAmp.disabled = !ctlParallax.checked;
+  card.setOptions({ amplitude: amplitude() });
+  card.preview();
+  try {
+    localStorage.setItem(PARALLAX_KEY, ctlParallax.checked ? 'on' : 'off');
+  } catch {
+    // 存不下就只管这一次
+  }
+  track('parallax', { on: ctlParallax.checked ? 1 : 0 });
 });
 
 ctlIntensity.addEventListener('input', () => {

@@ -326,6 +326,47 @@ select {
 }
 
 /* 折叠的次要参数 */
+/* 立体视差开关：一行文字 + 右侧拨动开关。原生 checkbox 改外观，键盘、读屏照常能用 */
+.toggle {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 0;
+  border-top: 1px solid var(--line);
+  cursor: pointer;
+}
+.toggle__text { display: grid; gap: 2px; font-size: 12px; }
+.toggle__text small { font-size: 11px; color: var(--muted); }
+.toggle input {
+  appearance: none;
+  flex: none;
+  position: relative;
+  width: 36px;
+  height: 20px;
+  margin: 0;
+  border-radius: 999px;
+  background: var(--line);
+  cursor: pointer;
+  transition: background 0.2s;
+}
+.toggle input::after {
+  content: '';
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: #fff;
+  box-shadow: 0 1px 3px rgba(35, 32, 43, 0.3);
+  transition: transform 0.2s;
+}
+.toggle input:checked { background: linear-gradient(120deg, #a88be0, #7b8fe0 50%, #59b6a8); }
+.toggle input:checked::after { transform: translateX(16px); }
+.toggle input:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.field input[type='range']:disabled { opacity: 0.35; }
+
 .more { border-top: 1px solid var(--line); padding-top: 10px; margin-top: 4px; }
 .more__head {
   cursor: pointer;

@@ -20,6 +20,8 @@ export const zh = {
   'drop.hint': '或点击选择',
   'panel.foils': '各层箔面',
   'panel.lead': '真实闪卡的底材是箔：主体用不透明油墨盖住所以哑光，背景不盖所以闪。',
+  'panel.parallax': '立体视差',
+  'panel.parallaxHint': '关掉就是一张平的实体卡',
   'panel.more': '景深与炫光',
   'panel.amp': '视差振幅',
   'panel.ampHint': '拉到 0 卡面就是完全平的',
@@ -190,6 +192,8 @@ export const en: Messages = {
   'panel.foils': 'Foil per layer',
   'panel.lead':
     'Real holo cards are printed on foil: the subject is covered with opaque ink so it stays matte, the background is not, so it shines.',
+  'panel.parallax': 'Parallax',
+  'panel.parallaxHint': 'Off gives a flat card, like a real one',
   'panel.more': 'Depth and halo',
   'panel.amp': 'Parallax',
   'panel.ampHint': 'At 0 the card is completely flat',
@@ -355,6 +359,8 @@ export const ja: Messages = {
   'panel.foils': 'レイヤーごとのホイル',
   'panel.lead':
     '本物のキラカードはホイルに印刷されています。主役は不透明インクで覆うのでマットに、背景は覆わないので光ります。',
+  'panel.parallax': '立体視差',
+  'panel.parallaxHint': 'オフにすると実物のような平らなカードに',
   'panel.more': '奥行きとハロー',
   'panel.amp': '視差の強さ',
   'panel.ampHint': '0 にするとカードは完全に平らになります',
