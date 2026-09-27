@@ -13,11 +13,12 @@
  *   public/css/cards/v-regular.css     → [data-foil="sunpillar"]
  *   public/css/cards/rainbow-holo.css  → [data-foil="rainbow"]
  *
- * 相对上游的改动只有三处，配方里的渐变、混合模式、滤镜数值一律没动：
+ * 相对上游的改动只有四处，配方里的渐变、混合模式、滤镜数值一律没动：
  *   1. 选择器从 .card[data-rarity=…] .card__shine 换成 .hc__shine[data-foil=…]
  *   2. 去掉了 clip-path（上游用它把箔限制在卡牌的插画窗口里；
  *      我们的箔是按层的 alpha 做遮罩，见 card.css）
  *   3. rainbow 的 :before 依赖每张卡专属的 --foil 蚀刻图，我们没有，所以略去
+ *   4. sunpillar 的 :after 斜纹层位置从 -x 改成 100% - x，去掉一道竖直接缝（见那条规则里的注释）
  *
  * 变量名（--pointer-x、--background-x、--card-opacity 等）刻意保持与上游一致，
  * 以后要再移植别的稀有度，配方可以直接贴过来。
@@ -249,10 +250,17 @@
 .hc__shine[data-foil='sunpillar']:after {
   content: '';
 
+  /*
+   * 第三层（斜纹）上游写的是 calc(var(--background-x) * -1)：195% 宽的图块配负的位置，
+   * 图块起点总落在卡面里（--background-x 在 37%～63%，起点在卡宽的 35%～60% 处），
+   * 重复的斜纹在那里断开，亮的画面（天空、白墙）上就是一道竖直接缝。
+   * 改成 100% - x：随指针移动的方向和速度完全一样（都是每 1% 指针移动 0.95%），
+   * 只是条纹相位差一个常数，而图块起点落在卡宽的 -60%～-35%，永远在卡外
+   */
   background-position:
     center,
     0% var(--background-y),
-    calc(var(--background-x) * -1) calc(var(--background-y) * -1),
+    calc(100% - var(--background-x)) calc(var(--background-y) * -1),
     var(--background-x) var(--background-y);
   background-size: var(--imgsize) 100%, 200% 400%, 195% 100%, 200% 100%;
 
