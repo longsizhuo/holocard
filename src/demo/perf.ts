@@ -78,8 +78,13 @@ function send(mode: string, times: number[], state: PerfState, interacted: boole
   if (gaps.length < 2) return;
   const at = (p: number): number => gaps[Math.min(gaps.length - 1, Math.floor(p * gaps.length))] ?? 0;
 
-  // 最快的那一成帧的间隔就是屏幕刷新间隔。整页都卡的时候这个估计会偏大，要和 fps 一起看
-  const vsync = Math.max(at(0.1), 1);
+  /*
+   * 屏幕刷新间隔：最快那一成帧附近的间隔取平均。整页都卡的时候这个估计会偏大，要和 fps 一起看。
+   * 不能直接拿第 10 百分位：Safari 的 rAF 时间戳只精确到 1ms，60Hz 的间隔在 16 和 17 之间来回跳，
+   * 取到 16 就报成 63Hz（120Hz 报成 125）。取平均就还原回来了
+   */
+  const fast = gaps.filter((g) => g <= at(0.1) * 1.5);
+  const vsync = Math.max(fast.reduce((a, b) => a + b, 0) / Math.max(1, fast.length), 1);
   // 每个间隔里本该出几帧：间隔是刷新间隔的 3 倍，就是掉了 2 帧
   let dropped = 0;
   for (const gap of gaps) dropped += Math.max(0, Math.round(gap / vsync) - 1);

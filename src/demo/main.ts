@@ -890,7 +890,8 @@ async function boot(): Promise<void> {
 
 await boot();
 pollHalo();
-// 性能埋点，staging 和线上都有。render 模式是服务端的无头浏览器，不是真人的设备
-if (route.mode !== 'render') {
+// 性能埋点，staging 和线上都有。render 模式是服务端的无头浏览器，不是真人的设备；
+// 卡片没加载出来（分享链接过期 404）的空页面也不量，不然会把 card 模式的帧率拉高
+if (route.mode !== 'render' && current) {
   measurePerf(route.mode, () => ({ parallax: ctlParallax.checked, busy: busy || exporting }));
 }

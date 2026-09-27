@@ -120,7 +120,7 @@ ssh oracle "cd /opt/holocard && node22/bin/node db.mjs \"SELECT ...\""  # 任意
 |---|---|
 | `fps` `p50` `p95` `max_ms` | 实际帧率，帧间隔的中位数、95 分位、最大值（毫秒） |
 | `hz` `dropped` | 估出来的刷新率（最快那一成帧的间隔），和按它算的掉帧比例。整页都卡的时候 `hz` 会偏低、`dropped` 会偏小，要和 `fps` 一起看 |
-| `screen_w/h` `view_w/h` `dpr` | 屏幕、窗口的 CSS 像素和缩放比，相乘是物理像素 |
+| `screen_w/h` `view_w/h` `dpr` | 屏幕、窗口的 CSS 像素和缩放比。窗口 × dpr 是要画的物理像素；屏幕 × dpr 在浏览器缩放不是 100% 时不准（Chrome 的 dpr 含页面缩放） |
 | `gpu` `cores` `memory` | 显卡名（Safari 只报 Apple GPU）、CPU 核数、内存（只有 Chromium 有） |
 | `parallax` `busy` `interacted` `reduced_motion` | 视差开没开、有没有在处理照片、量的时候动没动鼠标、开没开减少动态效果 |
 | `ua` `country` | 服务端从请求头取的 User-Agent 和 Cloudflare 给的国家 |

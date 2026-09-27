@@ -42,8 +42,11 @@ const median = (values) => {
 if (arg === 'perf') {
   const days = Number(process.argv[3] ?? 7);
   const rows = db.prepare('SELECT * FROM perf WHERE created_at > ? ORDER BY created_at DESC').all(Date.now() - days * 86400000);
-  // 物理像素 = CSS 像素 × dpr。卡不卡和它、和刷新率关系最大
-  const physical = (r) => `${Math.round(r.screen_w * r.dpr)}x${Math.round(r.screen_h * r.dpr)}@${r.hz}Hz`;
+  /*
+   * 要画的物理像素 = 窗口的 CSS 像素 × dpr，卡不卡和它、和刷新率关系最大。
+   * 不用 screen × dpr：Chrome 的 dpr 会乘上页面缩放而 screen 不会，2560 的屏开 150% 缩放会被算成 4K
+   */
+  const physical = (r) => `${Math.round(r.view_w * r.dpr)}x${Math.round(r.view_h * r.dpr)}@${r.hz}Hz`;
   const flags = (r) => [r.parallax ? '视差' : '', r.busy ? '处理中' : '', r.interacted ? '有操作' : '', r.reduced_motion ? '减动效' : ''].filter(Boolean).join(' ');
   console.log(`最近 ${days} 天共 ${rows.length} 条。最近 30 条：`);
   console.table(
@@ -61,13 +64,17 @@ if (arg === 'perf') {
       flags: flags(r),
     })),
   );
-  // 分组时去掉「处理中」的：上传、导出的时候掉帧是正常的，混进来会把静置时的数拉低
+  /*
+   * 分组时只看真正静置的：处理照片、导出时掉帧是正常的；有操作（鼠标在卡上动）时箔面在重画，
+   * 桌面端样本大多带操作、手机大多不带，混在一起两类设备就没法比了
+   */
   const groups = new Map();
-  for (const r of rows.filter((r) => !r.busy)) {
+  for (const r of rows.filter((r) => !r.busy && !r.interacted)) {
     const key = `${physical(r)} | ${shortUa(r.ua)} | ${(r.gpu ?? '').slice(0, 60)}`;
-    groups.set(key, [...(groups.get(key) ?? []), r]);
+    if (!groups.has(key)) groups.set(key, []);
+    groups.get(key).push(r);
   }
-  console.log('按屏幕、浏览器、显卡分组（不含处理照片时的），掉帧多的在前：');
+  console.log('按窗口物理像素、浏览器、显卡分组（只算静置、没操作的），掉帧多的在前：');
   console.table(
     [...groups]
       .map(([key, list]) => ({

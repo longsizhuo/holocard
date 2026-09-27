@@ -111,21 +111,42 @@ const db = new CardDb(DB_PATH);
 const MAX_EXPORT_QUEUE = Number(process.env.HOLOCARD_MAX_EXPORT_QUEUE ?? 6);
 const EXPORT_RATE_LIMIT = Number(process.env.HOLOCARD_EXPORT_RATE_LIMIT ?? 8);
 
+/**
+ * 限流按什么记。IPv6 按 /64 记：一个用户手上通常是一整段 /64，逐个地址记的话每个请求换个地址就绕过去了。
+ * IPv4（含 ::ffff:1.2.3.4 这种映射写法）照旧按地址
+ */
+function limitKey(ip: string): string {
+  if (!ip.includes(':') || ip.includes('.')) return ip;
+  const [head = '', tail] = ip.split('::');
+  const h = head ? head.split(':') : [];
+  const t = tail ? tail.split(':') : [];
+  const full = tail === undefined ? h : [...h, ...new Array<string>(Math.max(0, 8 - h.length - t.length)).fill('0'), ...t];
+  return `${full.slice(0, 4).join(':')}::/64`;
+}
+
 /** 简单的滑动窗口限流。单进程、内存态，够用；真被大规模刷再上 Cloudflare 的规则 */
 function makeLimiter(limit: number, windowMs: number): (ip: string) => boolean {
   const hits = new Map<string, number[]>();
+  let sweptAt = 0;
   return (ip) => {
+    const key = limitKey(ip);
     const now = Date.now();
-    const recent = (hits.get(ip) ?? []).filter((t) => now - t < windowMs);
+    const recent = (hits.get(key) ?? []).filter((t) => now - t < windowMs);
+    // 已经超限的不再记账：不然一个 IP 狂刷时数组越来越长，被挡掉的请求也越来越费 CPU
+    if (recent.length >= limit) {
+      hits.set(key, recent);
+      return true;
+    }
     recent.push(now);
-    hits.set(ip, recent);
-    // 顺手清掉早就过期的条目，别让这个 Map 无限长
-    if (hits.size > 5000) {
-      for (const [key, times] of hits) {
-        if (times.every((t) => now - t >= windowMs)) hits.delete(key);
+    hits.set(key, recent);
+    // 过期条目每个窗口清一次。以前是超过 5000 条就每个请求全表扫一遍，被刷时正好最慢
+    if (now - sweptAt >= windowMs) {
+      sweptAt = now;
+      for (const [k, times] of hits) {
+        if (times.every((t) => now - t >= windowMs)) hits.delete(k);
       }
     }
-    return recent.length > limit;
+    return false;
   };
 }
 
@@ -135,6 +156,11 @@ const rateLimited = makeLimiter(RATE_LIMIT, RATE_WINDOW_MS);
 const exportLimited = makeLimiter(EXPORT_RATE_LIMIT, RATE_WINDOW_MS);
 /** 性能埋点的限流：正常一次页面访问一条，这个数只挡刷的 */
 const perfLimited = makeLimiter(30, RATE_WINDOW_MS);
+/**
+ * 性能埋点的总量上限，不分来源。换着地址刷能绕过按 IP 的限流，而表只留最新 20 万行，
+ * 灌满的话真实数据全被挤掉。正常流量离这个数远得很
+ */
+const perfFlooded = makeLimiter(120, 60 * 1000);
 
 /**
  * 定长字符串比较。长度不同时先比一个等长的占位串，让耗时与输入无关，
@@ -928,7 +954,16 @@ const server = createServer((req, res) => {
     }
 
     if (req.method === 'POST' && url.pathname === '/api/perf') {
-      if (perfLimited(clientIp(req))) {
+      /*
+       * 只收本站前端发的：它发的是 application/json 的 Blob。别的网站想借访客的浏览器灌假数据，
+       * 要么只能发 text/plain（这里拒收），要么带 application/json 触发预检（这个服务不答 OPTIONS）
+       */
+      const site = req.headers['sec-fetch-site'];
+      if (!String(req.headers['content-type'] ?? '').startsWith('application/json') || (site && site !== 'same-origin')) {
+        res.writeHead(400).end();
+        return;
+      }
+      if (perfLimited(clientIp(req)) || perfFlooded('all')) {
         res.writeHead(429).end();
         return;
       }
