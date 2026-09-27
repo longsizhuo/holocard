@@ -32,6 +32,7 @@ import { fileURLToPath } from 'node:url';
 import { build } from 'vite';
 import { env } from '@huggingface/transformers';
 import { segmentToLayerSet } from '../src/segmenter';
+import { MATTE_MODEL_ID, estimateMatte } from '../src/segmenter/matte';
 import { SERVER_REFINE_OPTIONS } from '../src/segmenter/refine';
 import { sharpImages } from '../server/images';
 import { renderPreview, closeBrowser } from '../server/preview';
@@ -129,7 +130,10 @@ function idFromHash(hash: string): string {
 
 async function ensureLayers(image: string): Promise<string> {
   const bytes = await readFile(image);
-  const id = idFromHash(createHash('sha256').update(bytes).digest('hex'));
+  const models = join(ROOT, '.models');
+  // 放了抠图权重就和线上一样抠主体（下载见 deploy/README.md）。有没有抠图的结果不一样，缓存要分开存
+  const matte = existsSync(join(models, MATTE_MODEL_ID, 'onnx', 'model.onnx'));
+  const id = idFromHash(createHash('sha256').update(bytes).update(matte ? 'matte' : '').digest('hex'));
   const dir = join(CACHE, id);
 
   if (await stat(join(dir, 'manifest.json')).catch(() => null)) {
@@ -137,7 +141,6 @@ async function ensureLayers(image: string): Promise<string> {
     return id;
   }
 
-  const models = join(ROOT, '.models');
   if (!(await stat(models).catch(() => null))) {
     throw new Error(
       `找不到模型权重 ${models}。下载方法见 deploy/README.md「模型权重」一节，放到这个目录下即可`,
@@ -151,6 +154,7 @@ async function ensureLayers(image: string): Promise<string> {
   const set = await segmentToLayerSet(new Blob([new Uint8Array(bytes)]), {
     // 和线上分层服务同一套参数，出来的层才和用户拿到的一样
     extract: { images: sharpImages, refine: SERVER_REFINE_OPTIONS },
+    ...(matte ? { findSubject: (b: Blob) => estimateMatte(b).catch(() => null) } : {}),
   });
   await mkdir(dir, { recursive: true });
   await Promise.all(

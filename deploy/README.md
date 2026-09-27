@@ -49,7 +49,7 @@ ssh oracle 'cd /srv/holocard-web && ln -sfn releases/<版本> current.new && mv 
 | `/opt/holocard/holocard-server.mjs` | 服务本体（单文件 ESM） |
 | `/opt/holocard/node22/` | Node 22 运行时（系统自带的是 18，sharp 要求 ≥20.9） |
 | `/opt/holocard/node_modules/` | transformers.js + onnxruntime-node + sharp，约 483MB |
-| `/srv/holocard-models/` | Depth Anything V2-Small 权重（q8，27MB） |
+| `/srv/holocard-models/` | Depth Anything V2-Small 权重（q8，27MB）+ BiRefNet_lite 权重（fp32，214MB，抠主体用；不放就只按深度切层） |
 | `/srv/holocard-web/` | 前端 releases + current 软链 |
 | `/srv/holocard-layers/` | 每张卡一个目录：原图（去掉 EXIF）+ 层 PNG + manifest + 预览图 + 卡册缩略图 `thumb.jpg`（分层完成时做好；早期没存原图的卡在第一次有人要时用各层叠出来现做） |
 | `/srv/holocard-data/holocard.db` | 卡片数据库（SQLite），每张卡的状态、原图地址、结果地址、保留期、删除口令 |
@@ -60,8 +60,8 @@ ssh oracle 'cd /srv/holocard-web && ln -sfn releases/<版本> current.new && mv 
 `/etc/systemd/system/holocard.service` 里：
 
 ```
-MemoryMax=3G      # 推理峰值约 780MB，再加常驻 Chromium 约 400MB
-CPUQuota=200%     # 4 核里最多占 2 核，留给 Minecraft 和数据库
+MemoryMax=10G     # 抠主体峰值约 7GB（推理完回落到 1GB 以内），再加深度模型、常驻 Chromium。不到 8G 服务就不抠主体
+CPUQuota=200%     # 4 核里最多占 2 核，留给数据库和同机其他服务。抠主体在 2 核下约 25 秒一张
 Environment=PLAYWRIGHT_BROWSERS_PATH=/opt/holocard/browsers
 ```
 
@@ -273,6 +273,19 @@ curl -sL $B/onnx/model_quantized.onnx -o $D/onnx/model_quantized.onnx
 ```
 
 用 q8 而不是 fp16：在 ARM CPU 上实测快一倍（2.7s 对 5s+）、内存省三成，而深度图差别在切层这一步看不出来。
+
+抠主体的权重（选型和为什么用 fp32 见仓库 README 的「BiRefNet：服务端抠主体」）：
+
+```bash
+D=/srv/holocard-models/onnx-community/BiRefNet_lite-ONNX
+mkdir -p $D/onnx
+B=https://huggingface.co/onnx-community/BiRefNet_lite-ONNX/resolve/main
+curl -sL $B/config.json -o $D/config.json
+curl -sL $B/onnx/model.onnx -o $D/onnx/model.onnx
+sha256sum $D/onnx/model.onnx   # 5600024376f572a557870a5eb0afb1e5961636bef4e1e22132025467d0f03333，224005088 字节
+```
+
+服务启动日志的「模型目录」一行后面没有「没有抠图权重」字样，就是认到了。staging 和线上共用这个目录。
 
 **2.5 渲染 OG 预览图的浏览器**
 

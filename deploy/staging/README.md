@@ -22,7 +22,7 @@ PR 页面的 Deployments 里会显示「部署中 / 已部署 / 失败」和访�
 | 服务 / 端口 | `holocard` / 8791 | `holocard-staging` / 8793 |
 | 运行用户 | ubuntu | `holocard-stg`（专用，见下） |
 | 数据 | `/srv/holocard-*` | `/srv/holocard-staging/`，没人看的卡 2 天清掉 |
-| 资源上限 | 3G 内存 / 2 核 | 1.5G / 1 核，队列上限 4 |
+| 资源上限 | 10G 内存 / 2 核 | 9G / 1 核，队列上限 4（内存是给抠主体留的，峰值约 7G；不到 8G 服务就不抠） |
 | 统计、收录 | umami、允许收录 | 都不带（构建时没有 `.env.production`；网关加 noindex） |
 
 staging 跑的是没评审过的代码，所以**构建和运行都不以 ubuntu 的身份执行 PR 里的代码**：

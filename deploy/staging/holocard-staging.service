@@ -31,8 +31,13 @@ Environment=HOLOCARD_TTL_MS=172800000
 Restart=on-failure
 RestartSec=5s
 
-# 比线上收得更紧，别和线上、Minecraft、数据库抢资源
-MemoryMax=1536M
+# 比线上收得更紧，别和线上、数据库抢资源。
+# 内存上限是给抠主体留的：峰值约 7GB，推理完回落。和线上恰好同时抠图时整机会吃紧，
+# OOMScoreAdjust 让内核真要杀进程时先杀 staging。
+# ponytail: 没加跨服务的锁，staging 用的人少、撞上的概率低；真撞上多了再给两边套一个共享 slice
+# 不到 8G 服务就不抠主体（server/index.ts 的 MATTE_MIN_MEMORY），多给 1G 留给预览图的 Chromium
+MemoryMax=9G
+OOMScoreAdjust=500
 CPUQuota=100%
 
 # 沙箱：整个文件系统只读，看不见 /home，拿不到新权限。

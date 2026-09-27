@@ -39,6 +39,7 @@ instead of bleeding into the layers behind it.
 photo
  └→ Depth Anything V2-Small ──→ continuous depth map (decides layer order)
       └→ cut at valleys of the depth histogram ──→ adaptive, 2–4 layers
+           └→ BiRefNet_lite subject matte (server only) ──→ the subject gets its own layer; only depth cuts behind it are kept
            └→ depth-edge snapping + foreground growth ──→ object edges become clean steps
                 └→ guided-filter refinement ──→ layer boundaries snap to real object edges in the photo
                      └→ per-layer alpha (which is also that layer's foil mask)
@@ -50,12 +51,21 @@ Each layer plays two roles at once: an image with parallax, and the mask for tha
 
 - **What is in front** (ordering): from monocular depth estimation. A matting model only separates "subject / background" and cannot order three or more layers.
 - **Where the boundary is** (mask quality): the mask edge is the foil edge, and a ragged edge is obvious at a glance.
-  Depth maps are blurry at object edges and often shrink a few pixels into the object, so the boundary is refined separately, see "Edge refinement" below.
+  The subject's boundary comes from a matting model (server side, see "BiRefNet: subject matting on the server" below); boundaries inside the background come from depth.
+  Depth maps are blurry at object edges and often shrink a few pixels into the object, so those are refined separately, see "Edge refinement" below.
 
 A few design decisions:
 
 **Layer boundaries sit at valleys of the depth histogram instead of being evenly spaced.** Valleys are the distances where the scene has little content.
 Cutting through content splits an object in two. The number of layers is computed too: many photos really only have two.
+
+**The subject's boundary must not come from depth.** With depth alone a layer boundary is an iso-depth line; when a crowd stands at one distance their depth is one continuous blob,
+and wherever the line falls it runs through people. A more accurate depth model does not help — it just runs through people more accurately.
+So the server first mattes out the subject: the subject gets its own layer whose outline is the matte, and depth only decides ordering and parallax.
+Only depth cuts that lie behind the subject, sit on a real valley and leave a meaningful area (≥2% of the image) are kept; cuts through or in front of the subject and equal-mass fallback cuts are dropped.
+Whether there is a real occlusion step between the subject and the layer behind it decides whether they may slide against each other —
+lettering on a sign or the photo on an ID card get matted out as the subject, but they lie in the same plane as the background and would float if they slid.
+When no subject is found (pure landscapes), or when the browser does the layering as a fallback, layering is by depth alone as before.
 
 **Boundaries are feathered, not hard thresholds.** A hard cut glues a ring of background pixels onto the foreground layer, and that dirty ring floats with the subject once parallax kicks in.
 
@@ -106,10 +116,10 @@ Two pitfalls only showed up after refinement was added:
 The guide is replaceable. It is currently the photo's RGB; anything that produces a foreground alpha can be added as an extra guide channel
 (`ExtractOptions.extraGuide`) without changing the algorithm.
 
-### Why not BiRefNet
+### BiRefNet: subject matting on the server
 
-The original plan was to use BiRefNet_lite (MIT, fp16 about 109MB) to produce a foreground alpha for refinement. In practice it does not run in the browser;
-all four routes were tried:
+BiRefNet_lite (MIT) gives the subject alpha on the server, and the subject layer's boundary uses it directly without the guided filter.
+It does not run in the browser — all four routes were tried — so the browser fallback does not matte the subject:
 
 | Route | Result |
 |---|---|
@@ -120,11 +130,21 @@ all four routes were tried:
 
 To reproduce: `node scripts/probe-matte.mjs --image path/to/photo`.
 
-After layering moved to the server it was measured again: onnxruntime-node on two ARM cores takes 20 s at 1024 input with a 12 GB memory peak,
-while the service is capped at 3 GB, so it is still out.
+The first server measurement peaked at 12 GB; that was onnxruntime's memory arena, which keeps memory used by inference instead of returning it.
+With it disabled the peak is 6.9 GB and memory drops back to 0.6–0.8 GB after inference, so it runs inside the service process.
+The service only mattes when its memory limit (systemd `MemoryMax`) is at least 8 GB; below that it layers by depth alone instead of getting OOM-killed.
 
-Actually using it would require re-exporting the model: split that wide Concat into two levels, or free up the input size. `src/segmenter/matte.ts` is kept,
-with a capability check that decides **before downloading any weights** whether this machine can run it, and refuses right away if not, so no bandwidth is wasted.
+Model choice (the 16 staging images, measured against the full model, 4 ARM cores):
+
+| Model | Per image | Peak memory | Versus the full model |
+|---|---|---|---|
+| Full (Swin-L), 1024 input | 54 s | 8.8 GB | —— |
+| **lite (Swin-T), 1024 input** ← in use | 23 s | 6.9 GB | Subject IoU 0.885, closest edges; treats the inside of white line art as background |
+| 512 model, int8 | 11 s | 4.4 GB | Subject IoU 0.885, softer edges; misses part of sign lettering |
+
+All three share the same training set (official model zoo); lite only has a smaller backbone. fp16 is 40% slower on ARM CPUs;
+quantizing lite to int8 is only 10% faster with identical results, not worth an extra self-quantization step.
+Switching models only touches `MATTE_MODEL_ID` and the input size in `src/segmenter/matte.ts`.
 
 A guided filter that uses color as the guide has a ceiling: **outlines whose color is close to the background cannot be separated**
 (a black outline on a dark background gets pulled toward the background by the linear color model), and fine semi-transparent structures like hair are not as good as with a dedicated matting model.

@@ -73,13 +73,18 @@ const STAGE_KEYS: Record<string, MessageKey> = {
   'loading-model': 'stage.loading-model',
   'estimating-depth': 'stage.estimating-depth',
   analyzing: 'stage.analyzing',
+  'finding-subject': 'stage.finding-subject',
   extracting: 'stage.extracting',
   done: 'stage.done',
 };
 
-/** 轮询间隔。处理通常几秒，一秒一次既不浪费也不显迟钝 */
+/** 轮询间隔。处理要几十秒，一秒一次既不浪费也不显迟钝 */
 const POLL_INTERVAL_MS = 1000;
-/** 总超时。超过就认为服务端卡死了 */
+/**
+ * 总超时。超过就认为服务端卡死了。
+ * 排队的时间不算：服务端一张要半分钟以上（抠主体占大头），队列满 12 张时排在最后的要等七八分钟，
+ * 那是在正常排队，不是卡死。只要轮询还能拿到「排队中」，就从头计时
+ */
 const TIMEOUT_MS = 5 * 60 * 1000;
 /** 轮询连续失败多久才放弃，见 segmentOnServer 里的说明 */
 const POLL_GIVE_UP_MS = 60 * 1000;
@@ -167,7 +172,7 @@ export async function segmentOnServer(
   }
 
   const { id, deleteToken } = (await created.json()) as { id: string; deleteToken: string };
-  const deadline = Date.now() + TIMEOUT_MS;
+  let deadline = Date.now() + TIMEOUT_MS;
   /*
    * 连续失败从什么时候开始算。
    *
@@ -207,6 +212,7 @@ export async function segmentOnServer(
     const status = (await res.json()) as JobStatus;
 
     if (status.state === 'queued') {
+      deadline = Date.now() + TIMEOUT_MS;
       onProgress?.({ key: 'progress.queued', params: { n: Math.max(0, status.position - 1) } });
     } else if (status.state === 'running') {
       onProgress?.({ key: STAGE_KEYS[status.stage ?? ''] ?? 'progress.serverWorking' });
