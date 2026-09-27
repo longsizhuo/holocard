@@ -6,7 +6,7 @@
  * 它找的是具体露出了什么，只看上面那几类。
  *
  * 分层完成后给原图打分：这几类里置信度最高的那个，存进 cards.nsfw（0..1）和 cards.nsfw_part（是哪个部位），
- * 用 `node scripts/db.mjs nsfw` 查，删不删由人决定（用 scripts/delete-card.mjs）。
+ * 用 `node scripts/db.mjs nsfw` 查，下不下架由人决定（scripts/takedown.mjs，软删除，能恢复）。
  * 对用户完全无感：不拦上传、不加文案、不影响分享。模型在本机跑，图片不出这台机器。
  *
  * 模型 NudeNet v3.4 的 320n.onnx（YOLOv8n，12MB，AGPL-3.0，和本项目的 GPL-3.0 可以组合：GPLv3 第 13 条），

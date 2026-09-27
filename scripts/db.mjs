@@ -11,7 +11,7 @@
  *   node scripts/db.mjs "SELECT ..."      任意只读 SQL
  *   node scripts/db.mjs perf [天数]        性能埋点：最近 30 条 + 按屏幕、显卡、浏览器分组（默认看 7 天）
  *   node scripts/db.mjs nsfw [阈值]        疑似完全裸露的卡（分数 ≥ 阈值，默认 0.4）。只列 id、部位和状态，不打开图片；
- *                                         要删用 scripts/delete-card.mjs
+ *                                         要下架用 scripts/takedown.mjs（软删除，能恢复）
  *
  * 数据库位置取 HOLOCARD_DB，默认 /srv/holocard-data/holocard.db。线上：
  *   ssh oracle 'cd /opt/holocard && node22/bin/node db.mjs'

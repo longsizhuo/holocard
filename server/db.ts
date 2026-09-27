@@ -22,9 +22,12 @@ import { PERF_COLUMNS, PERF_SCHEMA, type PerfSample } from './perf';
  *   error    分层失败（原图留着，方便复现）
  *   deleted  上传者自己删了
  *   expired  过了保留期被清理
- * 后两种只删文件、不删这一行，留着做统计。
+ *   removed  站长下架（scripts/takedown.mjs）：对外和 deleted 一样看不到了，
+ *            但文件没删，挪进了产物目录下的 .removed/<id>——误判能恢复，复核、留证也有东西可看
+ * deleted、expired 只删文件、不删这一行，留着做统计。
+ * 上传者自己删的是真删：页面上写明了「删除后无法恢复、服务端上的层文件都已清掉」，不能口头说删了其实留着。
  */
-export type CardStatus = 'queued' | 'running' | 'done' | 'error' | 'deleted' | 'expired';
+export type CardStatus = 'queued' | 'running' | 'done' | 'error' | 'deleted' | 'expired' | 'removed';
 
 export interface CardRow {
   id: string;

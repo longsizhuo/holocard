@@ -1211,8 +1211,10 @@ const server = createServer((req, res) => {
         if (exportQueue[i]?.id === id) exportQueue.splice(i, 1);
       }
 
-      // 文件（含原图）全删；数据库那一行留着，只改状态，统计时还能数到
+      // 文件（含原图）全删；数据库那一行留着，只改状态，统计时还能数到。
+      // 被站长下架过的卡，隔离区里那份也一起删：上传者要删，页面上承诺的是服务端的文件都清掉
       await rm(dir, { recursive: true, force: true });
+      await rm(join(OUT_DIR, '.removed', id), { recursive: true, force: true });
       db.update(id, { status: 'deleted', stage: null });
       console.log(`[delete] ${id} 已被创建者删除`);
       json(res, 200, { deleted: true });
@@ -1318,7 +1320,7 @@ const server = createServer((req, res) => {
     if (req.method === 'GET' && jobMatch) {
       const card = db.get(jobMatch[1] ?? '');
       // 删掉的、过期的对前端来说都是「没有了」，不暴露内部状态
-      if (!card || card.status === 'deleted' || card.status === 'expired') {
+      if (!card || card.status === 'deleted' || card.status === 'expired' || card.status === 'removed') {
         fail(res, 404, 'job_not_found', '任务不存在或已过期');
         return;
       }

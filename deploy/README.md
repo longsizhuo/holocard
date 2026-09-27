@@ -235,12 +235,17 @@ id 就是公开的。这个站没有账号，「所有者」就是「手上有�
 明确露出时一般在 0.5 以上。露出的臀部不算（丁字泳裤、紧身裙都会被认成它，实测穿裙子的照片就有 0.46）。
 
 ```bash
-ssh oracle 'cd /opt/holocard && node22/bin/node db.mjs nsfw'          # 列出疑似的卡：id、部位、分数、有没有分享出去、被看了几次。不打开图片
-ssh oracle 'cd /opt/holocard && node22/bin/node db.mjs nsfw 0.2'      # 换个阈值
-ssh oracle 'cd /opt/holocard && node22/bin/node delete-card.mjs <id>' # 下架：和上传者自己点删除完全一样（文件全删、状态改 deleted）
+ssh oracle 'cd /opt/holocard && node22/bin/node db.mjs nsfw'                   # 列出疑似的卡：id、部位、分数、有没有分享出去、被看了几次。不打开图片
+ssh oracle 'cd /opt/holocard && node22/bin/node db.mjs nsfw 0.2'               # 换个阈值
+ssh oracle 'cd /opt/holocard && node22/bin/node takedown.mjs <id>'             # 下架
+ssh oracle 'cd /opt/holocard && node22/bin/node takedown.mjs restore <id>'     # 误判了，恢复
 ```
 
-删完之后层文件和原图在 Cloudflare 边缘最多还缓存 4 小时（`max-age=14400`）。要立刻失效，
+**下架是软删除**：文件不删，挪进 `/srv/holocard-layers/.removed/<id>`（700 权限，不是合法的卡片 id，没有路由能取到），
+库里状态改成 `removed`。对外和删掉一样，但误判能原样恢复，复核、留证也有东西可看；过期清理不会动它。
+上传者自己点删除仍然是真删（页面上写明了「删除后无法恢复、服务端上的层文件都已清掉」），连隔离区那份一起删。
+
+下架后层文件和原图在 Cloudflare 边缘最多还缓存 4 小时（`max-age=14400`）。要立刻失效，
 去 Cloudflare 后台「缓存 → 配置 → 自定义清除」按前缀清 `holocard.longsizhuo.com/api/layers/<id>/`
 （服务器上的两个 Cloudflare 令牌都没有清缓存的权限）。
 
