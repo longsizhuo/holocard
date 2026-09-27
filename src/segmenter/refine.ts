@@ -44,19 +44,26 @@ export interface RefineOptions {
   confidenceHigh: number;
 }
 
-/*
- * 全分辨率（和 extract 的 maxDimension 一样）、窗口 0.8% 图宽。
- * 以前在 520 宽的缩小图上算、窗口 1.6%，放回 1400 宽时软边有二十来个像素宽，
- * 带子里是半透明的背景色，视差时跟着前景走，是白边的另一半来源；现在窄了一半。
- * 代价是分层多 1 秒左右、峰值内存多 90MB 上下（看板娘那张原图实测：8.0 → 9.3 秒，907 → 999MB）
- */
+/** 默认值给浏览器端回退用：在缩小图上算，手机上内存吃得消。服务端用下面的 SERVER_REFINE_OPTIONS */
 export const DEFAULT_REFINE_OPTIONS: RefineOptions = {
-  workingWidth: 1400,
-  windowRadius: 0.008,
+  workingWidth: 520,
+  windowRadius: 0.016,
   epsilon: 2e-3,
   bandRadius: 0.016,
   confidenceLow: 0.35,
   confidenceHigh: 0.75,
+};
+
+/**
+ * 服务端的精修参数：全分辨率（和 extract 的 maxDimension 一样）、窗口 0.8% 图宽。
+ * 在 520 宽的缩小图上算、窗口 1.6% 时，放回 1400 宽软边有二十来个像素宽，
+ * 带子里是半透明的背景色，视差时跟着前景走，是白边的另一半来源；这样窄了一半。
+ * 代价是分层多 1 秒左右、峰值内存多 90MB 上下（看板娘那张原图实测：8.0 → 9.3 秒，907 → 999MB）。
+ * 浏览器端回退不用它：那 90MB 是按像素数分配的 Float32Array，低内存手机上可能直接被杀
+ */
+export const SERVER_REFINE_OPTIONS: Partial<RefineOptions> = {
+  workingWidth: 1400,
+  windowRadius: 0.008,
 };
 
 export interface RefineResult {
