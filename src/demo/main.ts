@@ -1,6 +1,8 @@
 /** 演示页：加载素材、接分层流水线、挂调参面板 */
 
 import './style.css';
+// 珠光底的漂移动画，由 scripts/pearl-keyframes.mjs 生成
+import './pearl-drift.css';
 import { HoloCard } from '../renderer/card';
 import { ensureTextures } from '../renderer/textures';
 import { LayerFormatError, loadLayerSet } from '../format/io';
@@ -289,7 +291,8 @@ function applyHalo(): void {
  * 乘上强度，拖强度滑块时读数条才会跟着动。
  *
  * 只在「景深与炫光」展开时每帧读：读数就在那个默认折叠的面板里，折着时看不见。
- * 以前是无条件每帧跑，页面永远闲不下来，每秒按屏幕刷新率（60～240 次）白白提交一帧
+ * 以前是无条件每帧跑，每秒按屏幕刷新率（60～240 次）多跑一轮主线程、提交一帧。
+ * （页面上的扫光、标题渐变这些 CSS 动画照样每帧出图，所以页面并不会因此完全闲下来，省的只是这一份）
  */
 const moreBox = need<HTMLDetailsElement>('details.more');
 let haloRaf = 0;
