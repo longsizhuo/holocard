@@ -12,6 +12,7 @@
  *   POST /api/jobs             请求体是图片字节 → 202 {id}
  *   GET  /api/jobs/{id}        → {state, stage, position, layers?, error?}
  *   GET  /api/layers/{id}/...  产出的层文件与 manifest
+ *   POST /api/perf             性能埋点，一次页面访问最多一条（见 perf.ts）
  *   GET  其余路径               前端静态文件（HOLOCARD_WEB_DIR）
  *
  * 静态文件也由这个服务自己发，所以它是自包含的：上游只要一条反代就够，
@@ -39,6 +40,7 @@ import {
 import { renderPreview, PREVIEW_HEIGHT, PREVIEW_WIDTH } from './preview';
 import { recordHit, flushHits, sweepCards, expiresAt, importLegacy } from './cards';
 import { CardDb, type CardRow } from './db';
+import { parsePerf } from './perf';
 import {
   EXPORT_FILE,
   EXPORT_FORMATS,
@@ -131,6 +133,8 @@ function makeLimiter(limit: number, windowMs: number): (ip: string) => boolean {
 const rateLimited = makeLimiter(RATE_LIMIT, RATE_WINDOW_MS);
 /** 导出动图的限流，和上传分开计数 */
 const exportLimited = makeLimiter(EXPORT_RATE_LIMIT, RATE_WINDOW_MS);
+/** 性能埋点的限流：正常一次页面访问一条，这个数只挡刷的 */
+const perfLimited = makeLimiter(30, RATE_WINDOW_MS);
 
 /**
  * 定长字符串比较。长度不同时先比一个等长的占位串，让耗时与输入无关，
@@ -890,6 +894,11 @@ async function sweep(): Promise<void> {
   flushHits(db);
   const removed = await sweepCards(db, OUT_DIR, TTL_MS, KEEP_DOUBLINGS_CAP);
   if (removed > 0) console.log(`[sweep] 清理了 ${removed} 张过期卡片`);
+  try {
+    db.prunePerf(90, 200_000);
+  } catch (error) {
+    console.error('[perf] 清理失败', error);
+  }
 }
 
 const server = createServer((req, res) => {
@@ -915,6 +924,31 @@ const server = createServer((req, res) => {
     }
     if ((req.method === 'GET' || req.method === 'HEAD') && url.pathname === '/sitemap.xml') {
       text(res, 'application/xml; charset=utf-8', await sitemapXml(), req.method);
+      return;
+    }
+
+    if (req.method === 'POST' && url.pathname === '/api/perf') {
+      if (perfLimited(clientIp(req))) {
+        res.writeHead(429).end();
+        return;
+      }
+      let sample;
+      try {
+        sample = parsePerf(JSON.parse((await readBody(req, 4096)).toString('utf8')), req);
+      } catch {
+        sample = null;
+      }
+      if (!sample) {
+        res.writeHead(400).end();
+        return;
+      }
+      // 埋点写不进去（磁盘满、库被锁）不能把服务带崩：这个处理函数外面没有兜底的 catch
+      try {
+        db.insertPerf(sample);
+      } catch (error) {
+        console.error('[perf] 写库失败', error);
+      }
+      res.writeHead(204).end();
       return;
     }
 

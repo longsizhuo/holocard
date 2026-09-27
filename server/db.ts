@@ -12,6 +12,7 @@
 import { DatabaseSync } from 'node:sqlite';
 import { mkdirSync } from 'node:fs';
 import { dirname } from 'node:path';
+import { PERF_COLUMNS, PERF_SCHEMA, type PerfSample } from './perf';
 
 /**
  * 一张卡的生命周期：
@@ -111,6 +112,8 @@ export class CardDb {
     this.#db.exec('PRAGMA journal_mode = WAL;');
     this.#db.exec('PRAGMA synchronous = NORMAL;');
     this.#db.exec(SCHEMA);
+    // 性能埋点（见 perf.ts）也放这个库里：同一个进程写，同一个脚本（scripts/db.mjs）查
+    this.#db.exec(PERF_SCHEMA);
   }
 
   insert(row: CardRow): void {
@@ -185,6 +188,25 @@ export class CardDb {
     return this.#db
       .prepare('SELECT * FROM cards WHERE status = ? ORDER BY created_at')
       .all(status) as unknown as CardRow[];
+  }
+
+  /** 记一条性能埋点，字段已经在 perf.ts 里校验过 */
+  insertPerf(sample: PerfSample): void {
+    this.#db
+      .prepare(`INSERT INTO perf (${PERF_COLUMNS.join(', ')}) VALUES (${PERF_COLUMNS.map(() => '?').join(', ')})`)
+      .run(...PERF_COLUMNS.map((key) => sample[key] ?? null));
+  }
+
+  /**
+   * 性能埋点只留最近 keepDays 天、最多 maxRows 条。
+   * 接口是公开的，按 IP 限流挡不住换着 IP 刷，这个上限保证库不会被撑大
+   */
+  prunePerf(keepDays: number, maxRows: number): number {
+    const old = this.#db.prepare('DELETE FROM perf WHERE created_at < ?').run(Date.now() - keepDays * 86400000);
+    const extra = this.#db
+      .prepare('DELETE FROM perf WHERE rowid IN (SELECT rowid FROM perf ORDER BY created_at DESC LIMIT -1 OFFSET ?)')
+      .run(maxRows);
+    return Number(old.changes) + Number(extra.changes);
   }
 
   close(): void {

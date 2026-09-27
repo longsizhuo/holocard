@@ -19,6 +19,7 @@ import {
 } from './api';
 import { albumCountFor, initAlbums, openAlbums, openPicker } from './albums-ui';
 import { initTracking, pageView, track } from './track';
+import { measurePerf } from './perf';
 import { parseRoute, shareUrl } from './route';
 import {
   blockingInAppBrowser,
@@ -889,3 +890,7 @@ async function boot(): Promise<void> {
 
 await boot();
 pollHalo();
+// 性能埋点，staging 和线上都有。render 模式是服务端的无头浏览器，不是真人的设备
+if (route.mode !== 'render') {
+  measurePerf(route.mode, () => ({ parallax: ctlParallax.checked, busy: busy || exporting }));
+}

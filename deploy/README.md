@@ -110,6 +110,32 @@ ssh oracle "cd /opt/holocard && node22/bin/node db.mjs \"SELECT ...\""  # 任意
 回滚到数据库之前的版本需要注意：之后新建的卡没有 `meta.json`，旧代码会给它们生成新的删除口令，
 这些卡的上传者就删不了了。
 
+### 性能埋点（`perf` 表）
+
+有人反馈 4K 屏 + 高端显卡打开风扇狂转、卡顿，手机上却正常——这类问题只在某些屏幕和显卡的组合上出现，
+光靠口头反馈没法知道修好了没有、还有谁在卡。所以每次页面访问（`/`、`/c/<id>`，不含截图用的 `/render/`），
+页面静置 3 秒后用 `requestAnimationFrame` 量 10 秒的帧间隔，汇总成一条发到 `POST /api/perf`：
+
+| 字段 | 说明 |
+|---|---|
+| `fps` `p50` `p95` `max_ms` | 实际帧率，帧间隔的中位数、95 分位、最大值（毫秒） |
+| `hz` `dropped` | 估出来的刷新率（最快那一成帧的间隔），和按它算的掉帧比例。整页都卡的时候 `hz` 会偏低、`dropped` 会偏小，要和 `fps` 一起看 |
+| `screen_w/h` `view_w/h` `dpr` | 屏幕、窗口的 CSS 像素和缩放比，相乘是物理像素 |
+| `gpu` `cores` `memory` | 显卡名（Safari 只报 Apple GPU）、CPU 核数、内存（只有 Chromium 有） |
+| `parallax` `busy` `interacted` `reduced_motion` | 视差开没开、有没有在处理照片、量的时候动没动鼠标、开没开减少动态效果 |
+| `ua` `country` | 服务端从请求头取的 User-Agent 和 Cloudflare 给的国家 |
+
+**不存 IP、不带任何能把两条连到同一个人的 id**。接口是公开的：每个字段按范围校验，不合规整条丢掉；
+每个 IP 10 分钟最多 30 条；只留 90 天、最多 20 万条（清理跟着过期卡片的清理一起跑）。
+写库失败只打日志，不影响服务。
+
+```bash
+ssh oracle 'cd /opt/holocard && node22/bin/node db.mjs perf'      # 最近 7 天：最近 30 条 + 按屏幕、浏览器、显卡分组
+ssh oracle 'cd /opt/holocard && node22/bin/node db.mjs perf 30'   # 最近 30 天
+```
+
+本地验证：`node scripts/verify-perf.mjs --url <地址> [--browser webkit]`，会真的写一条进那个服务的库，别对着线上跑。
+
 ## 搜索引擎与 AI 抓取
 
 目标是被搜到、被 AI 引用，同时**用户的照片不进任何索引**。

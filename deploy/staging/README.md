@@ -24,6 +24,7 @@ PR 页面的 Deployments 里会显示「部署中 / 已部署 / 失败」和访�
 | 数据 | `/srv/holocard-*` | `/srv/holocard-staging/`，没人看的卡 2 天清掉 |
 | 资源上限 | 3G 内存 / 2 核 | 1.5G / 1 核，队列上限 4 |
 | 统计、收录 | umami、允许收录 | 都不带（构建时没有 `.env.production`；网关加 noindex） |
+| 性能埋点 | 进线上的库 | 进 staging 自己的库，查：`HOLOCARD_DB=/srv/holocard-staging/data/holocard.db node scripts/db.mjs perf`（在仓库目录下以 ubuntu 跑，只读） |
 
 staging 跑的是没评审过的代码，所以**构建和运行都不以 ubuntu 的身份执行 PR 里的代码**：
 

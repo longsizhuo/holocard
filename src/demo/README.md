@@ -8,4 +8,5 @@
 - `albums.ts` / `albums-ui.ts`：卡册的数据（只存本机 localStorage）和界面（原生 `<dialog>`）
 - `route.ts`：路由和分享链接
 - `track.ts`：自建 umami 埋点，没配站点 id 时一个字节都不加载
+- `perf.ts`：性能埋点。静置时量 10 秒帧率，发给自己的服务端（staging 和线上都有，不走 umami）
 - `style.css`：珠光主题
