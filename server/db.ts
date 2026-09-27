@@ -52,6 +52,10 @@ export interface CardRow {
   last_hit_at: number | null;
   /** 删除口令。只在提交时返回给上传者一次 */
   delete_token: string;
+  /** 原图的裸露分 0..1（见 moderation.ts），只记录不拦。还没识别过、或者模型不可用时是 null */
+  nsfw: number | null;
+  /** 分数来自哪个部位（NudeNet 的类名，比如 FEMALE_BREAST_EXPOSED）。翻记录时不用打开图片也知道是什么 */
+  nsfw_part: string | null;
 }
 
 const SCHEMA = `
@@ -76,7 +80,9 @@ CREATE TABLE IF NOT EXISTS cards (
   shared_at      INTEGER,
   hits           INTEGER NOT NULL DEFAULT 0,
   last_hit_at    INTEGER,
-  delete_token   TEXT NOT NULL
+  delete_token   TEXT NOT NULL,
+  nsfw           REAL,
+  nsfw_part      TEXT
 );
 CREATE INDEX IF NOT EXISTS cards_status  ON cards(status);
 CREATE INDEX IF NOT EXISTS cards_created ON cards(created_at);
@@ -98,6 +104,8 @@ const UPDATABLE = [
   'shared_at',
   'hits',
   'last_hit_at',
+  'nsfw',
+  'nsfw_part',
 ] as const;
 type Updatable = (typeof UPDATABLE)[number];
 export type CardPatch = Partial<Pick<CardRow, Updatable>>;
@@ -112,6 +120,10 @@ export class CardDb {
     this.#db.exec('PRAGMA journal_mode = WAL;');
     this.#db.exec('PRAGMA synchronous = NORMAL;');
     this.#db.exec(SCHEMA);
+    // 早于裸露识别建的库补上这两列。CREATE TABLE IF NOT EXISTS 不会给已有的表加列
+    const columns = new Set((this.#db.prepare('PRAGMA table_info(cards)').all() as { name: string }[]).map((c) => c.name));
+    if (!columns.has('nsfw')) this.#db.exec('ALTER TABLE cards ADD COLUMN nsfw REAL');
+    if (!columns.has('nsfw_part')) this.#db.exec('ALTER TABLE cards ADD COLUMN nsfw_part TEXT');
     // 性能埋点（见 perf.ts）也放这个库里：同一个进程写，同一个脚本（scripts/db.mjs）查
     this.#db.exec(PERF_SCHEMA);
   }
@@ -121,8 +133,8 @@ export class CardDb {
       .prepare(
         `INSERT INTO cards (id, status, stage, error, created_at, updated_at,
            original_url, original_type, original_bytes, source_width, source_height,
-           result_url, layer_count, shared, shared_at, hits, last_hit_at, delete_token)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+           result_url, layer_count, shared, shared_at, hits, last_hit_at, delete_token, nsfw, nsfw_part)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       )
       .run(
         row.id,
@@ -143,6 +155,8 @@ export class CardDb {
         row.hits,
         row.last_hit_at,
         row.delete_token,
+        row.nsfw,
+        row.nsfw_part,
       );
   }
 
