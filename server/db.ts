@@ -122,6 +122,12 @@ export class CardDb {
     // WAL：读写互不阻塞。轮询接口一秒一次在读，处理线程同时在写进度
     this.#db.exec('PRAGMA journal_mode = WAL;');
     this.#db.exec('PRAGMA synchronous = NORMAL;');
+    /*
+     * 写和写撞上时等一会儿，而不是立刻抛 database is locked。
+     * 站长的 takedown.mjs 会在服务运行时写库；服务里不少写库的地方外面没有 catch（访问计数的定时落库、
+     * 分享、删除），撞上一次整个进程就退出了
+     */
+    this.#db.exec('PRAGMA busy_timeout = 5000;');
     this.#db.exec(SCHEMA);
     // 早于裸露识别建的库补上这两列。CREATE TABLE IF NOT EXISTS 不会给已有的表加列
     const columns = new Set((this.#db.prepare('PRAGMA table_info(cards)').all() as { name: string }[]).map((c) => c.name));

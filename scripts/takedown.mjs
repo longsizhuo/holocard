@@ -50,8 +50,16 @@ if (restore) {
     process.exit(1);
   }
   await rename(quarantine, live);
-  db.prepare('UPDATE cards SET status = ?, updated_at = ? WHERE id = ?').run('done', Date.now(), id);
-  console.log(`已恢复 ${id}`);
+  /*
+   * 下架时本来就没做出来的卡（error，没有 manifest）恢复回 error，不能变成 done：
+   * 不然 /api/jobs 报「完成」，前端去拿 manifest 拿到 404，分享、导出也会接下它。
+   * 保留期从现在重新算：过期清理按 created_at（没分享过的）或 last_hit_at（分享过的）算到期，
+   * 下架期间链接打不开、没人访问，不重置的话刚恢复就可能被下一轮清理删掉
+   */
+  const status = existsSync(join(live, 'manifest.json')) ? 'done' : 'error';
+  const now = Date.now();
+  db.prepare('UPDATE cards SET status = ?, updated_at = ?, created_at = ?, last_hit_at = ? WHERE id = ?').run(status, now, now, now, id);
+  console.log(`已恢复 ${id}（${status}），保留期从现在重新算`);
 } else {
   if (card.status !== 'done' && card.status !== 'error') {
     console.error(`这张卡现在是 ${card.status}，没有可下架的东西`);

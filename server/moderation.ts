@@ -103,19 +103,28 @@ export async function detectNudity(file: string, modelDir: string): Promise<Nudi
     const output = (await model.run(feeds))[model.outputNames[0] ?? 'output0'];
     if (!output) return null;
 
-    // 输出是 [1, 4 + 类别数, 候选框数]：每个候选框前 4 个是坐标，后面是各类的分数。
-    // 只要「有没有、多确定」，不要框的位置，所以不用做 NMS：直接取目标类别的最大分
+    /*
+     * 输出是 [1, 4 + 类别数, 候选框数]：每个候选框前 4 个是坐标，后面是各类的分数。
+     * 只要「有没有、多确定」，不要框的位置，所以不用做 NMS。
+     * 和 nudenet.py 一样，每个候选框先取分数最高的那一类，只有它属于「完全裸露」才算：
+     * 各类分数是各自独立的 sigmoid，同一处的「露出」和「遮挡」常常同时有分（比基尼：遮挡 0.7、露出 0.45），
+     * 分开各取最大会把遮挡的也记成露出
+     */
     const values = output.data as Float32Array;
     const boxes = output.dims[2] ?? 0;
     let best: Nudity = { score: 0, part: null };
-    LABELS.forEach((label, k) => {
-      if (!NUDE.has(label)) return;
-      const row = (4 + k) * boxes;
-      for (let b = 0; b < boxes; b++) {
-        const score = values[row + b] ?? 0;
-        if (score > best.score) best = { score, part: label };
-      }
-    });
+    for (let b = 0; b < boxes; b++) {
+      let top = 0;
+      let topLabel = '';
+      LABELS.forEach((label, k) => {
+        const score = values[(4 + k) * boxes + b] ?? 0;
+        if (score > top) {
+          top = score;
+          topLabel = label;
+        }
+      });
+      if (NUDE.has(topLabel) && top > best.score) best = { score: top, part: topLabel };
+    }
     return best.score >= DETECTION_FLOOR ? best : { score: best.score, part: null };
   } catch (error) {
     console.error(`[nsfw] ${file} 识别失败`, error);
