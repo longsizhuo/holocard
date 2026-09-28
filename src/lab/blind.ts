@@ -17,7 +17,11 @@ interface Experiment {
   focus?: string;
 }
 
-const VOTES = ['A', '=', 'B', 'X'] as const;
+/**
+ * A / B：这一边更好（偏好）；= 差不多；X 两边都有问题；
+ * A! / B!：这一边赢，是因为对面有明显 bug。偏好和「坏了」分开记，统计时 bug 率比偏好重要得多
+ */
+const VOTES = ['A', '=', 'B', 'X', 'A!', 'B!'] as const;
 type Vote = (typeof VOTES)[number];
 
 const $ = <T extends HTMLElement>(id: string): T => document.getElementById(id) as T;
@@ -153,7 +157,7 @@ $('next').addEventListener('click', () => void open(current === exp.total ? 1 : 
 
 document.addEventListener('keydown', (e) => {
   if (e.target instanceof HTMLTextAreaElement || e.metaKey || e.ctrlKey || e.altKey) return;
-  const map: Record<string, Vote> = { '1': 'A', '2': '=', '3': 'B', '4': 'X', a: 'A', b: 'B' };
+  const map: Record<string, Vote> = { '1': 'A', '2': '=', '3': 'B', '4': 'X', '5': 'B!', '6': 'A!', a: 'A', b: 'B' };
   const key = e.key.toLowerCase();
   if (map[key]) vote(map[key]);
   else if (e.key === 'ArrowLeft') $('prev').click();

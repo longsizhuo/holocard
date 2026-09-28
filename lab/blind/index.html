@@ -96,7 +96,9 @@
   .shield { position: absolute; inset: -18px; z-index: 5; cursor: crosshair; touch-action: none; }
   #error { margin: 0; color: var(--bad); }
 
-  #vote { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; }
+  /* 上一行是偏好，下一行是「坏了」：bug 按钮放在对应那一侧的正下方 */
+  #vote { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
+  #vote .bug { font-size: 14px; color: var(--muted); }
   #vote button {
     font: inherit;
     padding: 10px 8px;
@@ -117,7 +119,9 @@
   #vote [data-v="A"][aria-pressed="true"] { background: var(--a); }
   #vote [data-v="B"][aria-pressed="true"] { background: var(--b); }
   #vote [data-v="="][aria-pressed="true"] { background: var(--same); }
-  #vote [data-v="X"][aria-pressed="true"] { background: var(--bad); }
+  #vote [data-v="X"][aria-pressed="true"],
+  #vote [data-v="A!"][aria-pressed="true"],
+  #vote [data-v="B!"][aria-pressed="true"] { background: var(--bad); color: var(--on-accent); }
 
   .sheet { display: grid; gap: 10px; }
   .sheet__head { display: flex; flex-wrap: wrap; gap: 8px 16px; align-items: center; }
@@ -139,6 +143,9 @@
   #dots button[data-v="B"] { background: var(--b); color: var(--on-accent); border-color: transparent; }
   #dots button[data-v="="] { background: var(--same); color: var(--on-accent); border-color: transparent; }
   #dots button[data-v="X"] { background: var(--bad); color: var(--on-accent); border-color: transparent; }
+  /* 因为对面有 bug 才赢的：底色是赢的那边，底下一道 bug 色 */
+  #dots button[data-v="A!"] { background: var(--a); color: var(--on-accent); border-color: transparent; box-shadow: inset 0 -4px 0 var(--bad); }
+  #dots button[data-v="B!"] { background: var(--b); color: var(--on-accent); border-color: transparent; box-shadow: inset 0 -4px 0 var(--bad); }
   .out { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; }
   #result {
     flex: 1 1 320px;
@@ -160,7 +167,8 @@
   @media (max-width: 760px) {
     .wrap { padding-inline: 16px; }
     #stage { grid-template-columns: 1fr; }
-    #vote { grid-template-columns: repeat(2, 1fr); }
+    #vote { grid-template-columns: repeat(3, 1fr); }
+    #vote button { font-size: 13px; padding: 9px 4px; }
     #vote kbd { display: none; }
     .sweep { margin-left: 0; }
   }
@@ -194,14 +202,16 @@
       <button type="button" data-v="A"><kbd>1</kbd> A 更好</button>
       <button type="button" data-v="="><kbd>2</kbd> 差不多</button>
       <button type="button" data-v="B"><kbd>3</kbd> B 更好</button>
-      <button type="button" data-v="X"><kbd>4</kbd> 都有问题</button>
+      <button type="button" data-v="B!" class="bug"><kbd>5</kbd> A 有明显 bug</button>
+      <button type="button" data-v="X" class="bug"><kbd>4</kbd> 都有问题</button>
+      <button type="button" data-v="A!" class="bug"><kbd>6</kbd> B 有明显 bug</button>
     </div>
   </section>
 
   <section class="panel sheet" aria-label="全部">
     <div class="sheet__head">
       <span class="progress">已评 <span class="num" id="done">0</span> / <span class="num" id="total">0</span></span>
-      <span class="hint">选完自动跳到下一对没评的；<kbd>←</kbd> <kbd>→</kbd> 翻页，点下面的编号直接跳。</span>
+      <span class="hint">选完自动跳到下一对没评的；<kbd>←</kbd> <kbd>→</kbd> 翻页，点下面的编号直接跳。编号底下带一道橙色的，是因为对面有明显 bug 才赢的。</span>
     </div>
     <div id="dots"></div>
     <div class="out">
