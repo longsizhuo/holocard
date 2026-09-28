@@ -14,6 +14,9 @@ importers:
       heic-decode:
         specifier: 2.1.0
         version: 2.1.0
+      onnxruntime-node:
+        specifier: 1.30.0
+        version: 1.30.0
       playwright-core:
         specifier: ^1.63.0
         version: 1.63.0

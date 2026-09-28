@@ -41,6 +41,7 @@ import { renderPreview, PREVIEW_HEIGHT, PREVIEW_WIDTH } from './preview';
 import { recordHit, flushHits, sweepCards, expiresAt, importLegacy } from './cards';
 import { CardDb, type CardRow } from './db';
 import { parsePerf } from './perf';
+import { detectNudity } from './moderation';
 import {
   EXPORT_FILE,
   EXPORT_FORMATS,
@@ -481,6 +482,9 @@ async function runJob(id: string): Promise<void> {
     });
     // 缩略图顺手做掉，卡册里第一次打开时就不用现做了。不等它，也不让它的失败影响这张卡
     void ensureThumb(id);
+    // 裸露识别（只记录不拦，见 moderation.ts）。卡已经是 done 了，用户不用等它；
+    // 放在这里串行跑，是为了不和下一张的分层抢 CPU
+    await recordNsfw(id, file);
   } catch (error) {
     db.update(id, {
       status: 'error',
@@ -497,6 +501,46 @@ async function runJob(id: string): Promise<void> {
         .map((name) => rm(join(dir, name), { force: true }).catch(() => undefined)),
     );
   }
+}
+
+/**
+ * 给一张卡做裸露识别并记下，分数高的打一行日志，方便从 journalctl 里直接看到（见 moderation.ts）。
+ * 绝不抛错：runJob 里它在 try 块中，抛出去会被当成分层失败，把做好的卡删掉
+ */
+async function recordNsfw(id: string, file: string): Promise<void> {
+  const result = await detectNudity(file, MODEL_DIR);
+  if (!result) return;
+  try {
+    db.update(id, { nsfw: Math.round(result.score * 1000) / 1000, nsfw_part: result.part });
+  } catch (error) {
+    console.error(`[nsfw] ${id} 结果写库失败`, error);
+    return;
+  }
+  if (result.score >= NSFW_LOG_THRESHOLD) {
+    console.log(`[nsfw] ${id} 疑似裸露：${result.part}（${result.score.toFixed(3)}），查看：db.mjs nsfw`);
+  }
+}
+
+/**
+ * 分数到这个值就在日志里提一句，只是提示，不做任何拦截。
+ * 依据：上线前线上 93 张正常原图离线跑过，这几个部位的最高分是 0.21；明确露出时一般在 0.5 以上
+ */
+const NSFW_LOG_THRESHOLD = 0.4;
+
+/**
+ * 启动时把还没识别过的卡补上（上线这个功能之前的存量卡，以及上次识别前服务就重启了的）。
+ * 一张张串行来，不耽误启动；只看还留着原图的卡，删掉的、过期的没有文件可看
+ */
+async function backfillNsfw(): Promise<void> {
+  let scored = 0;
+  for (const card of db.live()) {
+    if (card.nsfw !== null) continue;
+    const file = originalFile(card);
+    if (!file || !(await stat(file).catch(() => null))) continue;
+    await recordNsfw(card.id, file);
+    scored++;
+  }
+  if (scored > 0) console.log(`[nsfw] 给 ${scored} 张存量卡补做了裸露识别`);
 }
 
 function pump(): void {
@@ -1053,6 +1097,8 @@ const server = createServer((req, res) => {
         hits: 0,
         last_hit_at: null,
         delete_token: randomUUID(),
+        nsfw: null,
+        nsfw_part: null,
       };
       db.insert(card);
       queue.push(id);
@@ -1165,8 +1211,10 @@ const server = createServer((req, res) => {
         if (exportQueue[i]?.id === id) exportQueue.splice(i, 1);
       }
 
-      // 文件（含原图）全删；数据库那一行留着，只改状态，统计时还能数到
+      // 文件（含原图）全删；数据库那一行留着，只改状态，统计时还能数到。
+      // 被站长下架过的卡，隔离区里那份也一起删：上传者要删，页面上承诺的是服务端的文件都清掉
       await rm(dir, { recursive: true, force: true });
+      await rm(join(OUT_DIR, '.removed', id), { recursive: true, force: true });
       db.update(id, { status: 'deleted', stage: null });
       console.log(`[delete] ${id} 已被创建者删除`);
       json(res, 200, { deleted: true });
@@ -1272,7 +1320,7 @@ const server = createServer((req, res) => {
     if (req.method === 'GET' && jobMatch) {
       const card = db.get(jobMatch[1] ?? '');
       // 删掉的、过期的对前端来说都是「没有了」，不暴露内部状态
-      if (!card || card.status === 'deleted' || card.status === 'expired') {
+      if (!card || card.status === 'deleted' || card.status === 'expired' || card.status === 'removed') {
         fail(res, 404, 'job_not_found', '任务不存在或已过期');
         return;
       }
@@ -1360,6 +1408,8 @@ for (const signal of ['SIGTERM', 'SIGINT'] as const) {
 
 server.listen(PORT, '127.0.0.1', () => {
   void backfillPreviews();
+  // 外面没有兜底的 catch，漏出来的拒绝会让进程退出
+  void backfillNsfw().catch((error: unknown) => console.error('[nsfw] 补打分中断', error));
   console.log(`holocard 分层服务已启动 127.0.0.1:${PORT}`);
   console.log(`  产物目录 ${OUT_DIR}`);
   console.log(`  模型目录 ${MODEL_DIR}`);

@@ -22,9 +22,12 @@ import { PERF_COLUMNS, PERF_SCHEMA, type PerfSample } from './perf';
  *   error    分层失败（原图留着，方便复现）
  *   deleted  上传者自己删了
  *   expired  过了保留期被清理
- * 后两种只删文件、不删这一行，留着做统计。
+ *   removed  站长下架（scripts/takedown.mjs）：对外和 deleted 一样看不到了，
+ *            但文件没删，挪进了产物目录下的 .removed/<id>——误判能恢复，复核、留证也有东西可看
+ * deleted、expired 只删文件、不删这一行，留着做统计。
+ * 上传者自己删的是真删：页面上写明了「删除后无法恢复、服务端上的层文件都已清掉」，不能口头说删了其实留着。
  */
-export type CardStatus = 'queued' | 'running' | 'done' | 'error' | 'deleted' | 'expired';
+export type CardStatus = 'queued' | 'running' | 'done' | 'error' | 'deleted' | 'expired' | 'removed';
 
 export interface CardRow {
   id: string;
@@ -52,6 +55,10 @@ export interface CardRow {
   last_hit_at: number | null;
   /** 删除口令。只在提交时返回给上传者一次 */
   delete_token: string;
+  /** 原图的裸露分 0..1（见 moderation.ts），只记录不拦。还没识别过、或者模型不可用时是 null */
+  nsfw: number | null;
+  /** 分数来自哪个部位（NudeNet 的类名，比如 FEMALE_BREAST_EXPOSED）。翻记录时不用打开图片也知道是什么 */
+  nsfw_part: string | null;
 }
 
 const SCHEMA = `
@@ -76,7 +83,9 @@ CREATE TABLE IF NOT EXISTS cards (
   shared_at      INTEGER,
   hits           INTEGER NOT NULL DEFAULT 0,
   last_hit_at    INTEGER,
-  delete_token   TEXT NOT NULL
+  delete_token   TEXT NOT NULL,
+  nsfw           REAL,
+  nsfw_part      TEXT
 );
 CREATE INDEX IF NOT EXISTS cards_status  ON cards(status);
 CREATE INDEX IF NOT EXISTS cards_created ON cards(created_at);
@@ -98,6 +107,8 @@ const UPDATABLE = [
   'shared_at',
   'hits',
   'last_hit_at',
+  'nsfw',
+  'nsfw_part',
 ] as const;
 type Updatable = (typeof UPDATABLE)[number];
 export type CardPatch = Partial<Pick<CardRow, Updatable>>;
@@ -111,7 +122,17 @@ export class CardDb {
     // WAL：读写互不阻塞。轮询接口一秒一次在读，处理线程同时在写进度
     this.#db.exec('PRAGMA journal_mode = WAL;');
     this.#db.exec('PRAGMA synchronous = NORMAL;');
+    /*
+     * 写和写撞上时等一会儿，而不是立刻抛 database is locked。
+     * 站长的 takedown.mjs 会在服务运行时写库；服务里不少写库的地方外面没有 catch（访问计数的定时落库、
+     * 分享、删除），撞上一次整个进程就退出了
+     */
+    this.#db.exec('PRAGMA busy_timeout = 5000;');
     this.#db.exec(SCHEMA);
+    // 早于裸露识别建的库补上这两列。CREATE TABLE IF NOT EXISTS 不会给已有的表加列
+    const columns = new Set((this.#db.prepare('PRAGMA table_info(cards)').all() as { name: string }[]).map((c) => c.name));
+    if (!columns.has('nsfw')) this.#db.exec('ALTER TABLE cards ADD COLUMN nsfw REAL');
+    if (!columns.has('nsfw_part')) this.#db.exec('ALTER TABLE cards ADD COLUMN nsfw_part TEXT');
     // 性能埋点（见 perf.ts）也放这个库里：同一个进程写，同一个脚本（scripts/db.mjs）查
     this.#db.exec(PERF_SCHEMA);
   }
@@ -121,8 +142,8 @@ export class CardDb {
       .prepare(
         `INSERT INTO cards (id, status, stage, error, created_at, updated_at,
            original_url, original_type, original_bytes, source_width, source_height,
-           result_url, layer_count, shared, shared_at, hits, last_hit_at, delete_token)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+           result_url, layer_count, shared, shared_at, hits, last_hit_at, delete_token, nsfw, nsfw_part)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       )
       .run(
         row.id,
@@ -143,6 +164,8 @@ export class CardDb {
         row.hits,
         row.last_hit_at,
         row.delete_token,
+        row.nsfw,
+        row.nsfw_part,
       );
   }
 

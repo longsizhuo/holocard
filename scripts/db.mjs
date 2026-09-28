@@ -10,6 +10,8 @@
  *   node scripts/db.mjs <id>              某一张卡的全部字段
  *   node scripts/db.mjs "SELECT ..."      任意只读 SQL
  *   node scripts/db.mjs perf [天数]        性能埋点：最近 30 条 + 按屏幕、显卡、浏览器分组（默认看 7 天）
+ *   node scripts/db.mjs nsfw [阈值]        疑似完全裸露的卡（分数 ≥ 阈值，默认 0.4）。只列 id、部位和状态，不打开图片；
+ *                                         要下架用 scripts/takedown.mjs（软删除，能恢复）
  *
  * 数据库位置取 HOLOCARD_DB，默认 /srv/holocard-data/holocard.db。线上：
  *   ssh oracle 'cd /opt/holocard && node22/bin/node db.mjs'
@@ -39,7 +41,23 @@ const median = (values) => {
   return sorted.length ? sorted[Math.floor(sorted.length / 2)] : null;
 };
 
-if (arg === 'perf') {
+if (arg === 'nsfw') {
+  // 默认阈值和服务端打日志的一样（server/index.ts 的 NSFW_LOG_THRESHOLD）
+  const threshold = Number(process.argv[3] ?? 0.4);
+  const rows = db
+    .prepare(
+      `SELECT id, status, nsfw, nsfw_part AS part, shared, hits, created_at, last_hit_at FROM cards
+       WHERE nsfw >= ? AND status IN ('done', 'error') ORDER BY nsfw DESC`,
+    )
+    .all(threshold);
+  // 早期迁移来的卡没存原图，永远打不了分，不算在「待补」里
+  const pending = db
+    .prepare(`SELECT COUNT(*) AS n FROM cards WHERE nsfw IS NULL AND original_url IS NOT NULL AND status IN ('done', 'error')`)
+    .get();
+  console.log(`疑似完全裸露（分数 ≥ ${threshold}）的卡 ${rows.length} 张（有原图还没识别的 ${pending.n} 张，服务启动时会补）：`);
+  // 分享过、有人看过的排查优先级最高：那些是真的传出去了
+  console.table(rows.map((r) => ({ ...r, created_at: time(r.created_at), last_hit_at: time(r.last_hit_at) })));
+} else if (arg === 'perf') {
   const days = Number(process.argv[3] ?? 7);
   const rows = db.prepare('SELECT * FROM perf WHERE created_at > ? ORDER BY created_at DESC').all(Date.now() - days * 86400000);
   /*
