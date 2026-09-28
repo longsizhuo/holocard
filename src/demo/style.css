@@ -451,7 +451,8 @@ select {
 @keyframes progress-flow {
   to { transform: translateX(100%); }
 }
-.progress__hint { display: block; margin-top: 2px; opacity: 0.75; }
+.progress__eta { font-variant-numeric: tabular-nums; opacity: 0.8; }
+.progress__eta::before { content: ' · '; }
 
 /* ---------- 炫光读数 ---------- */
 

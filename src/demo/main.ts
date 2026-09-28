@@ -77,7 +77,7 @@ const filePicker = need<HTMLInputElement>('#file');
 const progress = need<HTMLDivElement>('#progress');
 const progressFill = need<HTMLElement>('#progress-fill');
 const progressText = need<HTMLSpanElement>('#progress-text');
-const progressHint = need<HTMLElement>('#progress-hint');
+const progressEta = need<HTMLSpanElement>('#progress-eta');
 
 const shareBox = need<HTMLDivElement>('#share');
 const shareBtn = need<HTMLButtonElement>('#share-btn');
@@ -320,7 +320,8 @@ moreBox.addEventListener('toggle', () => {
  * 中途没有进度可报。以前整个处理过程进度条都停在 5%，抠主体那一步二十几秒一动不动，像卡死了。
  * 进入一个阶段时跳到它的起点，然后按 1 − e^(−2t/预计) 往终点靠：到预计时间走完约八成六，
  * 超时了也还在慢慢动，但不越过终点、也不倒退。
- * 区间宽窄和秒数是线上（2 核）实测的一张图的耗时分布，流水线变了要跟着改；没列出来的（重连）原地不动
+ * 区间宽窄和秒数是线上（2 核）实测的一张图的耗时分布，流水线变了要跟着改；没列出来的（重连）原地不动。
+ * 服务端给了剩余时间（见 etaSeconds）就按剩余时间走，这张表只管上传前后、老版本服务端和浏览器端处理
  */
 const PROGRESS_SPANS: Partial<Record<MessageKey, readonly [number, number, number]>> = {
   'progress.preparing': [0, 0.02, 1],
@@ -331,8 +332,8 @@ const PROGRESS_SPANS: Partial<Record<MessageKey, readonly [number, number, numbe
   'stage.loading-model': [0.12, 0.2, 8],
   'stage.estimating-depth': [0.2, 0.3, 5],
   'stage.analyzing': [0.3, 0.32, 1],
-  'stage.finding-subject': [0.32, 0.78, 25],
-  'stage.extracting': [0.78, 0.93, 10],
+  'stage.finding-subject': [0.32, 0.86, 28],
+  'stage.extracting': [0.86, 0.93, 3],
   'stage.done': [0.93, 0.95, 1],
   'progress.fetching': [0.95, 0.99, 2],
 };
@@ -342,6 +343,15 @@ let progressSince = 0;
 let progressBase = 0;
 let progressAt = 0;
 let progressTimer = 0;
+/**
+ * 服务端给的剩余秒数（见 server/eta.ts）和收到它的时刻，倒计时在两次轮询之间自己往下走。
+ * 有它的时候进度条也跟着它走：「已用 / (已用 + 剩余)」，和倒计时说的是同一件事
+ */
+let etaSeconds: number | null = null;
+let etaAt = 0;
+let etaStart = 0;
+let etaBase = 0;
+let etaShown = -1;
 
 function setProgressBar(ratio: number): void {
   progressAt = ratio;
@@ -349,6 +359,24 @@ function setProgressBar(ratio: number): void {
 }
 
 function tickProgress(): void {
+  if (etaSeconds !== null) {
+    const now = performance.now();
+    const left = Math.max(0, etaSeconds - (now - etaAt) / 1000);
+    const spent = (now - etaStart) / 1000;
+    // 剩余至少按 1 秒算：估计的时间用完了、结果还没到，进度条慢慢逼近 95%，而不是一下子顶满
+    setProgressBar(Math.max(progressAt, etaBase + (0.95 - etaBase) * (spent / (spent + Math.max(1, left)))));
+    /*
+     * 最后几秒不数了。估计本来就没那么准，而且抠主体超时时服务端的剩余时间会停在
+     * 「后面几步的时间」上（约 5 秒）不再减少——停在一个具体数字上最难等，不如说「马上就好」
+     */
+    const shown = left > 5 ? Math.ceil(left) : 0;
+    if (shown !== etaShown) {
+      etaShown = shown;
+      if (shown > 0) setText(progressEta, 'progress.eta', { s: shown });
+      else setText(progressEta, 'progress.almost');
+    }
+    return;
+  }
   const span = progressKey ? PROGRESS_SPANS[progressKey] : undefined;
   if (!span) return;
   const [, to, seconds] = span;
@@ -356,9 +384,28 @@ function tickProgress(): void {
   setProgressBar(Math.max(progressAt, progressBase + (to - progressBase) * (1 - Math.exp((-2 * t) / seconds))));
 }
 
-function showProgress(key: MessageKey, params?: Record<string, string | number>, ratio?: number): void {
+function showProgress(
+  key: MessageKey,
+  params?: Record<string, string | number>,
+  ratio?: number,
+  eta?: number,
+): void {
   progress.hidden = false;
   setText(progressText, key, params);
+  if (eta !== undefined) {
+    const now = performance.now();
+    if (etaSeconds === null) {
+      etaStart = now;
+      etaBase = progressAt;
+    }
+    etaSeconds = eta;
+    etaAt = now;
+    progressEta.hidden = false;
+  } else {
+    etaSeconds = null;
+    etaShown = -1;
+    progressEta.hidden = true;
+  }
   if (ratio !== undefined) {
     // 有确切比例（浏览器端下载模型）就照它来
     progressKey = null;
@@ -378,7 +425,9 @@ function showProgress(key: MessageKey, params?: Record<string, string | number>,
 
 function hideProgress(): void {
   progress.hidden = true;
-  progressHint.hidden = true;
+  progressEta.hidden = true;
+  etaSeconds = null;
+  etaShown = -1;
   window.clearInterval(progressTimer);
   progressTimer = 0;
   progressKey = null;
@@ -445,10 +494,9 @@ async function processImage(file: File): Promise<void> {
     let serverId: string | null = null;
     try {
       const upload = await shrinkIfHuge(file);
-      progressHint.hidden = false;
       const result = await segmentOnServer(upload, (p) => {
         if (p.key !== 'progress.uploading') stage = 'server';
-        showProgress(p.key, p.params, p.ratio);
+        showProgress(p.key, p.params, p.ratio, p.eta);
       });
       stage = 'download';
       set = await loadLayerSet(result.layers);
@@ -463,8 +511,6 @@ async function processImage(file: File): Promise<void> {
       // 回退：在浏览器里跑。首次要下约 50MB 权重，所以只在根本没有服务端时才走
       console.info('[holocard] 服务端不可用，回退到浏览器端：', serverError.message);
       stage = 'browser';
-      // 浏览器端要慢得多，那句「半分钟到一分钟」不适用了
-      progressHint.hidden = true;
       showProgress('progress.fallback');
       const { segmentToLayerSet } = await import('../segmenter');
       set = await segmentToLayerSet(file, {
