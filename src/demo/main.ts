@@ -369,7 +369,12 @@ function tickProgress(): void {
      * 最后几秒不数了。估计本来就没那么准，而且抠主体超时时服务端的剩余时间会停在
      * 「后面几步的时间」上（约 5 秒）不再减少——停在一个具体数字上最难等，不如说「马上就好」
      */
-    const shown = left > 5 ? Math.ceil(left) : 0;
+    let shown = left > 5 ? Math.ceil(left) : 0;
+    /*
+     * 数字只往下走。当前阶段比平均慢时服务端的估计会停住，前端两次轮询之间自己减 1、下次轮询又被拉回，
+     * 就成了 40→39→40、6→马上就好→6 来回跳。明显上调（排队的人变多了）才跟着改
+     */
+    if (etaShown >= 0 && shown > etaShown && shown - etaShown < 10) shown = etaShown;
     if (shown !== etaShown) {
       etaShown = shown;
       if (shown > 0) setText(progressEta, 'progress.eta', { s: shown });
@@ -407,9 +412,11 @@ function showProgress(
     progressEta.hidden = true;
   }
   if (ratio !== undefined) {
-    // 有确切比例（浏览器端下载模型）就照它来
+    // 有确切比例的只有浏览器端下载模型：它只占「加载模型」那一段，直接用的话下完就是 100%，
+    // 后面几十秒的推理进度条一直顶满。只进不退：汇总进度和单个文件的进度是交替报上来的
     progressKey = null;
-    setProgressBar(ratio);
+    const [from, to] = PROGRESS_SPANS['stage.loading-model'] ?? [0, 1];
+    setProgressBar(Math.max(progressAt, from + (to - from) * ratio));
     return;
   }
   // 轮询每秒都会报一次同一个阶段，只在换阶段时重新计时

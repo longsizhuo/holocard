@@ -130,6 +130,33 @@ const crashedJobs = new Set<string>();
  */
 let segmenter: Worker | null = null;
 let segmentTail: Promise<unknown> = Promise.resolve();
+/**
+ * 最近一次起的分层线程还没报「就绪」就退出了：它要用的模块加载失败（依赖缺了、chunks/ 少文件、
+ * 原生模块在线程里起不来）。健康检查据此报 503，发版脚本才拦得住——这类错误只在线程里才会暴露，
+ * 不然要等第一个人上传时才发现
+ */
+let segmenterBroken = false;
+
+function spawnSegmenter(): Worker {
+  const worker = new Worker(new URL('./segment-worker.mjs', import.meta.url));
+  let ready = false;
+  worker.on('message', (reply: SegmentReply) => {
+    if (reply.type !== 'ready') return;
+    ready = true;
+    segmenterBroken = false;
+  });
+  /*
+   * 线程里未捕获的异常会在 Worker 对象上发 error 事件，没人接的话直接在主线程抛出，整个服务就崩了。
+   * 接住它只记日志：随后必然还有一个 exit，当时正在做的那张在各自的 onExit 里判失败
+   */
+  worker.on('error', (error) => console.error('[segment] 分层线程出错', error));
+  // 空闲时死掉的线程也要清掉，不然下一张发过去永远等不到回复，后面整个队列卡死
+  worker.once('exit', () => {
+    if (segmenter === worker) segmenter = null;
+    if (!ready) segmenterBroken = true;
+  });
+  return worker;
+}
 
 function segmentInWorker(
   bytes: Uint8Array<ArrayBuffer>,
@@ -140,12 +167,13 @@ function segmentInWorker(
     () =>
       new Promise<{ manifest: LayerManifest; images: Uint8Array[] }>((resolve, reject) => {
         // 和本文件打包在同一个目录里，见 vite.server.config.ts
-        const worker = (segmenter ??= new Worker(new URL('./segment-worker.mjs', import.meta.url)));
+        const worker = (segmenter ??= spawnSegmenter());
         const finish = (): void => {
           worker.off('message', onMessage);
           worker.off('exit', onExit);
         };
         const onMessage = (reply: SegmentReply): void => {
+          if (reply.type === 'ready') return;
           if (reply.type === 'stage') {
             onStage(reply.stage);
             return;
@@ -526,12 +554,17 @@ async function runJob(id: string): Promise<void> {
 
   // 上次就是在处理它的时候崩的（多半是抠图吃爆了内存），这次不抠，免得反复崩
   const matte = MATTE_READY && !crashedJobs.has(id);
-  startJob(id, matte);
+  let timing = false;
   try {
     // 拷一份到独立的 ArrayBuffer：Node 的 Buffer 可能落在共享池上，没法整块转给工作线程
     const bytes = new Uint8Array(await readFile(file));
     const set = await segmentInWorker(bytes, matte, (stage) => {
       db.update(id, { stage });
+      // 从工作线程真正接手（报第一个阶段）才开始计时：并发调大时前面可能还在等线程，那段不该算进「加载模型」
+      if (!timing) {
+        timing = true;
+        startJob(id, matte);
+      }
       enterStage(id, stage);
     });
 
@@ -1052,8 +1085,8 @@ const server = createServer((req, res) => {
     const url = new URL(req.url ?? '/', 'http://localhost');
 
     if ((req.method === 'GET' || req.method === 'HEAD') && url.pathname === '/api/health') {
-      json(res, 200, {
-        ok: true,
+      json(res, segmenterBroken ? 503 : 200, {
+        ok: !segmenterBroken,
         running,
         queued: queue.length,
         concurrency: CONCURRENCY,
@@ -1487,6 +1520,9 @@ for (const signal of ['SIGTERM', 'SIGINT'] as const) {
     process.exit(0);
   });
 }
+
+// 分层线程启动就起好：模块加载失败能在健康检查里暴露出来（见 segmenterBroken），第一张图也不用等它加载
+segmenter ??= spawnSegmenter();
 
 server.listen(PORT, '127.0.0.1', () => {
   void backfillPreviews();

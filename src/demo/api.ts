@@ -227,7 +227,7 @@ export async function segmentOnServer(
         ...(status.eta === undefined ? {} : { eta: status.eta }),
       });
     } else if (status.state === 'done' && status.layers) {
-      onProgress?.({ key: 'progress.fetching', ratio: 0.95 });
+      onProgress?.({ key: 'progress.fetching' });
       // 服务端返回的是绝对路径，base 已经包含在里面
       return { layers: status.layers, id, deleteToken };
     } else if (status.state === 'error') {

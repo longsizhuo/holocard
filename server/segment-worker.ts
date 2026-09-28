@@ -26,6 +26,7 @@ export interface SegmentRequest {
 }
 
 export type SegmentReply =
+  | { type: 'ready' }
   | { type: 'stage'; stage: string }
   | { type: 'done'; manifest: LayerManifest; images: Uint8Array[] }
   | { type: 'error'; message: string };
@@ -34,6 +35,10 @@ const port = parentPort;
 if (!port) throw new Error('segment-worker 只能当工作线程跑');
 
 let configured = false;
+
+// 能走到这里，说明这个线程要用的模块（transformers、onnxruntime-node、sharp……）都加载好了。
+// 主线程据此判断健康检查过不过，见 server/index.ts 的 spawnSegmenter
+port.postMessage({ type: 'ready' } satisfies SegmentReply);
 
 port.on('message', (request: SegmentRequest) => {
   void (async () => {
