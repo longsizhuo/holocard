@@ -429,7 +429,15 @@ export function analyzeDepth(
   // 这种图按语义切不出东西，退化成等质量切分。
   if (picked.length < opts.minLayers - 1) {
     const need = opts.minLayers - 1;
-    return verify(equalMassCuts(histogram, need), new Array<number>(need).fill(0));
+    const result = verify(equalMassCuts(histogram, need), new Array<number>(need).fill(0));
+    /*
+     * 兜底切出来的层一律刚性：分开上箔，但不相对位移。
+     * 深度上没有前后景的分界，这一刀是按像素数硬切的，常常从人身上、人群中间劈过去。
+     * 一做视差，被劈开的人就错位，背景层补出来的碎片和人形鬼影也跟着露出来
+     * （staging 上 19392d36 那张：整片人群被切成两半）。
+     * 对比过三种做法：现状（撕裂、鬼影）、刚性（干净，主体哑光背景上箔）、干脆不分层（主体脸上也打满箔）——刚性最好
+     */
+    return { ...result, rigid: result.rigid.map(() => true) };
   }
 
   return verify(
