@@ -1,24 +1,26 @@
 /**
  * 前景抠图 —— BiRefNet_lite (MIT)
  *
- * 现状：实验性，默认流程没有接它。在绝大多数机器的浏览器里它跑不起来，实测过四条路：
+ * 现状：服务端用它定主体轮廓（见 slice.ts 的 fitCutsToSubject），浏览器端的退回处理不用。
+ * 在绝大多数机器的浏览器里它跑不起来，实测过四条路：
  *   WebGPU        模型里有个 16 路 Concat，单个着色器要绑 17 个 storage buffer，适配器上限通常是 16
  *   WASM @1024    std::bad_alloc，激活值装不进 32 位寻址的 WASM 堆；关掉 arena 分配器也一样
  *   WASM @512/768 这份 ONNX 导出时把输入焊死在 1024×1024，其他尺寸直接拒收
- * 要真正用上它，得重新导出模型：把那个宽 Concat 拆开，或者放开输入尺寸。
+ * 浏览器里要用上它，得重新导出模型：把那个宽 Concat 拆开，或者放开输入尺寸。
  * 复现方法：node scripts/probe-matte.mjs --image 照片路径
  *
- * 留着这个模块有两个用处：一是能力检查写好了，哪天适配器上限够了可以直接用；
- * 二是边缘精修（refine.ts）的向导是可替换的，任何能产出前景 alpha 的东西都能接进去，
- * 这里定义的 Matte 就是那个接口。
- *
- * 选型备忘：全量 BiRefNet 的 ONNX 有 973MB；RMBG 系列效果相近但都是非商用许可。
+ * 选型备忘（2026-09，staging 16 张图、以完整版为参照、4 核 ARM）：
+ *   完整版 1024   54 秒，峰值 8.8GB。质量最好，但太慢
+ *   512 版 int8   11 秒，峰值 4.4GB。主体判断和 lite 打平，边缘糊一些（输入只有一半），招牌字认不全
+ *   lite 1024     23 秒，峰值 6.9GB。边缘最接近完整版，白底线稿会把人物内部当成背景 ← 现在用的
+ * 训练集三者一样（官方 model zoo），lite 只是骨干网络从 Swin-L 换成 Swin-T。
+ * 换型号只动 MATTE_MODEL_ID 和 estimateMatte 的输入边长。RMBG 系列效果相近但都是非商用许可。
  */
 
 import { AutoModel, RawImage, Tensor } from '@huggingface/transformers';
 import { configureModelSource, pickDevice, type LoadProgress } from './runtime';
 
-const MODEL_ID = 'onnx-community/BiRefNet_lite-ONNX';
+export const MATTE_MODEL_ID = 'onnx-community/BiRefNet_lite-ONNX';
 
 /** 前景 alpha，取值 0..1，1 表示显著主体 */
 export interface Matte {
@@ -72,15 +74,27 @@ async function load(onProgress?: (p: LoadProgress) => void): Promise<MatteModel>
   if (loadedPromise) return loadedPromise;
 
   loadedPromise = (async () => {
+    configureModelSource();
+    const progress = onProgress ? { progress_callback: (p: unknown) => onProgress(p as LoadProgress) } : {};
+
+    /*
+     * 服务端（Node 只有 cpu）：官方 fp32 权重。半精度在 ARM CPU 上反而慢四成，
+     * 自己量化成 int8 只快一成、边缘和主体判断没区别，不值得多一道工序。
+     * 内存池必须关：开着的话推理完 7GB 峰值不还给系统，常驻 RSS 一路涨到 12GB；
+     * 关掉后推理完回落到 0.6~0.8GB（4 核 ARM 实测，一张约 23 秒）。
+     */
+    if ((await pickDevice()) === 'cpu') {
+      return AutoModel.from_pretrained(MATTE_MODEL_ID, {
+        device: 'cpu',
+        dtype: 'fp32',
+        session_options: { enableCpuMemArena: false, enableMemPattern: false },
+        ...progress,
+      });
+    }
+
     const reason = await matteUnsupportedReason();
     if (reason) throw new MatteUnsupportedError(reason);
-
-    configureModelSource();
-    return AutoModel.from_pretrained(MODEL_ID, {
-      device: 'webgpu',
-      dtype: 'fp16',
-      ...(onProgress ? { progress_callback: (p: unknown) => onProgress(p as LoadProgress) } : {}),
-    });
+    return AutoModel.from_pretrained(MATTE_MODEL_ID, { device: 'webgpu', dtype: 'fp16', ...progress });
   })();
 
   try {
@@ -117,7 +131,12 @@ function assertUsable(data: Float32Array): void {
 
 /** 自己做预处理而不用 AutoProcessor：输入边长要可控，见 estimateMatte 的说明 */
 async function preprocess(image: RawImage, size: number): Promise<Tensor> {
-  const resized = await image.rgb().resize(size, size);
+  /*
+   * resample 1 是 lanczos：Node 下走 sharp.resize，带抗锯齿。默认的 bilinear 在 Node 下走 sharp.affine，
+   * 手机原图缩到 1024 每个输出像素只取 2×2 个点，头发、招牌字出锯齿，而抠图的 alpha 直接就是主体层的边。
+   * 浏览器端不认这个参数，照旧
+   */
+  const resized = await image.rgb().resize(size, size, { resample: 1 });
   const pixels = resized.data;
   const plane = size * size;
   const data = new Float32Array(plane * 3);

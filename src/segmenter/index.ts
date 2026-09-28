@@ -4,6 +4,7 @@
  * 流程：
  *   estimateDepth  拿到连续深度，决定谁在前
  *   analyzeDepth   在深度直方图的谷底切层，层数自适应
+ *   findSubject    （仅服务端）抠出主体，主体单独一层、不被切开，深度切点只留主体身后的
  *   extractLayers  深度边缘吸附、引导滤波精修边界、逐层补全
  *
  * 产出的每一层同时承担两个角色：带视差的画面，以及这一层箔面的遮罩——
@@ -20,7 +21,9 @@ import {
 } from '../format/types';
 import { estimateDepth } from './depth';
 import type { LoadProgress } from './runtime';
-import { analyzeDepth, buildCutEvidence, type SliceOptions } from './slice';
+import { analyzeDepth, buildCutEvidence, fitCutsToSubject, type SliceOptions } from './slice';
+import type { Matte } from './matte';
+import { keepMainParts } from './morph';
 import { extractLayers, type ExtractOptions } from './extract';
 import { browserImages } from './image-io';
 
@@ -31,6 +34,7 @@ export type SegmentStage =
   | 'loading-model'
   | 'estimating-depth'
   | 'analyzing'
+  | 'finding-subject'
   | 'extracting'
   | 'done';
 
@@ -48,12 +52,18 @@ export interface SegmentOptions {
   slice: Partial<SliceOptions>;
   extract: Partial<ExtractOptions>;
   onProgress: (p: SegmentProgress) => void;
+  /**
+   * 抠主体。返回 null 表示这张图认不出主体（或者抠图模型不可用），照旧只按深度切层。
+   * 只有服务端给：浏览器里跑不动这个模型，见 matte.ts。
+   */
+  findSubject: (image: Blob) => Promise<Matte | null>;
 }
 
 const STAGE_TEXT: Record<SegmentStage, string> = {
   'loading-model': '正在加载深度模型',
   'estimating-depth': '正在估计深度',
   analyzing: '正在分析深度分布',
+  'finding-subject': '正在识别主体',
   extracting: '正在切层与补洞',
   done: '完成',
 };
@@ -107,11 +117,12 @@ function toParallax(depths: number[], rigid: boolean[]): number[] {
  * 生成者标识，把切层决策也写进去。
  * 排查「为什么这张图切成两层 / 为什么切在这个位置」时，看这一行就够了。
  */
-function buildGeneratorTag(cuts: number[], prominences: number[]): string {
+function buildGeneratorTag(cuts: number[], prominences: number[], subject: boolean): string {
   const detail = cuts
     .map((c, i) => `${c.toFixed(3)}@${(prominences[i] ?? 0).toFixed(3)}`)
     .join(',');
-  return `holocard-web/0.1.0 depth-anything-v2-small layers=${cuts.length + 1} cuts=[${detail}]`;
+  const layers = cuts.length + 1 + (subject ? 1 : 0);
+  return `holocard-web/0.1.0 depth-anything-v2-small${subject ? ' birefnet-lite' : ''} layers=${layers} cuts=[${detail}]${subject ? ' +subject' : ''}`;
 }
 
 export async function segmentToLayerSet(
@@ -166,25 +177,48 @@ export async function segmentToLayerSet(
     }
   })();
 
-  const { cuts, prominences, rigid } = analyzeDepth(depth, options.slice ?? {}, evidence);
+  let sliced = analyzeDepth(depth, options.slice ?? {}, evidence);
+
+  let subject: Matte | null = null;
+  if (options.findSubject) {
+    report('finding-subject');
+    const found = await options.findSubject(image);
+    if (found) {
+      /*
+       * 碎块（面积不到最大块 5%）扔掉，离留下的块超过 1% 图宽的淡值（阴影、旁边路人，0.1~0.4）清零。
+       * 淡值留着的话，主体层上是一片半透明副本，去背景色时颜色误差放大 1/a 倍，一动就是一片跟着主体走的重影
+       */
+      const reach = Math.max(1, Math.round(found.width * 0.01));
+      subject = { ...found, data: keepMainParts(found.data, found.width, found.height, 0.05, reach) };
+      sliced = fitCutsToSubject(sliced, depth, subject, evidence, options.slice?.maxLayers);
+    }
+  }
+  const { cuts, prominences, rigid } = sliced;
 
   report('extracting');
-  const { images, stats, width, height } = await extractLayers(
-    image,
-    depth,
-    cuts,
-    options.extract ?? {},
-  );
+  const { images, stats, width, height } = await extractLayers(image, depth, cuts, {
+    ...options.extract,
+    subject,
+  });
 
-  const parallax = toParallax(
-    stats.map((s) => s.depth),
-    rigid,
-  );
+  const depths = stats.map((s) => s.depth);
+  if (subject && depths.length > 1) {
+    /*
+     * 主体一定是最前面那层。按深度中位数它不一定最近：远处的人、脚下一大片近处的地面，
+     * 背景层的中位数可以比主体还近。那样主体反而动得比背景少，看起来像陷进卡里。
+     * 改过的值要写进 manifest：加载时 parseManifest 按 depth 重排层序，写原值的话主体会被排到
+     * 背景层底下，被那张铺满全卡的背景整个盖住。
+     * 封顶 1（depth 的约定是 0..1）。背景也到 1 时和主体相等：排序是稳定的，主体照样排在最后
+     */
+    const others = Math.max(...depths.slice(0, -1));
+    depths[depths.length - 1] = Math.min(1, Math.max(depths[depths.length - 1] ?? 0, others + 0.05));
+  }
+  const parallax = toParallax(depths, rigid);
   const nearest = parallax[stats.length - 1] ?? 0;
   const farthest = parallax[0] ?? 0;
   const layers: LayerEntry[] = stats.map((stat, i) => ({
     file: `layer-${i}.png`,
-    depth: stat.depth,
+    depth: depths[i] ?? stat.depth,
     parallax: parallax[i] ?? 0,
     bbox: stat.bbox,
     // 除最前层外，每一层都向遮挡它的层身后做了补全
@@ -196,11 +230,11 @@ export async function segmentToLayerSet(
      * 否则一张脸被切成三层时，中间那层会上 holo，脸上凭空多出几道竖条光栅；
      * 背景被切成两层时，同一面墙一半日柱一半 holo（issue #3 第 2 条的「分层断裂」）。
      * 整张图是一个刚体时两条都成立，主体优先：只有最远层上箔。
+     * 抠出了主体时更简单：主体那层哑光、其余上箔，和视差怎么分组无关。
      */
-    foil:
-      i > 0 && (parallax[i] ?? 0) === nearest
-        ? { type: 'none', intensity: 1 }
-        : defaultFoilFor((parallax[i] ?? 0) === farthest ? 0 : i, stats.length),
+    foil: (subject ? i === stats.length - 1 : i > 0 && (parallax[i] ?? 0) === nearest)
+      ? { type: 'none', intensity: 1 }
+      : defaultFoilFor((parallax[i] ?? 0) === farthest ? 0 : i, stats.length),
   }));
 
   report('done');
@@ -209,7 +243,7 @@ export async function segmentToLayerSet(
     manifest: {
       version: LAYERS_FORMAT_VERSION,
       source: { width, height },
-      generator: buildGeneratorTag(cuts, prominences),
+      generator: buildGeneratorTag(cuts, prominences, subject !== null),
       layers,
       effects: {
         halo: defaultHalo(),
