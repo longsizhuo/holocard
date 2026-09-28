@@ -185,6 +185,8 @@ With one shared factor the card at rest matches the original photo pixel for pix
 **Highlight protection.** Most foils use `color-dodge` (base ÷ (1 − foil)) and the card-wide glare uses `overlay`, so bright areas clip to pure white and the texture of white clothes or fur disappears.
 Every foil mask, and the masks of the halo and glare, are therefore attenuated by image brightness: unchanged below luminance 0.6, easing down to 0.2 at pure white (`renderer/highlight.ts`).
 Shadows and midtones keep the full effect; only what is about to clip is held back.
+The halo and glare are laid once per parallax group, each masked by that group's own image and shifted and scaled with it; the light itself still spans the whole card.
+With one static mask for the whole card, the outline in the mask drifted off the subject as soon as the layers moved: where a dark outline used to be now sat bright background under full glare, leaving a white band beside the subject.
 
 **Tuning previews at the peak.** While a slider is being dragged the pointer is not on the card, so the card is at rest, and foils and halo only show when it tilts, parallax only when it leans.
 `preview()` therefore turns the card to the halo's brightest angle while any slider moves, holds it briefly, then eases back.
