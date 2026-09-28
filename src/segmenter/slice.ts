@@ -9,6 +9,9 @@
  * 硬凑三层会在没有语义边界的地方撕开。
  */
 
+import type { Matte } from './matte';
+import { dilateMask } from './morph';
+
 /** 归一化后的深度图，data 取值 0..1，1 表示最近 */
 export interface DepthMap {
   data: Float32Array;
@@ -274,14 +277,19 @@ const MIN_STEP_SUPPORT = 0.12;
 
 /** 这条切点是不是骑在一道真实的遮挡台阶上 */
 function hasDepthStep(cut: number, depth: DepthMap): boolean {
+  const inBand = (i: number): boolean => Math.abs((depth.data[i] ?? 0) - cut) <= BAND_HALF_WIDTH;
+  return stepSupport(depth, inBand) >= MIN_STEP_SUPPORT;
+}
+
+/** 带子（inBand 为真的像素）里有多大比例骑在遮挡台阶上 */
+function stepSupport(depth: DepthMap, inBand: (i: number) => boolean): number {
   const { data, width, height } = depth;
   const r = Math.max(2, Math.round(width * STEP_RADIUS));
   let band = 0;
   let onStep = 0;
   for (let y = 0; y < height; y++) {
     for (let x = 0; x < width; x++) {
-      const d = data[y * width + x] ?? 0;
-      if (Math.abs(d - cut) > BAND_HALF_WIDTH) continue;
+      if (!inBand(y * width + x)) continue;
       band++;
       // 邻域取九个点就够：要的是「这里有没有台阶」，不是精确的落差值
       let lo = 1;
@@ -300,12 +308,11 @@ function hasDepthStep(cut: number, depth: DepthMap): boolean {
       if (hi - lo > STEP_DEPTH) onStep++;
     }
   }
-  if (band === 0) return false;
-  return onStep / band >= MIN_STEP_SUPPORT;
+  return band === 0 ? 0 : onStep / band;
 }
 
-/** 这条切点在原图上有没有对应的可见边界 */
-function hasVisibleEdge(cut: number, depth: DepthMap, ev: CutEvidence): boolean {
+/** 这条切点在原图上有没有对应的可见边界。exclude 标出的（深度网格上的）像素不算 */
+function hasVisibleEdge(cut: number, depth: DepthMap, ev: CutEvidence, exclude?: Uint8Array): boolean {
   if (ev.mean <= 0) return false;
   const threshold = ev.mean * EDGE_MULTIPLE;
   let inBand = 0;
@@ -315,7 +322,9 @@ function hasVisibleEdge(cut: number, depth: DepthMap, ev: CutEvidence): boolean 
     const dv = Math.min(depth.height - 1, Math.round((y / ev.height) * depth.height));
     for (let x = 1; x < ev.width - 1; x++) {
       const du = Math.min(depth.width - 1, Math.round((x / ev.width) * depth.width));
-      const d = depth.data[dv * depth.width + du] ?? 0;
+      const di = dv * depth.width + du;
+      if (exclude?.[di]) continue;
+      const d = depth.data[di] ?? 0;
       if (Math.abs(d - cut) > BAND_HALF_WIDTH) continue;
       inBand++;
       if ((ev.gradient[y * ev.width + x] ?? 0) > threshold) onEdge++;
@@ -420,11 +429,124 @@ export function analyzeDepth(
   // 这种图按语义切不出东西，退化成等质量切分。
   if (picked.length < opts.minLayers - 1) {
     const need = opts.minLayers - 1;
-    return verify(equalMassCuts(histogram, need), new Array<number>(need).fill(0));
+    const result = verify(equalMassCuts(histogram, need), new Array<number>(need).fill(0));
+    /*
+     * 兜底切出来的层一律刚性：分开上箔，但不相对位移。
+     * 深度上没有前后景的分界，这一刀是按像素数硬切的，常常从人身上、人群中间劈过去。
+     * 一做视差，被劈开的人就错位，背景层补出来的碎片和人形鬼影也跟着露出来
+     * （staging 上 19392d36 那张：整片人群被切成两半）。
+     * 对比过三种做法：现状（撕裂、鬼影）、刚性（干净，主体哑光背景上箔）、干脆不分层（主体脸上也打满箔）——刚性最好
+     */
+    return { ...result, rigid: result.rigid.map(() => true) };
   }
 
   return verify(
     picked.map((v) => v.bin / last),
     picked.map((v) => v.prominence),
   );
+}
+
+/** 主体身后的切点：主体里最多这么大比例的像素落在切点的远侧（含羽化带） */
+const MAX_SUBJECT_BEHIND = 0.05;
+/**
+ * 切点近侧去掉主体（连同主体外一圈）之后，至少还得剩这么大比例的画面，这一刀才值得切。
+ * 主体和背景之间的那道深度谷底，抠掉主体后只剩轮廓外的碎渣，单独成层还要上箔、有自己的视差，
+ * 一动就是几片会飞的碎片。staging 5 张多层图实测：看板娘那一刀剩 0%（发梢边上几块，都在那一圈里），
+ * 真实的中景从 6%（海边近处的礁石）到 56%
+ */
+const MIN_LEFTOVER = 0.02;
+/** 上面说的「主体外一圈」有多宽，相对图宽。深度图在物体边缘是几像素宽的斜坡，要盖得住。和 extract.ts 的同名常量一致 */
+const SUBJECT_MARGIN = 0.02;
+
+/**
+ * 有了主体遮罩（抠图模型给的）之后，重新决定切点。
+ *
+ * 只看深度时，层的边界是一条等深度线。一群人站在同一个距离上，深度连成一片，
+ * 这条线切在哪都会从人身上穿过去（staging 19392d36：整片人群被劈成两半）——换更准的深度模型也没用，
+ * 模型越准，越准地从人身上穿过去。所以边界改由主体遮罩决定，深度只管前后和视差：
+ *
+ *   主体        单独一层，边界就是抠图的轮廓，永远不被切开
+ *   主体身后    深度上真实的谷底照切，背景里的前后景分离还在；等质量兜底的切点一律不要
+ *   穿过主体 / 主体前面的切点   不要。和主体同一距离上的其他人、其他物体会被它劈开
+ *
+ * ponytail: 主体前面的遮挡物（横在身前的绸带、前景虚化的花）归进背景层，视差大时会从主体身后滑过；
+ * 要做对得给它单独一层并重排箔面，等真有这种图再说。
+ *
+ * 主体和身后那层之间有没有真实的遮挡台阶，决定它们能不能相对滑动：
+ * 招牌上的字、证件照上的人、截图里的车，模型都会当成主体抠出来，可它们和背景是同一个平面，
+ * 一滑就浮起来了。沿用深度切点的台阶判据，量主体轮廓一圈。
+ *
+ * 返回的 cuts 只含留下的深度切点；rigid 比 cuts 多一项，最后一项是主体那条分界。
+ */
+export function fitCutsToSubject(
+  result: SliceResult,
+  depth: DepthMap,
+  subject: Matte,
+  evidence: CutEvidence | null = null,
+  maxLayers: number = DEFAULT_SLICE_OPTIONS.maxLayers,
+): SliceResult {
+  const { data, width, height } = depth;
+  // 主体遮罩按归一化坐标对到深度图的网格上（抠图输入是整张图拉伸成正方形的，坐标系一致）
+  const inside = new Uint8Array(width * height);
+  const subjectDepths: number[] = [];
+  for (let y = 0; y < height; y++) {
+    const sy = Math.round((y / Math.max(1, height - 1)) * (subject.height - 1));
+    for (let x = 0; x < width; x++) {
+      const sx = Math.round((x / Math.max(1, width - 1)) * (subject.width - 1));
+      if ((subject.data[sy * subject.width + sx] ?? 0) < 0.5) continue;
+      const i = y * width + x;
+      inside[i] = 1;
+      subjectDepths.push(data[i] ?? 0);
+    }
+  }
+
+  const nearSubject = dilateMask(inside, width, height, Math.max(1, Math.round(width * SUBJECT_MARGIN)));
+
+  const cuts: number[] = [];
+  const prominences: number[] = [];
+  const rigid: boolean[] = [];
+  result.cuts.forEach((c, k) => {
+    const prominence = result.prominences[k] ?? 0;
+    if (prominence <= 0) return; // 等质量兜底，见 analyzeDepth
+    let behind = 0;
+    for (const d of subjectDepths) if (d < c + BAND_HALF_WIDTH) behind++;
+    if (behind > subjectDepths.length * MAX_SUBJECT_BEHIND) return;
+    let leftover = 0;
+    for (let i = 0; i < data.length; i++) if (!nearSubject[i] && (data[i] ?? 0) > c) leftover++;
+    if (leftover < data.length * MIN_LEFTOVER) return;
+    /*
+     * analyzeDepth 核对边界时，整条等深度带都算数——主体从近处落到背景的那道轮廓斜坡会穿过它身后的每一条切点，
+     * 而且全是真台阶、真边缘。主体归了自己那层之后，这段轮廓就不是这条切点的边界了，
+     * 带着它算会把一条背景里本来看不见、或者没有台阶的切点判成可见、可滑动（墙上的翻拍海报相对墙滑开）。
+     * 扣掉主体那一圈重新核对。没有梯度证据时照旧不核对、不判刚性
+     */
+    if (evidence && !hasVisibleEdge(c, depth, evidence, nearSubject)) return;
+    const inBand = (i: number): boolean => !nearSubject[i] && Math.abs((data[i] ?? 0) - c) <= BAND_HALF_WIDTH;
+    cuts.push(c);
+    prominences.push(prominence);
+    rigid.push(evidence ? stepSupport(depth, inBand) < MIN_STEP_SUPPORT : false);
+  });
+
+  // 主体自己占一层，深度切点最多 maxLayers - 2 条；多了按显著性去掉最弱的
+  while (cuts.length > Math.max(0, maxLayers - 2)) {
+    const weakest = prominences.indexOf(Math.min(...prominences));
+    cuts.splice(weakest, 1);
+    prominences.splice(weakest, 1);
+    rigid.splice(weakest, 1);
+  }
+
+  // 主体轮廓：自己在主体里、上下左右有一个不在
+  const onContour = (i: number): boolean => {
+    if (!inside[i]) return false;
+    const x = i % width;
+    return (
+      (x > 0 && !inside[i - 1]) ||
+      (x < width - 1 && !inside[i + 1]) ||
+      (i >= width && !inside[i - width]) ||
+      (i + width < inside.length && !inside[i + width])
+    );
+  };
+  rigid.push(stepSupport(depth, onContour) < MIN_STEP_SUPPORT);
+
+  return { cuts, histogram: result.histogram, prominences, rigid };
 }

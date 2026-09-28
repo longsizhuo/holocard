@@ -65,6 +65,7 @@ export const zh = {
   'stage.downloading': '正在下载 {file}',
   'stage.estimating-depth': '正在估计深度',
   'stage.analyzing': '正在分析深度分布',
+  'stage.finding-subject': '正在识别主体',
   'stage.extracting': '正在切层与补洞',
   'stage.done': '完成',
 
@@ -236,6 +237,7 @@ export const en: Messages = {
   'stage.downloading': 'Downloading {file}',
   'stage.estimating-depth': 'Estimating depth',
   'stage.analyzing': 'Analyzing the depth distribution',
+  'stage.finding-subject': 'Finding the subject',
   'stage.extracting': 'Cutting layers and filling holes',
   'stage.done': 'Done',
 
@@ -403,6 +405,7 @@ export const ja: Messages = {
   'stage.downloading': '{file} をダウンロード中',
   'stage.estimating-depth': '深度を推定中',
   'stage.analyzing': '深度の分布を分析中',
+  'stage.finding-subject': '被写体を検出中',
   'stage.extracting': 'レイヤーを切り出して穴を埋め中',
   'stage.done': '完了',
 

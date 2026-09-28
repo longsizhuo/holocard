@@ -234,3 +234,66 @@ export function blurAlpha(alpha: Float32Array, width: number, height: number): F
   }
   return out;
 }
+
+/**
+ * 只留主体的主要部分：实心部分（alpha ≥ 0.5）按 8 连通分块，面积不到最大块 minShare 的碎块扔掉，
+ * 留下的块外面 reach 像素以外的淡值也清零。
+ *
+ * 抠图模型会顺手抠进一些不相干的碎块：证件照旁边的几行字、招牌下面的阴影。
+ * 它们跟着主体层一起滑，就从原来的位置上撕下来（staging 上那张学生证：名字和院系被撕成两截）。
+ * 同一画面里的几个人大小相近，都留得下。
+ */
+export function keepMainParts(
+  alpha: Float32Array,
+  width: number,
+  height: number,
+  minShare: number,
+  reach: number,
+): Float32Array {
+  const n = width * height;
+  const label = new Int32Array(n).fill(-1);
+  const sizes: number[] = [];
+  const stack = new Int32Array(n);
+  for (let start = 0; start < n; start++) {
+    if (label[start] !== -1 || (alpha[start] ?? 0) < 0.5) continue;
+    const id = sizes.length;
+    let size = 0;
+    let top = 0;
+    stack[top++] = start;
+    label[start] = id;
+    while (top > 0) {
+      const p = stack[--top] ?? 0;
+      size++;
+      const x = p % width;
+      const y = (p - x) / width;
+      for (let dy = -1; dy <= 1; dy++) {
+        const ny = y + dy;
+        if (ny < 0 || ny >= height) continue;
+        for (let dx = -1; dx <= 1; dx++) {
+          const nx = x + dx;
+          if (nx < 0 || nx >= width) continue;
+          const q = ny * width + nx;
+          if (label[q] !== -1 || (alpha[q] ?? 0) < 0.5) continue;
+          label[q] = id;
+          stack[top++] = q;
+        }
+      }
+    }
+    sizes.push(size);
+  }
+  if (sizes.length === 0) return alpha;
+
+  // 不能 Math.max(...sizes)：满是噪点的抠图能有几十万块，展开成参数会超出调用栈上限
+  let largest = 0;
+  for (const size of sizes) if (size > largest) largest = size;
+  const floor = largest * minShare;
+  const kept = new Uint8Array(n);
+  for (let p = 0; p < n; p++) {
+    const id = label[p] ?? -1;
+    if (id >= 0 && (sizes[id] ?? 0) >= floor) kept[p] = 1;
+  }
+  const near = dilateMask(kept, width, height, reach);
+  const out = new Float32Array(alpha);
+  for (let p = 0; p < n; p++) if (!near[p]) out[p] = 0;
+  return out;
+}

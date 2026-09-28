@@ -25,13 +25,15 @@
 import { createServer, type Server } from 'node:http';
 import { createHash } from 'node:crypto';
 import { mkdir, readFile, writeFile, stat } from 'node:fs/promises';
-import { watch, existsSync } from 'node:fs';
+import { watch, existsSync, statSync } from 'node:fs';
 import { spawn } from 'node:child_process';
 import { dirname, extname, join, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { build } from 'vite';
 import { env } from '@huggingface/transformers';
 import { segmentToLayerSet } from '../src/segmenter';
+import { MATTE_MODEL_ID, estimateMatte } from '../src/segmenter/matte';
+import { SERVER_REFINE_OPTIONS } from '../src/segmenter/refine';
 import { sharpImages } from '../server/images';
 import { renderPreview, closeBrowser } from '../server/preview';
 import { EXPORT_FORMATS, exportFiles, runExport, type ExportFormat } from '../server/export';
@@ -128,7 +130,15 @@ function idFromHash(hash: string): string {
 
 async function ensureLayers(image: string): Promise<string> {
   const bytes = await readFile(image);
-  const id = idFromHash(createHash('sha256').update(bytes).digest('hex'));
+  const models = join(ROOT, '.models');
+  /*
+   * 放了抠图权重就和线上一样抠主体（下载见 deploy/README.md）。抠没抠、用的哪个模型、哪一版权重，
+   * 出来的层都不一样，都算进缓存键。权重 200MB 不值得每次算哈希，大小加修改时间够分辨了
+   */
+  const weights = join(models, MATTE_MODEL_ID, 'onnx', 'model.onnx');
+  const matte = existsSync(weights);
+  const matteKey = matte ? `${MATTE_MODEL_ID}:${statSync(weights).size}:${statSync(weights).mtimeMs}` : '';
+  const id = idFromHash(createHash('sha256').update(bytes).update(matteKey).digest('hex'));
   const dir = join(CACHE, id);
 
   if (await stat(join(dir, 'manifest.json')).catch(() => null)) {
@@ -136,7 +146,6 @@ async function ensureLayers(image: string): Promise<string> {
     return id;
   }
 
-  const models = join(ROOT, '.models');
   if (!(await stat(models).catch(() => null))) {
     throw new Error(
       `找不到模型权重 ${models}。下载方法见 deploy/README.md「模型权重」一节，放到这个目录下即可`,
@@ -148,7 +157,9 @@ async function ensureLayers(image: string): Promise<string> {
   console.log('分层：第一次用这张图，跑一遍模型（之后走缓存）…');
   const started = Date.now();
   const set = await segmentToLayerSet(new Blob([new Uint8Array(bytes)]), {
-    extract: { images: sharpImages },
+    // 和线上分层服务同一套参数，出来的层才和用户拿到的一样
+    extract: { images: sharpImages, refine: SERVER_REFINE_OPTIONS },
+    ...(matte ? { findSubject: (b: Blob) => estimateMatte(b).catch(() => null) } : {}),
   });
   await mkdir(dir, { recursive: true });
   await Promise.all(

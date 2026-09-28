@@ -21,6 +21,7 @@ import type { BBox } from '../format/types';
 import { browserImages, type ImageBackend } from './image-io';
 import { blurAlpha, dilateMask, growForeground, nearestSource, snapDepthEdges } from './morph';
 import { createRefiner, guideFromImage, type Guide, type RefineOptions } from './refine';
+import type { Matte } from './matte';
 import type { DepthMap } from './slice';
 
 export interface ExtractOptions {
@@ -51,6 +52,11 @@ export interface ExtractOptions {
    * 尺寸必须和输出一致，取值 0..1。
    */
   extraGuide: Float32Array[] | null;
+  /**
+   * 主体遮罩（抠图模型给的）。给了就在 cuts 之上再加一层主体：主体轮廓就是这层的边界，
+   * 所有深度切层都让着它（主体像素一律归主体层），见 slice.ts 的 fitCutsToSubject。
+   */
+  subject: Matte | null;
 }
 
 export const DEFAULT_EXTRACT_OPTIONS: ExtractOptions = {
@@ -59,18 +65,20 @@ export const DEFAULT_EXTRACT_OPTIONS: ExtractOptions = {
   snapRadius: 0.01,
   snapThreshold: 0.12,
   /*
-   * 以前是 0.004（1400 宽时约 6 像素）。膨胀吃进来的那圈背景是不透明的，去背景色也救不了，
-   * 白墙、天空前的主体因此都带一道亮边（issue #3 第 2 条的「白边」）。
-   * 背景层那边另有 fringe 在遮挡区外扩一圈再补，物体边缘不会留在背景里，所以这里只留 2 像素兜底。
-   * 8 张测试照片（人像、宠物、逆光）对比过：白边明显变窄，运动时没有多出残影
+   * 不膨胀。膨胀吃进来的那圈背景是不透明的，去背景色也救不了：静止时它正好盖在原来的背景上看不出来，
+   * 一做视差就跟着前景走，成了贴着轮廓的一道亮边（issue #3 第 2 条的「白边」）。
+   * 0.004（约 6 像素）→ 0.0015（约 2 像素）时白边窄了，但首页示例卡（报纸前的黑发）上仍然一眼可见；
+   * 去掉之后没有了。背景层那边另有 fringe 在遮挡区外扩一圈再补，物体边缘不会留在背景里。
+   * 8 张线上的原图（黑发白墙、夜景、户外、花背景、动漫、猫）左右倾斜对比过，没有多出残影或缺边
    */
-  foregroundGrow: 0.0015,
+  foregroundGrow: 0,
   fringe: 0.005,
   mirrorReach: 0.12,
   images: browserImages,
   refineEdges: true,
   refine: {},
   extraGuide: null,
+  subject: null,
 };
 
 export interface LayerStat {
@@ -123,6 +131,46 @@ function sampleDepth(depth: DepthMap, u: number, v: number): number {
   const e = d[y1 * w + x1] ?? 0;
 
   return (a * (1 - tx) + b * tx) * (1 - ty) + (c * (1 - tx) + e * tx) * ty;
+}
+
+/** 抠图外的「主体外一圈」有多宽，相对图宽。和 slice.ts 的 SUBJECT_MARGIN 一致 */
+const SUBJECT_MARGIN = 0.02;
+
+/** 抠图 alpha 采样到输出尺寸（碎块已经在 index.ts 里清掉了，见 keepMainParts） */
+function subjectAlpha(subject: Matte, width: number, height: number): Float32Array {
+  const alpha = new Float32Array(width * height);
+  for (let y = 0; y < height; y++) {
+    const v = height > 1 ? y / (height - 1) : 0;
+    for (let x = 0; x < width; x++) {
+      alpha[y * width + x] = sampleDepth(subject, width > 1 ? x / (width - 1) : 0, v);
+    }
+  }
+  return alpha;
+}
+
+/**
+ * 主体身后的深度：主体连同外面一圈，换成离它最近的圈外像素的深度。深度切层只用它，主体交给抠图。
+ *
+ * 深度图里主体的轮廓总比抠图胖几个像素（边缘斜坡、发丝）。不换的话，多出来的那圈被当成「比切点近、又不是主体」，
+ * 判给了最近的那个深度层——主体四周多一圈环；补全时这一层还会顺着这圈环长到主体身后，
+ * 倾斜时头边上露出一块地面颜色的月牙压在天空上。
+ */
+function depthBehindSubject(depth: Float32Array, subject: Float32Array, width: number, height: number): Float32Array {
+  const touched = new Uint8Array(subject.length);
+  for (let p = 0; p < subject.length; p++) touched[p] = (subject[p] ?? 0) > 0.02 ? 1 : 0;
+  const zone = dilateMask(touched, width, height, Math.max(2, Math.round(width * SUBJECT_MARGIN)));
+  const outside = new Uint8Array(zone.length);
+  for (let p = 0; p < zone.length; p++) outside[p] = zone[p] ? 0 : 1;
+  if (!outside.includes(1)) return depth; // 主体占满整张图，没有身后可言
+
+  const { dx, dy } = nearestSource(outside, width, height);
+  const out = new Float32Array(depth);
+  for (let p = 0; p < out.length; p++) {
+    if (!zone[p]) continue;
+    const q = p + (dy[p] ?? 0) * width + (dx[p] ?? 0);
+    out[p] = depth[q] ?? out[p] ?? 0;
+  }
+  return out;
 }
 
 interface Pyramid {
@@ -333,7 +381,7 @@ export async function extractLayers(
   const src = decoded.data;
   const pixelCount = width * height;
 
-  const layerCount = cuts.length + 1;
+  const layerCount = cuts.length + 1 + (opts.subject ? 1 : 0);
   const f = opts.feather;
 
   // 把每个像素的深度采样出来，再把物体边缘的斜坡吸附成台阶
@@ -359,6 +407,10 @@ export async function extractLayers(
     Math.round(width * opts.foregroundGrow),
   );
 
+  // 有主体时，深度切层只切主体身后的东西，见 depthBehindSubject
+  const subjectMask = opts.subject ? subjectAlpha(opts.subject, width, height) : null;
+  const cutDepth = subjectMask ? depthBehindSubject(sampled, subjectMask, width, height) : sampled;
+
   /*
    * 每条层分界对应一张累积遮罩 cutMasks[k]：像素比第 k 条分界更近的程度，0..1。
    * 精修是针对「分界」做的而不是针对「层」：一条分界修好了，它两侧的层同时受益，
@@ -366,7 +418,7 @@ export async function extractLayers(
    */
   const cutMasks: Float32Array[] = cuts.map((cut) => {
     const mask = new Float32Array(pixelCount);
-    for (let p = 0; p < pixelCount; p++) mask[p] = smoothstep(cut - f, cut + f, sampled[p] ?? 0);
+    for (let p = 0; p < pixelCount; p++) mask[p] = smoothstep(cut - f, cut + f, cutDepth[p] ?? 0);
     return mask;
   });
 
@@ -406,7 +458,7 @@ export async function extractLayers(
       // 精修之前，哪些像素的深度落在第 k 层的区间里
       const present = new Uint8Array(pixelCount);
       for (let p = 0; p < pixelCount; p++) {
-        const d = sampled[p] ?? 0;
+        const d = cutDepth[p] ?? 0;
         present[p] = d >= loCut && d < hiCut ? 1 : 0;
       }
       const nearby = dilateMask(present, width, height, reach);
@@ -424,6 +476,22 @@ export async function extractLayers(
         if ((nearer[p] ?? 0) > (farther[p] ?? 0)) nearer[p] = farther[p] ?? 0;
       }
     }
+  }
+
+  if (subjectMask) {
+    /*
+     * 主体轮廓直接用抠图的 alpha，不再过引导滤波：它本来就是沿物体边缘出的软边，发丝也在里面，
+     * 精修只会把它往颜色边缘上拽。深度切层都并上主体，嵌套关系不变，主体不会被任何一刀切开。
+     */
+    for (let p = 0; p < pixelCount; p++) {
+      const a = subjectMask[p] ?? 0;
+      // 主体的软边是真实物体边缘，里面的颜色混着前景，补身后的层时不能拿来当填充源
+      if (a > 0.02 && a < 0.98) edgeConfidence[p] = 1;
+    }
+    for (const cutMask of cutMasks) {
+      for (let p = 0; p < pixelCount; p++) cutMask[p] = Math.max(cutMask[p] ?? 0, subjectMask[p] ?? 0);
+    }
+    cutMasks.push(subjectMask);
   }
 
   /*

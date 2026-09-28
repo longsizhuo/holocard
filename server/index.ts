@@ -20,12 +20,14 @@
  */
 
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
-import { createReadStream } from 'node:fs';
+import { createReadStream, existsSync } from 'node:fs';
 import { mkdir, rm, writeFile, readFile, readdir, stat } from 'node:fs/promises';
 import { randomUUID, timingSafeEqual } from 'node:crypto';
 import { basename, dirname, extname, join, resolve, sep } from 'node:path';
 import { env } from '@huggingface/transformers';
 import { segmentToLayerSet } from '../src/segmenter';
+import { SERVER_REFINE_OPTIONS } from '../src/segmenter/refine';
+import { MATTE_MODEL_ID, estimateMatte, type Matte } from '../src/segmenter/matte';
 import { sharpImages, normalizeOriginal, layerToWebp, makeThumb, ImageError } from './images';
 import {
   LANG_TAG,
@@ -98,6 +100,43 @@ const WEB_DIR = process.env.HOLOCARD_WEB_DIR ?? '';
 // 而且首个用户不该为下载权重等着
 env.localModelPath = MODEL_DIR;
 env.allowRemoteModels = false;
+
+/**
+ * 抠主体的权重（BiRefNet_lite，214MB，下载见 deploy/README.md）。
+ * 没放就不抠，照旧只按深度切层：开发机、没下权重的环境照样能跑。
+ *
+ * 还要看这个进程的内存上限（systemd 的 MemoryMax）。抠一张峰值约 7GB，上限不够的话一抠就被 cgroup 杀掉，
+ * 重启后续跑同一张又被杀，整个服务反复崩。权重在共享目录里、代码随 PR 自动上 staging、unit 文件要另外装，
+ * 三样不是同一步到位的，所以在这里自己挡住：上限不够就当没有权重。
+ */
+const MATTE_MIN_MEMORY = 8 * 2 ** 30;
+const MATTE_WEIGHTS = existsSync(join(MODEL_DIR, MATTE_MODEL_ID, 'onnx', 'model.onnx'));
+// 没有限制时是 0（或者一个天文数字）
+const MEMORY_CAP = process.constrainedMemory();
+const MATTE_READY = MATTE_WEIGHTS && (MEMORY_CAP === 0 || MEMORY_CAP >= MATTE_MIN_MEMORY);
+
+/**
+ * 启动时还是 running 的卡：上个进程正在处理它的时候没了。可能是发版重启，也可能就是它把进程弄崩的，
+ * 分不清，一律不抠主体续跑——少一个主体层，总比整个服务每半分钟崩一次强。
+ * ponytail: SIGTERM 时把正在跑的卡改回 queued 就能区分两种情况，发版重启恰好撞上的概率低，先不做
+ */
+const crashedJobs = new Set<string>();
+
+/** 上一次抠图的尾巴。同一时刻最多抠一张：并发调高时两次推理叠在一起就是 14GB */
+let matteTail: Promise<unknown> = Promise.resolve();
+
+async function findSubject(image: Blob): Promise<Matte | null> {
+  if (!MATTE_READY) return null;
+  const run = matteTail.then(() => estimateMatte(image));
+  matteTail = run.catch(() => null);
+  try {
+    return await run;
+  } catch (error) {
+    // 认不出主体（几乎全是前景或全是背景）也走这里，属于正常情况
+    console.warn(`[matte] 不抠主体，只按深度切层：${error instanceof Error ? error.message : String(error)}`);
+    return null;
+  }
+}
 
 /**
  * 所有卡片状态的唯一来源。以前是内存里的任务表 + 每个目录一份 meta.json，
@@ -457,8 +496,10 @@ async function runJob(id: string): Promise<void> {
     const bytes = await readFile(file);
     // 拷一份到独立的 ArrayBuffer：Node 的 Buffer 可能落在共享池上，Blob 不接受那种视图
     const set = await segmentToLayerSet(new Blob([new Uint8Array(bytes)]), {
-      extract: { images: sharpImages },
+      extract: { images: sharpImages, refine: SERVER_REFINE_OPTIONS },
       onProgress: (p) => db.update(id, { stage: p.stage }),
+      // 上次就是在处理它的时候崩的（多半是抠图吃爆了内存），这次不抠，免得反复崩
+      ...(crashedJobs.has(id) ? {} : { findSubject }),
     });
 
     // 流水线出的是 PNG，存盘前转成 WebP（画面有损、alpha 无损），体积只剩一成左右，见 layerToWebp
@@ -1360,6 +1401,7 @@ if (imported > 0) console.log(`[db] 从旧格式导入了 ${imported} 张卡`);
    * running 排在前面：它是更早提交的，续跑时应该先轮到它。
    */
   const unfinished = [...db.byStatus('running'), ...db.byStatus('queued')];
+  for (const card of db.byStatus('running')) crashedJobs.add(card.id);
   for (const card of unfinished) {
     const file = originalFile(card);
     if (file && (await stat(file).catch(() => null))) {
@@ -1412,7 +1454,12 @@ server.listen(PORT, '127.0.0.1', () => {
   void backfillNsfw().catch((error: unknown) => console.error('[nsfw] 补打分中断', error));
   console.log(`holocard 分层服务已启动 127.0.0.1:${PORT}`);
   console.log(`  产物目录 ${OUT_DIR}`);
-  console.log(`  模型目录 ${MODEL_DIR}`);
+  const matteNote = MATTE_READY
+    ? ''
+    : MATTE_WEIGHTS
+      ? `（内存上限 ${(MEMORY_CAP / 2 ** 30).toFixed(1)}G 不够抠主体，只按深度切层）`
+      : '（没有抠图权重，只按深度切层）';
+  console.log(`  模型目录 ${MODEL_DIR}${matteNote}`);
   console.log(`  数据库   ${DB_PATH}`);
   console.log(`  静态目录 ${WEB_DIR || '(未配置，由前端开发服务器负责)'}`);
   const days = Math.round(TTL_MS / 86400000);
