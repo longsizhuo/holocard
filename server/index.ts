@@ -25,10 +25,11 @@ import { mkdir, rm, writeFile, readFile, readdir, stat } from 'node:fs/promises'
 import { randomUUID, timingSafeEqual } from 'node:crypto';
 import { basename, dirname, extname, join, resolve, sep } from 'node:path';
 import { env } from '@huggingface/transformers';
-import { segmentToLayerSet } from '../src/segmenter';
-import { SERVER_REFINE_OPTIONS } from '../src/segmenter/refine';
-import { MATTE_MODEL_ID, estimateMatte, type Matte } from '../src/segmenter/matte';
-import { sharpImages, normalizeOriginal, layerToWebp, makeThumb, ImageError } from './images';
+import { Worker } from 'node:worker_threads';
+import type { LayerManifest } from '../src/format/types';
+import { MATTE_MODEL_ID } from '../src/segmenter/matte';
+import { normalizeOriginal, layerToWebp, makeThumb, ImageError } from './images';
+import type { SegmentReply, SegmentRequest } from './segment-worker';
 import {
   LANG_TAG,
   LANGS,
@@ -122,20 +123,50 @@ const MATTE_READY = MATTE_WEIGHTS && (MEMORY_CAP === 0 || MEMORY_CAP >= MATTE_MI
  */
 const crashedJobs = new Set<string>();
 
-/** 上一次抠图的尾巴。同一时刻最多抠一张：并发调高时两次推理叠在一起就是 14GB */
-let matteTail: Promise<unknown> = Promise.resolve();
+/**
+ * 分层在工作线程里做（为什么见 segment-worker.ts），线程常驻、一次一张。
+ * 一次一张也顺带保证了同一时刻最多抠一张：两次推理叠在一起就是 14GB
+ */
+let segmenter: Worker | null = null;
+let segmentTail: Promise<unknown> = Promise.resolve();
 
-async function findSubject(image: Blob): Promise<Matte | null> {
-  if (!MATTE_READY) return null;
-  const run = matteTail.then(() => estimateMatte(image));
-  matteTail = run.catch(() => null);
-  try {
-    return await run;
-  } catch (error) {
-    // 认不出主体（几乎全是前景或全是背景）也走这里，属于正常情况
-    console.warn(`[matte] 不抠主体，只按深度切层：${error instanceof Error ? error.message : String(error)}`);
-    return null;
-  }
+function segmentInWorker(
+  bytes: Uint8Array<ArrayBuffer>,
+  matte: boolean,
+  onStage: (stage: string) => void,
+): Promise<{ manifest: LayerManifest; images: Uint8Array[] }> {
+  const run = segmentTail.then(
+    () =>
+      new Promise<{ manifest: LayerManifest; images: Uint8Array[] }>((resolve, reject) => {
+        // 和本文件打包在同一个目录里，见 vite.server.config.ts
+        const worker = (segmenter ??= new Worker(new URL('./segment-worker.mjs', import.meta.url)));
+        const finish = (): void => {
+          worker.off('message', onMessage);
+          worker.off('exit', onExit);
+        };
+        const onMessage = (reply: SegmentReply): void => {
+          if (reply.type === 'stage') {
+            onStage(reply.stage);
+            return;
+          }
+          finish();
+          if (reply.type === 'done') resolve({ manifest: reply.manifest, images: reply.images });
+          else reject(new Error(reply.message));
+        };
+        // 线程自己崩了（未捕获的异常）：这张算失败，下一张重新起一个
+        const onExit = (code: number): void => {
+          finish();
+          segmenter = null;
+          reject(new Error(`分层线程意外退出（${code}）`));
+        };
+        worker.on('message', onMessage);
+        worker.on('exit', onExit);
+        const request: SegmentRequest = { bytes, modelDir: MODEL_DIR, matte };
+        worker.postMessage(request, [bytes.buffer as ArrayBuffer]);
+      }),
+  );
+  segmentTail = run.catch(() => null);
+  return run;
 }
 
 /**
@@ -493,21 +524,21 @@ async function runJob(id: string): Promise<void> {
   const dir = join(OUT_DIR, id);
 
   try {
-    const bytes = await readFile(file);
-    // 拷一份到独立的 ArrayBuffer：Node 的 Buffer 可能落在共享池上，Blob 不接受那种视图
-    const set = await segmentToLayerSet(new Blob([new Uint8Array(bytes)]), {
-      extract: { images: sharpImages, refine: SERVER_REFINE_OPTIONS },
-      onProgress: (p) => db.update(id, { stage: p.stage }),
+    // 拷一份到独立的 ArrayBuffer：Node 的 Buffer 可能落在共享池上，没法整块转给工作线程
+    const bytes = new Uint8Array(await readFile(file));
+    const set = await segmentInWorker(
+      bytes,
       // 上次就是在处理它的时候崩的（多半是抠图吃爆了内存），这次不抠，免得反复崩
-      ...(crashedJobs.has(id) ? {} : { findSubject }),
-    });
+      MATTE_READY && !crashedJobs.has(id),
+      (stage) => db.update(id, { stage }),
+    );
 
     // 流水线出的是 PNG，存盘前转成 WebP（画面有损、alpha 无损），体积只剩一成左右，见 layerToWebp
     await Promise.all(
       set.manifest.layers.map(async (layer, i) => {
-        const blob = set.images[i];
-        if (!blob) return;
-        const webp = await layerToWebp(Buffer.from(await blob.arrayBuffer()));
+        const png = set.images[i];
+        if (!png) return;
+        const webp = await layerToWebp(Buffer.from(png.buffer, png.byteOffset, png.byteLength));
         layer.file = layer.file.replace(/\.png$/, '.webp');
         await writeFile(join(dir, layer.file), webp);
       }),
