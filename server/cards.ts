@@ -152,6 +152,8 @@ export async function importLegacy(
       // 迁移时按「刚被访问过」起算，别让存量卡一上线就被清掉
       last_hit_at: num(meta?.['lastHitAt']) ?? Date.now(),
       delete_token: typeof token === 'string' ? token : randomUUID(),
+      nsfw: null,
+      nsfw_part: null,
     });
     imported++;
   }

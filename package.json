@@ -7,7 +7,7 @@
   "license": "GPL-3.0-only",
   "scripts": {
     "dev": "vite",
-    "build": "tsc --noEmit && vite build",
+    "build": "node scripts/pearl-keyframes.mjs --check && tsc --noEmit && vite build",
     "preview": "vite preview",
     "typecheck": "tsc --noEmit",
     "capture": "node scripts/capture.mjs",
@@ -19,6 +19,7 @@
   "dependencies": {
     "@huggingface/transformers": "^4.3.0",
     "heic-decode": "2.1.0",
+    "onnxruntime-node": "1.30.0",
     "playwright-core": "^1.63.0",
     "sharp": "^0.35.4",
     "upng-js": "2.1.0"

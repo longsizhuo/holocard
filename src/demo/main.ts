@@ -1,6 +1,8 @@
 /** 演示页：加载素材、接分层流水线、挂调参面板 */
 
 import './style.css';
+// 珠光底的漂移动画，由 scripts/pearl-keyframes.mjs 生成
+import './pearl-drift.css';
 import { HoloCard } from '../renderer/card';
 import { ensureTextures } from '../renderer/textures';
 import { LayerFormatError, loadLayerSet } from '../format/io';
@@ -17,6 +19,7 @@ import {
 } from './api';
 import { albumCountFor, initAlbums, openAlbums, openPicker } from './albums-ui';
 import { initTracking, pageView, track } from './track';
+import { measurePerf } from './perf';
 import { parseRoute, shareUrl } from './route';
 import {
   blockingInAppBrowser,
@@ -286,17 +289,28 @@ function applyHalo(): void {
 
 /**
  * 把此刻炫光实际有多亮显示出来，纯读数：角度决定的那部分（渲染器算的 --hc-halo）× 炫光强度。
- * 乘上强度，拖强度滑块时读数条才会跟着动
+ * 乘上强度，拖强度滑块时读数条才会跟着动。
+ *
+ * 只在「景深与炫光」展开时每帧读：读数就在那个默认折叠的面板里，折着时看不见。
+ * 以前是无条件每帧跑，每秒按屏幕刷新率（60～240 次）多跑一轮主线程、提交一帧。
+ * （页面上的扫光、标题渐变这些 CSS 动画照样每帧出图，所以页面并不会因此完全闲下来，省的只是这一份）
  */
+const moreBox = need<HTMLDetailsElement>('details.more');
+let haloRaf = 0;
 function pollHalo(): void {
+  haloRaf = 0;
+  if (!moreBox.open) return;
   const root = card.element;
   if (root) {
     const value = (Number(root.style.getPropertyValue('--hc-halo')) || 0) * Number(ctlIntensity.value);
     outHalo.value = value.toFixed(2);
     haloFill.style.width = `${Math.round(value * 100)}%`;
   }
-  requestAnimationFrame(pollHalo);
+  haloRaf = requestAnimationFrame(pollHalo);
 }
+moreBox.addEventListener('toggle', () => {
+  if (moreBox.open && !haloRaf) pollHalo();
+});
 
 function showProgress(key: MessageKey, params?: Record<string, string | number>, ratio?: number): void {
   progress.hidden = false;
@@ -876,3 +890,8 @@ async function boot(): Promise<void> {
 
 await boot();
 pollHalo();
+// 性能埋点，staging 和线上都有。render 模式是服务端的无头浏览器，不是真人的设备；
+// 卡片没加载出来（分享链接过期 404）的空页面也不量，不然会把 card 模式的帧率拉高
+if (route.mode !== 'render' && current) {
+  measurePerf(route.mode, () => ({ parallax: ctlParallax.checked, busy: busy || exporting }));
+}

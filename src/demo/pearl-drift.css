@@ -1,0 +1,64 @@
+/*
+ * 珠光底的漂移动画。由 scripts/pearl-keyframes.mjs 生成，不要手改：
+ * 改那个脚本里的配置再重新生成；pnpm build 会先跑 --check，对不上就构建失败。
+ * 为什么是这个写法见那个脚本开头。
+ *
+ * 只在没开「减少动态效果」时生效：开了珠光就是静止的，也就不必把两层提成合成层。
+ */
+@media (prefers-reduced-motion: no-preference) {
+  .pearl::before { animation: pearl-drift-a 34s linear infinite alternate; }
+  .pearl::after { animation: pearl-drift-b 47s linear infinite alternate; }
+
+  /*
+   * will-change: filter 让模糊交给合成器对整层做一次，不再在每个光栅分块里各算一遍（分块要外扩 3 倍模糊半径），
+   * Chromium 上每帧的开销减半。只给 Chromium：WebKit（Safari）提成合成层后屏幕四周那圈模糊会变样（最多差 18/255），
+   * 而 Safari 本来就没有这个性能问题。-webkit-app-region 只有 Chromium 认，拿它来区分
+   */
+  @supports (-webkit-app-region: drag) {
+    .pearl::before, .pearl::after { will-change: filter; }
+  }
+}
+
+/* 34s，17 段，每段 steps(24) ≈ 每秒 12 次；折线和 ease-in-out 最大偏差 0.19%。快慢曲线已经烘进关键帧，所以上面写 linear */
+@keyframes pearl-drift-a {
+  0% { background-position: 0% 0%, 100% 0%, 50% 100%; animation-timing-function: steps(24); }
+  5.88% { background-position: 0.67% 0.4%, 99.33% 0.54%, 49.66% 99.33%; animation-timing-function: steps(24); }
+  11.76% { background-position: 2.75% 1.65%, 97.25% 2.2%, 48.63% 97.25%; animation-timing-function: steps(24); }
+  17.65% { background-position: 6.31% 3.79%, 93.69% 5.05%, 46.84% 93.69%; animation-timing-function: steps(24); }
+  23.53% { background-position: 11.41% 6.84%, 88.59% 9.12%, 44.3% 88.59%; animation-timing-function: steps(24); }
+  29.41% { background-position: 18% 10.8%, 82% 14.4%, 41% 82%; animation-timing-function: steps(24); }
+  35.29% { background-position: 25.98% 15.59%, 74.02% 20.78%, 37.01% 74.02%; animation-timing-function: steps(24); }
+  41.18% { background-position: 35.08% 21.05%, 64.92% 28.07%, 32.46% 64.92%; animation-timing-function: steps(24); }
+  47.06% { background-position: 44.94% 26.96%, 55.06% 35.95%, 27.53% 55.06%; animation-timing-function: steps(24); }
+  52.94% { background-position: 55.06% 33.04%, 44.94% 44.05%, 22.47% 44.94%; animation-timing-function: steps(24); }
+  58.82% { background-position: 64.92% 38.95%, 35.08% 51.93%, 17.54% 35.08%; animation-timing-function: steps(24); }
+  64.71% { background-position: 74.02% 44.41%, 25.98% 59.22%, 12.99% 25.98%; animation-timing-function: steps(24); }
+  70.59% { background-position: 82% 49.2%, 18% 65.6%, 9% 18%; animation-timing-function: steps(24); }
+  76.47% { background-position: 88.59% 53.16%, 11.41% 70.88%, 5.7% 11.41%; animation-timing-function: steps(24); }
+  82.35% { background-position: 93.69% 56.21%, 6.31% 74.95%, 3.16% 6.31%; animation-timing-function: steps(24); }
+  88.24% { background-position: 97.25% 58.35%, 2.75% 77.8%, 1.37% 2.75%; animation-timing-function: steps(24); }
+  94.12% { background-position: 99.33% 59.6%, 0.67% 79.46%, 0.34% 0.67%; animation-timing-function: steps(24); }
+  100% { background-position: 100% 60%, 0% 80%, 0% 0%; }
+}
+
+/* 47s，17 段，每段 steps(33) ≈ 每秒 12 次；折线和 ease-in-out 最大偏差 0.19%。快慢曲线已经烘进关键帧，所以上面写 linear */
+@keyframes pearl-drift-b {
+  0% { background-position: 100% 100%, 0% 0%; animation-timing-function: steps(33); }
+  5.88% { background-position: 99.46% 99.33%, 0.54% 0.67%; animation-timing-function: steps(33); }
+  11.76% { background-position: 97.8% 97.25%, 2.2% 2.75%; animation-timing-function: steps(33); }
+  17.65% { background-position: 94.95% 93.69%, 5.05% 6.31%; animation-timing-function: steps(33); }
+  23.53% { background-position: 90.88% 88.59%, 9.12% 11.41%; animation-timing-function: steps(33); }
+  29.41% { background-position: 85.6% 82%, 14.4% 18%; animation-timing-function: steps(33); }
+  35.29% { background-position: 79.22% 74.02%, 20.78% 25.98%; animation-timing-function: steps(33); }
+  41.18% { background-position: 71.93% 64.92%, 28.07% 35.08%; animation-timing-function: steps(33); }
+  47.06% { background-position: 64.05% 55.06%, 35.95% 44.94%; animation-timing-function: steps(33); }
+  52.94% { background-position: 55.95% 44.94%, 44.05% 55.06%; animation-timing-function: steps(33); }
+  58.82% { background-position: 48.07% 35.08%, 51.93% 64.92%; animation-timing-function: steps(33); }
+  64.71% { background-position: 40.78% 25.98%, 59.22% 74.02%; animation-timing-function: steps(33); }
+  70.59% { background-position: 34.4% 18%, 65.6% 82%; animation-timing-function: steps(33); }
+  76.47% { background-position: 29.12% 11.41%, 70.88% 88.59%; animation-timing-function: steps(33); }
+  82.35% { background-position: 25.05% 6.31%, 74.95% 93.69%; animation-timing-function: steps(33); }
+  88.24% { background-position: 22.2% 2.75%, 77.8% 97.25%; animation-timing-function: steps(33); }
+  94.12% { background-position: 20.54% 0.67%, 79.46% 99.33%; animation-timing-function: steps(33); }
+  100% { background-position: 20% 0%, 80% 100%; }
+}

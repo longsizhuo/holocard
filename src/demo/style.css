@@ -58,6 +58,13 @@ body {
  * 两层大尺度虹彩，错开速度和方向缓慢漂移，叠出「转一下角度颜色就变」的珠光感。
  * 用 200% 的背景块配合 background-position 位移，而不是 transform——
  * 位移 transform 会让边缘露白，还得额外放大补偿。
+ *
+ * 漂移动画（含时长、关键帧、will-change）不在这里，在生成的 pearl-drift.css 里，由 scripts/pearl-keyframes.mjs 产出。
+ * 原因是性能：background-position 一变就要整层重新光栅化，而这两层铺满屏幕还带 60px 模糊，
+ * 按屏幕刷新率每帧都变的话，4K 高刷屏上能把 RTX 4080 的风扇跑起来。现在每秒只变 12 次、曲线不变，
+ * Chromium 上模糊再交给合成器做；同一时刻截图对比，画面最大差 4/255，Safari 内核在它自身的渲染噪声以内
+ * （scripts/verify-pearl.mjs 可复核）。
+ * 这里每层 radial-gradient 的个数要和那个脚本的配置一致，pnpm build 会核对。
  */
 .pearl {
   position: fixed;
@@ -79,24 +86,13 @@ body {
     radial-gradient(40% 45% at 22% 28%, var(--p1) 0%, transparent 70%),
     radial-gradient(38% 42% at 78% 22%, var(--p2) 0%, transparent 70%),
     radial-gradient(45% 40% at 62% 82%, var(--p3) 0%, transparent 70%);
-  animation: pearl-drift-a 34s ease-in-out infinite alternate;
 }
 .pearl::after {
   background-image:
     radial-gradient(35% 40% at 70% 60%, var(--p4) 0%, transparent 70%),
     radial-gradient(42% 38% at 18% 70%, var(--p5) 0%, transparent 70%);
-  animation: pearl-drift-b 47s ease-in-out infinite alternate;
   mix-blend-mode: multiply;
   opacity: 0.75;
-}
-
-@keyframes pearl-drift-a {
-  from { background-position: 0% 0%, 100% 0%, 50% 100%; }
-  to   { background-position: 100% 60%, 0% 80%, 0% 0%; }
-}
-@keyframes pearl-drift-b {
-  from { background-position: 100% 100%, 0% 0%; }
-  to   { background-position: 20% 0%, 80% 100%; }
 }
 
 /*
@@ -782,10 +778,9 @@ select {
 /*
  * 「减少动态效果」下把珠光停住。渐变本身留着——静止的虹彩不会引起不适，
  * 而去掉它这一页就只剩白底，和卡片的箔面也对不上了。
+ * 珠光的漂移本来就只在 no-preference 下才加（见 pearl-drift.css），这里不用再管它。
  */
 @media (prefers-reduced-motion: reduce) {
-  .pearl::before,
-  .pearl::after,
   .page__head h1,
   .drop::after,
   .share__btn::after,

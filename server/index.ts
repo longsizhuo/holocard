@@ -12,6 +12,7 @@
  *   POST /api/jobs             请求体是图片字节 → 202 {id}
  *   GET  /api/jobs/{id}        → {state, stage, position, layers?, error?}
  *   GET  /api/layers/{id}/...  产出的层文件与 manifest
+ *   POST /api/perf             性能埋点，一次页面访问最多一条（见 perf.ts）
  *   GET  其余路径               前端静态文件（HOLOCARD_WEB_DIR）
  *
  * 静态文件也由这个服务自己发，所以它是自包含的：上游只要一条反代就够，
@@ -41,6 +42,8 @@ import {
 import { renderPreview, PREVIEW_HEIGHT, PREVIEW_WIDTH } from './preview';
 import { recordHit, flushHits, sweepCards, expiresAt, importLegacy } from './cards';
 import { CardDb, type CardRow } from './db';
+import { parsePerf } from './perf';
+import { detectNudity } from './moderation';
 import {
   EXPORT_FILE,
   EXPORT_FORMATS,
@@ -148,21 +151,42 @@ const db = new CardDb(DB_PATH);
 const MAX_EXPORT_QUEUE = Number(process.env.HOLOCARD_MAX_EXPORT_QUEUE ?? 6);
 const EXPORT_RATE_LIMIT = Number(process.env.HOLOCARD_EXPORT_RATE_LIMIT ?? 8);
 
+/**
+ * 限流按什么记。IPv6 按 /64 记：一个用户手上通常是一整段 /64，逐个地址记的话每个请求换个地址就绕过去了。
+ * IPv4（含 ::ffff:1.2.3.4 这种映射写法）照旧按地址
+ */
+function limitKey(ip: string): string {
+  if (!ip.includes(':') || ip.includes('.')) return ip;
+  const [head = '', tail] = ip.split('::');
+  const h = head ? head.split(':') : [];
+  const t = tail ? tail.split(':') : [];
+  const full = tail === undefined ? h : [...h, ...new Array<string>(Math.max(0, 8 - h.length - t.length)).fill('0'), ...t];
+  return `${full.slice(0, 4).join(':')}::/64`;
+}
+
 /** 简单的滑动窗口限流。单进程、内存态，够用；真被大规模刷再上 Cloudflare 的规则 */
 function makeLimiter(limit: number, windowMs: number): (ip: string) => boolean {
   const hits = new Map<string, number[]>();
+  let sweptAt = 0;
   return (ip) => {
+    const key = limitKey(ip);
     const now = Date.now();
-    const recent = (hits.get(ip) ?? []).filter((t) => now - t < windowMs);
+    const recent = (hits.get(key) ?? []).filter((t) => now - t < windowMs);
+    // 已经超限的不再记账：不然一个 IP 狂刷时数组越来越长，被挡掉的请求也越来越费 CPU
+    if (recent.length >= limit) {
+      hits.set(key, recent);
+      return true;
+    }
     recent.push(now);
-    hits.set(ip, recent);
-    // 顺手清掉早就过期的条目，别让这个 Map 无限长
-    if (hits.size > 5000) {
-      for (const [key, times] of hits) {
-        if (times.every((t) => now - t >= windowMs)) hits.delete(key);
+    hits.set(key, recent);
+    // 过期条目每个窗口清一次。以前是超过 5000 条就每个请求全表扫一遍，被刷时正好最慢
+    if (now - sweptAt >= windowMs) {
+      sweptAt = now;
+      for (const [k, times] of hits) {
+        if (times.every((t) => now - t >= windowMs)) hits.delete(k);
       }
     }
-    return recent.length > limit;
+    return false;
   };
 }
 
@@ -170,6 +194,13 @@ function makeLimiter(limit: number, windowMs: number): (ip: string) => boolean {
 const rateLimited = makeLimiter(RATE_LIMIT, RATE_WINDOW_MS);
 /** 导出动图的限流，和上传分开计数 */
 const exportLimited = makeLimiter(EXPORT_RATE_LIMIT, RATE_WINDOW_MS);
+/** 性能埋点的限流：正常一次页面访问一条，这个数只挡刷的 */
+const perfLimited = makeLimiter(30, RATE_WINDOW_MS);
+/**
+ * 性能埋点的总量上限，不分来源。换着地址刷能绕过按 IP 的限流，而表只留最新 20 万行，
+ * 灌满的话真实数据全被挤掉。正常流量离这个数远得很
+ */
+const perfFlooded = makeLimiter(120, 60 * 1000);
 
 /**
  * 定长字符串比较。长度不同时先比一个等长的占位串，让耗时与输入无关，
@@ -492,6 +523,9 @@ async function runJob(id: string): Promise<void> {
     });
     // 缩略图顺手做掉，卡册里第一次打开时就不用现做了。不等它，也不让它的失败影响这张卡
     void ensureThumb(id);
+    // 裸露识别（只记录不拦，见 moderation.ts）。卡已经是 done 了，用户不用等它；
+    // 放在这里串行跑，是为了不和下一张的分层抢 CPU
+    await recordNsfw(id, file);
   } catch (error) {
     db.update(id, {
       status: 'error',
@@ -508,6 +542,46 @@ async function runJob(id: string): Promise<void> {
         .map((name) => rm(join(dir, name), { force: true }).catch(() => undefined)),
     );
   }
+}
+
+/**
+ * 给一张卡做裸露识别并记下，分数高的打一行日志，方便从 journalctl 里直接看到（见 moderation.ts）。
+ * 绝不抛错：runJob 里它在 try 块中，抛出去会被当成分层失败，把做好的卡删掉
+ */
+async function recordNsfw(id: string, file: string): Promise<void> {
+  const result = await detectNudity(file, MODEL_DIR);
+  if (!result) return;
+  try {
+    db.update(id, { nsfw: Math.round(result.score * 1000) / 1000, nsfw_part: result.part });
+  } catch (error) {
+    console.error(`[nsfw] ${id} 结果写库失败`, error);
+    return;
+  }
+  if (result.score >= NSFW_LOG_THRESHOLD) {
+    console.log(`[nsfw] ${id} 疑似裸露：${result.part}（${result.score.toFixed(3)}），查看：db.mjs nsfw`);
+  }
+}
+
+/**
+ * 分数到这个值就在日志里提一句，只是提示，不做任何拦截。
+ * 依据：上线前线上 93 张正常原图离线跑过，这几个部位的最高分是 0.21；明确露出时一般在 0.5 以上
+ */
+const NSFW_LOG_THRESHOLD = 0.4;
+
+/**
+ * 启动时把还没识别过的卡补上（上线这个功能之前的存量卡，以及上次识别前服务就重启了的）。
+ * 一张张串行来，不耽误启动；只看还留着原图的卡，删掉的、过期的没有文件可看
+ */
+async function backfillNsfw(): Promise<void> {
+  let scored = 0;
+  for (const card of db.live()) {
+    if (card.nsfw !== null) continue;
+    const file = originalFile(card);
+    if (!file || !(await stat(file).catch(() => null))) continue;
+    await recordNsfw(card.id, file);
+    scored++;
+  }
+  if (scored > 0) console.log(`[nsfw] 给 ${scored} 张存量卡补做了裸露识别`);
 }
 
 function pump(): void {
@@ -931,6 +1005,11 @@ async function sweep(): Promise<void> {
   flushHits(db);
   const removed = await sweepCards(db, OUT_DIR, TTL_MS, KEEP_DOUBLINGS_CAP);
   if (removed > 0) console.log(`[sweep] 清理了 ${removed} 张过期卡片`);
+  try {
+    db.prunePerf(90, 200_000);
+  } catch (error) {
+    console.error('[perf] 清理失败', error);
+  }
 }
 
 const server = createServer((req, res) => {
@@ -956,6 +1035,40 @@ const server = createServer((req, res) => {
     }
     if ((req.method === 'GET' || req.method === 'HEAD') && url.pathname === '/sitemap.xml') {
       text(res, 'application/xml; charset=utf-8', await sitemapXml(), req.method);
+      return;
+    }
+
+    if (req.method === 'POST' && url.pathname === '/api/perf') {
+      /*
+       * 只收本站前端发的：它发的是 application/json 的 Blob。别的网站想借访客的浏览器灌假数据，
+       * 要么只能发 text/plain（这里拒收），要么带 application/json 触发预检（这个服务不答 OPTIONS）
+       */
+      const site = req.headers['sec-fetch-site'];
+      if (!String(req.headers['content-type'] ?? '').startsWith('application/json') || (site && site !== 'same-origin')) {
+        res.writeHead(400).end();
+        return;
+      }
+      if (perfLimited(clientIp(req)) || perfFlooded('all')) {
+        res.writeHead(429).end();
+        return;
+      }
+      let sample;
+      try {
+        sample = parsePerf(JSON.parse((await readBody(req, 4096)).toString('utf8')), req);
+      } catch {
+        sample = null;
+      }
+      if (!sample) {
+        res.writeHead(400).end();
+        return;
+      }
+      // 埋点写不进去（磁盘满、库被锁）不能把服务带崩：这个处理函数外面没有兜底的 catch
+      try {
+        db.insertPerf(sample);
+      } catch (error) {
+        console.error('[perf] 写库失败', error);
+      }
+      res.writeHead(204).end();
       return;
     }
 
@@ -1025,6 +1138,8 @@ const server = createServer((req, res) => {
         hits: 0,
         last_hit_at: null,
         delete_token: randomUUID(),
+        nsfw: null,
+        nsfw_part: null,
       };
       db.insert(card);
       queue.push(id);
@@ -1137,8 +1252,10 @@ const server = createServer((req, res) => {
         if (exportQueue[i]?.id === id) exportQueue.splice(i, 1);
       }
 
-      // 文件（含原图）全删；数据库那一行留着，只改状态，统计时还能数到
+      // 文件（含原图）全删；数据库那一行留着，只改状态，统计时还能数到。
+      // 被站长下架过的卡，隔离区里那份也一起删：上传者要删，页面上承诺的是服务端的文件都清掉
       await rm(dir, { recursive: true, force: true });
+      await rm(join(OUT_DIR, '.removed', id), { recursive: true, force: true });
       db.update(id, { status: 'deleted', stage: null });
       console.log(`[delete] ${id} 已被创建者删除`);
       json(res, 200, { deleted: true });
@@ -1244,7 +1361,7 @@ const server = createServer((req, res) => {
     if (req.method === 'GET' && jobMatch) {
       const card = db.get(jobMatch[1] ?? '');
       // 删掉的、过期的对前端来说都是「没有了」，不暴露内部状态
-      if (!card || card.status === 'deleted' || card.status === 'expired') {
+      if (!card || card.status === 'deleted' || card.status === 'expired' || card.status === 'removed') {
         fail(res, 404, 'job_not_found', '任务不存在或已过期');
         return;
       }
@@ -1333,6 +1450,8 @@ for (const signal of ['SIGTERM', 'SIGINT'] as const) {
 
 server.listen(PORT, '127.0.0.1', () => {
   void backfillPreviews();
+  // 外面没有兜底的 catch，漏出来的拒绝会让进程退出
+  void backfillNsfw().catch((error: unknown) => console.error('[nsfw] 补打分中断', error));
   console.log(`holocard 分层服务已启动 127.0.0.1:${PORT}`);
   console.log(`  产物目录 ${OUT_DIR}`);
   const matteNote = MATTE_READY
