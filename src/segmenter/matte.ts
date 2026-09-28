@@ -18,7 +18,7 @@
  */
 
 import { AutoModel, RawImage, Tensor } from '@huggingface/transformers';
-import { configureModelSource, pickDevice, type LoadProgress } from './runtime';
+import { configureModelSource, cpuSessionOptions, pickDevice, type LoadProgress } from './runtime';
 
 export const MATTE_MODEL_ID = 'onnx-community/BiRefNet_lite-ONNX';
 
@@ -70,7 +70,8 @@ export async function matteUnsupportedReason(): Promise<string | null> {
 
 let loadedPromise: Promise<MatteModel> | null = null;
 
-async function load(onProgress?: (p: LoadProgress) => void): Promise<MatteModel> {
+/** 加载抠图模型。estimateMatte 第一次用时会自己调；服务端的分层线程启动时提前调，第一张图不用等 */
+export async function loadMatteModel(onProgress?: (p: LoadProgress) => void): Promise<MatteModel> {
   if (loadedPromise) return loadedPromise;
 
   loadedPromise = (async () => {
@@ -87,7 +88,7 @@ async function load(onProgress?: (p: LoadProgress) => void): Promise<MatteModel>
       return AutoModel.from_pretrained(MATTE_MODEL_ID, {
         device: 'cpu',
         dtype: 'fp32',
-        session_options: { enableCpuMemArena: false, enableMemPattern: false },
+        session_options: { enableCpuMemArena: false, enableMemPattern: false, ...cpuSessionOptions() },
         ...progress,
       });
     }
@@ -159,7 +160,7 @@ export async function estimateMatte(
   image: Blob,
   options: Partial<MatteOptions> = {},
 ): Promise<Matte> {
-  const model = await load(options.onProgress);
+  const model = await loadMatteModel(options.onProgress);
   const input = await RawImage.fromBlob(image);
 
   const pixel_values = await preprocess(input, options.inputSize ?? 1024);

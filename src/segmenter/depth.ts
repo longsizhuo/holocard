@@ -7,7 +7,7 @@
  */
 
 import { pipeline, RawImage } from '@huggingface/transformers';
-import { configureModelSource, pickDevice, useOwnModelHost, type LoadProgress } from './runtime';
+import { configureModelSource, cpuSessionOptions, pickDevice, useOwnModelHost, type LoadProgress } from './runtime';
 import type { DepthMap } from './slice';
 
 const MODEL_ID = 'onnx-community/depth-anything-v2-small';
@@ -38,6 +38,7 @@ export async function loadDepthModel(
     return pipeline('depth-estimation', MODEL_ID, {
       device,
       dtype,
+      ...(device === 'cpu' ? { session_options: cpuSessionOptions() } : {}),
       ...(onProgress ? { progress_callback: (p: unknown) => onProgress(p as LoadProgress) } : {}),
     });
   })();
