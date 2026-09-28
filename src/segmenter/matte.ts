@@ -22,6 +22,29 @@ import { configureModelSource, cpuSessionOptions, pickDevice, type LoadProgress 
 
 export const MATTE_MODEL_ID = 'onnx-community/BiRefNet_lite-ONNX';
 
+/** 服务端用哪个抠图模型。默认 lite；做对比实验、换型号时由服务端按环境变量改（见 server/index.ts 的 MATTE_MODEL） */
+export interface MatteModelConfig {
+  /** Hugging Face 上的模型名，权重放在模型目录的同名子目录里 */
+  id: string;
+  /** 输入边长。这些 ONNX 导出时把尺寸焊死了：lite 1024、512 版 512 */
+  size: number;
+  /** transformers.js 的精度名：fp32 读 onnx/model.onnx，q8 读 onnx/model_quantized.onnx */
+  dtype: 'fp32' | 'fp16' | 'q8';
+}
+
+let matteModel: MatteModelConfig = { id: MATTE_MODEL_ID, size: 1024, dtype: 'fp32' };
+
+/** 换抠图模型。要在第一次加载之前调，加载过了就不换了 */
+export function setMatteModel(config: MatteModelConfig): void {
+  matteModel = config;
+}
+
+/** 某个精度在模型目录里对应哪个权重文件（服务端启动时据此判断权重在不在） */
+export function matteWeightsFile(config: MatteModelConfig): string {
+  const suffix = { fp32: '', fp16: '_fp16', q8: '_quantized' }[config.dtype];
+  return `${config.id}/onnx/model${suffix}.onnx`;
+}
+
 /** 前景 alpha，取值 0..1，1 表示显著主体 */
 export interface Matte {
   data: Float32Array;
@@ -85,9 +108,9 @@ export async function loadMatteModel(onProgress?: (p: LoadProgress) => void): Pr
      * 关掉后推理完回落到 0.6~0.8GB（4 核 ARM 实测，一张约 23 秒）。
      */
     if ((await pickDevice()) === 'cpu') {
-      return AutoModel.from_pretrained(MATTE_MODEL_ID, {
+      return AutoModel.from_pretrained(matteModel.id, {
         device: 'cpu',
-        dtype: 'fp32',
+        dtype: matteModel.dtype,
         session_options: { enableCpuMemArena: false, enableMemPattern: false, ...cpuSessionOptions() },
         ...progress,
       });
@@ -163,7 +186,7 @@ export async function estimateMatte(
   const model = await loadMatteModel(options.onProgress);
   const input = await RawImage.fromBlob(image);
 
-  const pixel_values = await preprocess(input, options.inputSize ?? 1024);
+  const pixel_values = await preprocess(input, options.inputSize ?? matteModel.size);
   const { output_image } = await model({ input_image: pixel_values });
 
   // 输出是 [1, 1, H, W] 的 logits，过 sigmoid 才是 alpha

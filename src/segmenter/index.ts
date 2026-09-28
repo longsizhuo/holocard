@@ -57,6 +57,8 @@ export interface SegmentOptions {
    * 只有服务端给：浏览器里跑不动这个模型，见 matte.ts。
    */
   findSubject: (image: Blob) => Promise<Matte | null>;
+  /** 抠图用的模型名，写进 manifest 的 generator，事后排查、对比实验时分得清是哪个模型做的 */
+  subjectModel: string;
 }
 
 const STAGE_TEXT: Record<SegmentStage, string> = {
@@ -117,12 +119,17 @@ function toParallax(depths: number[], rigid: boolean[]): number[] {
  * 生成者标识，把切层决策也写进去。
  * 排查「为什么这张图切成两层 / 为什么切在这个位置」时，看这一行就够了。
  */
-function buildGeneratorTag(cuts: number[], prominences: number[], subject: boolean): string {
+function buildGeneratorTag(cuts: number[], prominences: number[], subject: string | null): string {
   const detail = cuts
     .map((c, i) => `${c.toFixed(3)}@${(prominences[i] ?? 0).toFixed(3)}`)
     .join(',');
   const layers = cuts.length + 1 + (subject ? 1 : 0);
-  return `holocard-web/0.1.0 depth-anything-v2-small${subject ? ' birefnet-lite' : ''} layers=${layers} cuts=[${detail}]${subject ? ' +subject' : ''}`;
+  return `holocard-web/0.1.0 depth-anything-v2-small${subject ? ` ${subject}` : ''} layers=${layers} cuts=[${detail}]${subject ? ' +subject' : ''}`;
+}
+
+/** 模型名缩成 generator 里的一个词：onnx-community/BiRefNet_lite-ONNX → birefnet-lite */
+function subjectLabel(model = 'onnx-community/BiRefNet_lite-ONNX'): string {
+  return (model.split('/').pop() ?? model).replace(/-ONNX$/i, '').replace(/_/g, '-').toLowerCase();
 }
 
 export async function segmentToLayerSet(
@@ -243,7 +250,7 @@ export async function segmentToLayerSet(
     manifest: {
       version: LAYERS_FORMAT_VERSION,
       source: { width, height },
-      generator: buildGeneratorTag(cuts, prominences, subject !== null),
+      generator: buildGeneratorTag(cuts, prominences, subject ? subjectLabel(options.subjectModel) : null),
       layers,
       effects: {
         halo: defaultHalo(),
