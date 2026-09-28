@@ -20,7 +20,8 @@
  */
 
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
-import { createReadStream, existsSync } from 'node:fs';
+import { createReadStream, existsSync, readFileSync } from 'node:fs';
+import { availableParallelism } from 'node:os';
 import { mkdir, rm, writeFile, readFile, readdir, stat } from 'node:fs/promises';
 import { randomUUID, timingSafeEqual } from 'node:crypto';
 import { basename, dirname, extname, join, resolve, sep } from 'node:path';
@@ -29,7 +30,7 @@ import { Worker } from 'node:worker_threads';
 import type { LayerManifest } from '../src/format/types';
 import { MATTE_MODEL_ID } from '../src/segmenter/matte';
 import { normalizeOriginal, layerToWebp, makeThumb, ImageError } from './images';
-import type { SegmentReply, SegmentRequest } from './segment-worker';
+import type { SegmentReply, SegmentRequest, SegmenterConfig } from './segment-worker';
 import { enterStage, finishJob, queuedEta, runningEta, startJob } from './eta';
 import {
   LANG_TAG,
@@ -137,8 +138,26 @@ let segmentTail: Promise<unknown> = Promise.resolve();
  */
 let segmenterBroken = false;
 
+/**
+ * 这个服务分到几个核：systemd 的 CPUQuota 写在自己 cgroup 的 cpu.max 里，「200000 100000」就是 2 核。
+ * onnxruntime 默认按机器的物理核数开推理线程，多开的线程只会互相抢额度，见 src/segmenter/runtime.ts 的 setCpuThreads。
+ * 没有限额（开发机、cpu.max 是 max）或者读不到时，就按机器的核数
+ */
+function cpuShare(): number {
+  try {
+    const group = /^0::(.*)$/m.exec(readFileSync('/proc/self/cgroup', 'utf8'))?.[1] ?? '';
+    const [quota, period] = readFileSync(`/sys/fs/cgroup${group}/cpu.max`, 'utf8').trim().split(' ');
+    if (quota && period && quota !== 'max') return Math.max(1, Math.floor(Number(quota) / Number(period)));
+  } catch {
+    // 不是 cgroup v2，或者读不到
+  }
+  return availableParallelism();
+}
+const CPU_SHARE = cpuShare();
+
 function spawnSegmenter(): Worker {
-  const worker = new Worker(new URL('./segment-worker.mjs', import.meta.url));
+  const config: SegmenterConfig = { modelDir: MODEL_DIR, matte: MATTE_READY, threads: CPU_SHARE };
+  const worker = new Worker(new URL('./segment-worker.mjs', import.meta.url), { workerData: config });
   let ready = false;
   worker.on('message', (reply: SegmentReply) => {
     if (reply.type !== 'ready') return;
@@ -190,7 +209,7 @@ function segmentInWorker(
         };
         worker.on('message', onMessage);
         worker.on('exit', onExit);
-        const request: SegmentRequest = { bytes, modelDir: MODEL_DIR, matte };
+        const request: SegmentRequest = { bytes, matte };
         worker.postMessage(request, [bytes.buffer as ArrayBuffer]);
       }),
   );
@@ -1539,7 +1558,7 @@ server.listen(PORT, '127.0.0.1', () => {
   console.log(`  数据库   ${DB_PATH}`);
   console.log(`  静态目录 ${WEB_DIR || '(未配置，由前端开发服务器负责)'}`);
   const days = Math.round(TTL_MS / 86400000);
-  console.log(`  并发 ${CONCURRENCY}，队列上限 ${MAX_QUEUE}`);
+  console.log(`  并发 ${CONCURRENCY}，队列上限 ${MAX_QUEUE}，推理线程 ${CPU_SHARE}`);
   console.log(
     `  保留：未分享 ${days} 天；分享过的从最后一次访问起 ${days} 天，` +
       `访问量每翻一番延一档，最长 ${days * Math.pow(2, KEEP_DOUBLINGS_CAP - 1)} 天`,

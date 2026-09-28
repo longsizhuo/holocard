@@ -83,16 +83,18 @@ if (arg === 'nsfw') {
     })),
   );
   /*
-   * 分组时只看真正静置的：处理照片、导出时掉帧是正常的；有操作（鼠标在卡上动）时箔面在重画，
-   * 桌面端样本大多带操作、手机大多不带，混在一起两类设备就没法比了
+   * 分组时去掉「处理中」的（上传、导出时掉帧是正常的），也去掉软件渲染（SwiftShader：
+   * 服务器上的无头浏览器，测试或截图用的，不是真人的设备）。
+   * 「有操作」不去掉而是单独分组：桌面上鼠标一动就算有操作，去掉的话桌面样本就一条不剩了；
+   * 混在一起也不行，有操作时箔面在重画，和静置的帧率没法比
    */
   const groups = new Map();
-  for (const r of rows.filter((r) => !r.busy && !r.interacted)) {
-    const key = `${physical(r)} | ${shortUa(r.ua)} | ${(r.gpu ?? '').slice(0, 60)}`;
+  for (const r of rows.filter((r) => !r.busy && !/SwiftShader/i.test(r.gpu ?? ''))) {
+    const key = `${physical(r)} | ${shortUa(r.ua)} | ${(r.gpu ?? '').slice(0, 60)}${r.interacted ? ' | 有操作' : ''}`;
     if (!groups.has(key)) groups.set(key, []);
     groups.get(key).push(r);
   }
-  console.log('按窗口物理像素、浏览器、显卡分组（只算静置、没操作的），掉帧多的在前：');
+  console.log('按窗口物理像素、浏览器、显卡分组（不含处理照片时的和软件渲染的），掉帧多的在前：');
   console.table(
     [...groups]
       .map(([key, list]) => ({

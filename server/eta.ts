@@ -13,16 +13,16 @@ const STAGES = ['loading-model', 'estimating-depth', 'analyzing', 'finding-subje
 type Stage = (typeof STAGES)[number];
 
 /**
- * 初值：线上条件（2 核）实测的一张图各阶段耗时，秒，模型已经加载好的情况。
- * 加载模型只有重启后第一张慢（七八秒），平时一瞬间
+ * 初值：线上条件（2 核、推理线程按核数开）实测的一张图各阶段耗时，秒。
+ * 模型在分层线程启动时就预加载了，加载模型这一步平时一瞬间
  */
 const average: Record<Stage, number> = {
-  'loading-model': 1,
-  'estimating-depth': 6,
+  'loading-model': 0.5,
+  'estimating-depth': 4.5,
   analyzing: 0.5,
-  'finding-subject': 28,
-  extracting: 3,
-  saving: 1,
+  'finding-subject': 24.5,
+  extracting: 2.7,
+  saving: 0.5,
 };
 /** 新样本的权重。三五张图就能跟上机器的变化，又不至于被一张特别大的图带偏 */
 const WEIGHT = 0.3;
