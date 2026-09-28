@@ -20,7 +20,7 @@
 import type { BBox } from '../format/types';
 import { browserImages, type ImageBackend } from './image-io';
 import { blurAlpha, dilateMask, growForeground, nearestSource, snapDepthEdges } from './morph';
-import { createRefiner, guideFromImage, type Guide, type RefineOptions } from './refine';
+import { boxMean, createRefiner, guideFromImage, type Guide, type RefineOptions } from './refine';
 import type { Matte } from './matte';
 import type { DepthMap } from './slice';
 
@@ -645,7 +645,7 @@ export async function extractLayers(
     stats.push({ depth: median, bbox });
   }
 
-  decontaminate(src, layerPixels, layerAlphas, layerFilled);
+  decontaminate(src, layerPixels, layerAlphas, layerFilled, width, height);
 
   const images: Blob[] = [];
   for (let i = 0; i < layerPixels.length; i++) {
@@ -661,19 +661,30 @@ export async function extractLayers(
 
 /** alpha 低于它的像素几乎透明，颜色是什么都看不出来，不值得算；高于 1 − 它就当不透明 */
 const DECONTAMINATE_EPS = 0.02;
+/**
+ * 估前景色的两级窗口半径：大窗口按图宽比例，要够得着软边里侧的实心前景；小窗口按像素，把颜色贴回局部。
+ * 照 BiRefNet 官方 refine_foreground 取的（1024 宽时 90 和 6 的方窗）
+ */
+const FOREGROUND_REACH = 45 / 1024;
+const FOREGROUND_DETAIL = 3;
 
 /**
  * 软边去背景色（issue #3 第 2 条的「白边」）。
  *
  * 半透明边缘像素的颜色是前景和身后背景的混合：C = a·F + (1 − a)·B。
- * 以前层里存的就是原图的 C，于是每层的软边都带着一圈背景色——白墙前的头发带着白边，
+ * 层里直接存原图的 C 的话，每层的软边都带着一圈背景色——白墙前的头发带着白边，
  * 天空前的肩膀带着一圈天蓝。静止时看不出来（身后正好就是那块背景），
- * 一做视差，前景挪到别的背景上，这圈颜色就跟着走了。
+ * 一做视差，前景挪到别的背景上，这圈颜色就跟着走了。所以层里要存估出来的 F。
  *
- * 做法：由远及近逐层合成，B 取「这一层身后此刻实际垫着的颜色」（更远各层叠出来的结果），
- * 反解出 F = (C − (1 − a)·B) / a 存进层里。有两个好处：
- *   1. 静止时逐层叠回去恰好还是原图 C（不被截断的地方严格相等），不会因为去色把画面改了
- *   2. 身后垫着的是紧挨着的真实背景镜像过来的补全色，和真正的 B 很接近，F 就接近真正的前景色
+ * 由远及近逐层合成，B 取「这一层身后此刻实际垫着的颜色」。分两种情况：
+ * - 身后是原图（深度平缓过渡的羽化带）：B 是真的，直接反解 F = (C − (1 − a)·B) / a，
+ *   静止时逐层叠回去严格等于原图。
+ * - 身后是补出来的（物体真实边缘上，被挡住的部分连同 fringe 那一圈都是镜像补的）：不能反解。
+ *   补的颜色只是猜的，猜错的部分被放大 (1 − a) / a 倍，a = 0.2 时就是 4 倍。
+ *   主体身边有光晕、轮廓光，或者抠图把透明度估宽了一圈，真实背景就和补的对不上，
+ *   F 被推到 255（或 0），主体镶着一圈白边（黑边）跟着走。实测 97 张图，
+ *   中位数一张卡有 15% 的软边像素因此比身边的前景亮 40 级以上。
+ *   这里改用邻域估计，见 estimateForeground。
  * 颜色是补出来的像素（被更近的层挡住的部分）不参与：那里本来就看不见，也没有原图 C 可反解。
  */
 export function decontaminate(
@@ -681,21 +692,28 @@ export function decontaminate(
   pixels: Uint8ClampedArray[],
   alphas: Float32Array[],
   filled: (Uint8Array | null)[],
+  width: number,
+  height: number,
 ): void {
   const base = pixels[0];
   if (!base || pixels.length < 2) return;
-  const pixelCount = src.length / 4;
+  const pixelCount = width * height;
   // 身后此刻垫着的颜色。最远层 alpha 恒为 1，从它开始
   const backdrop = new Float32Array(pixelCount * 3);
   for (let p = 0; p < pixelCount; p++) {
     for (let c = 0; c < 3; c++) backdrop[p * 3 + c] = base[p * 4 + c] ?? 0;
   }
+  // 身后垫着的颜色是不是补出来的
+  const guessed = new Uint8Array(pixelCount);
+  if (filled[0]) guessed.set(filled[0]);
 
   for (let i = 1; i < pixels.length; i++) {
     const out = pixels[i];
     const alpha = alphas[i];
     if (!out || !alpha) continue;
     const fill = filled[i];
+    // 要在改写这一层之前算，读的是这一层原来的颜色
+    const estimate = estimateForeground(src, out, alpha, width, height);
     for (let p = 0; p < pixelCount; p++) {
       const a = alpha[p] ?? 0;
       if (a < DECONTAMINATE_EPS) continue;
@@ -705,11 +723,74 @@ export function decontaminate(
         const behind = backdrop[k] ?? 0;
         let color = out[p * 4 + c] ?? 0;
         if (soft) {
-          color = Math.min(255, Math.max(0, ((src[p * 4 + c] ?? 0) - (1 - a) * behind) / a));
+          color = guessed[p]
+            ? (estimate[k] ?? 0)
+            : Math.min(255, Math.max(0, ((src[p * 4 + c] ?? 0) - (1 - a) * behind) / a));
           out[p * 4 + c] = color;
         }
         backdrop[k] = a * color + (1 - a) * behind;
       }
+      // 这一层补过色的地方，更近的层身后就是猜的；这一层不透明、颜色又是原图的地方，身后又是真的了
+      if (fill?.[p]) guessed[p] = 1;
+      else if (a >= 1 - DECONTAMINATE_EPS) guessed[p] = 0;
     }
   }
+}
+
+/**
+ * 按邻域估一层的前景色，返回每个像素的 RGB（0..255）。
+ *
+ * blur-fusion（Forte & Pitié 2021，BiRefNet 官方 refine_foreground 同款），两级：
+ * 1. 大窗口里按 alpha 加权，得到邻域前景均值 F̄、邻域背景均值 B̄（背景取原图，身边真实的光晕也算进去），
+ *    按官方公式 F₁ = F̄ + a·(C − a·F̄ − (1 − a)·B̄) 得到一个很稳、但偏糊的前景色。
+ * 2. 小窗口里再对 F₁、B̄ 取均值，按 F = C + (1 − a)·(F̄ − B̄) 贴回原色：
+ *    原色往前景那边推，推多少按背景占的比例。邻域均值准的时候 F 就是真正的前景色；
+ *    不准的时候误差也只是乘 (1 − a)，不像反解那样被放大。
+ *    官方第二级也用 F₁ 的公式（残差再乘一次 a），描边、发丝在静止时会淡掉一截，粗黑描边的插画最明显。
+ * 实测 93 张卡（主体软边里比身边前景亮或暗出去的量）：反解 26.9，这一版 10.0，官方版 5.9；
+ * 静止时和原图的差：反解 6.5，这一版 13.7，官方版 18.2
+ */
+function estimateForeground(
+  src: Uint8ClampedArray,
+  layer: Uint8ClampedArray,
+  alpha: Float32Array,
+  width: number,
+  height: number,
+): Float32Array {
+  const n = width * height;
+  const reach = Math.max(1, Math.round(width * FOREGROUND_REACH));
+  const alphaFar = boxMean(alpha, width, height, reach);
+  const alphaNear = boxMean(alpha, width, height, FOREGROUND_DETAIL);
+  const out = new Float32Array(n * 3);
+  const fg = new Float32Array(n);
+  const bg = new Float32Array(n);
+  const clamp = (v: number): number => Math.min(255, Math.max(0, v));
+  for (let c = 0; c < 3; c++) {
+    for (let p = 0; p < n; p++) {
+      const a = alpha[p] ?? 0;
+      fg[p] = (layer[p * 4 + c] ?? 0) * a;
+      bg[p] = (src[p * 4 + c] ?? 0) * (1 - a);
+    }
+    const fgFar = boxMean(fg, width, height, reach);
+    const bgFar = boxMean(bg, width, height, reach);
+    for (let p = 0; p < n; p++) {
+      const a = alpha[p] ?? 0;
+      const w = alphaFar[p] ?? 0;
+      const f = (fgFar[p] ?? 0) / (w + 1e-5);
+      const b = (bgFar[p] ?? 0) / (1 - w + 1e-5);
+      const color = src[p * 4 + c] ?? 0;
+      fg[p] = clamp(f + a * (color - a * f - (1 - a) * b)) * a;
+      bg[p] = b * (1 - a);
+    }
+    const fgNear = boxMean(fg, width, height, FOREGROUND_DETAIL);
+    const bgNear = boxMean(bg, width, height, FOREGROUND_DETAIL);
+    for (let p = 0; p < n; p++) {
+      const a = alpha[p] ?? 0;
+      const w = alphaNear[p] ?? 0;
+      const f = (fgNear[p] ?? 0) / (w + 1e-5);
+      const b = (bgNear[p] ?? 0) / (1 - w + 1e-5);
+      out[p * 3 + c] = clamp((src[p * 4 + c] ?? 0) + (1 - a) * (f - b));
+    }
+  }
+  return out;
 }

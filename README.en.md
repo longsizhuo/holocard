@@ -79,8 +79,12 @@ Growing nearer regions outward makes object edges travel with the object. But th
 which gives subjects in front of white walls or sky a bright rim, so the growth is only 2 pixels; keeping object edges out of the background is done instead by widening the occluded area of the background layer before filling it.
 
 **Soft edges have the background colour removed.** A semi-transparent edge pixel mixes foreground and background: `C = a·F + (1 − a)·B`.
-Storing C as-is makes hair and fur edges carry the colour of the old background along when they move. Compositing far to near, B is whatever currently sits behind the layer,
-and F is solved for and stored: stacked back together at rest the layers still reproduce the original exactly, while in motion the soft edge carries only the foreground's own colour.
+Storing C as-is makes hair and fur edges carry the colour of the old background along when they move. Compositing far to near, B is whatever currently sits behind the layer.
+Where that is the original image (gentle depth transitions), F is solved for and stored: stacked back together at rest the layers still reproduce the original exactly.
+Where it was filled in (real object edges), solving is unsafe: the fill is a guess, and its error is amplified by `(1 − a)/a`,
+so a glow or rim light around the subject, or a matte that is a little too wide, pushes F to pure white and the subject drags a white outline around.
+There F comes from a neighbourhood estimate instead, `F = C + (1 − a)·(local foreground mean − local background mean)` (blur-fusion, the same family as BiRefNet's own foreground estimation),
+whose error is only scaled by `1 − a`, never amplified.
 
 **Every layer except the front one is completed, not just the bottom one.** When the foreground moves away, what shows through should be a continuation of the layer right behind it.
 How: for each covered pixel, find which layer the nearest visible pixel belongs to, and treat that layer as extending to it.
