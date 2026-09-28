@@ -24,14 +24,19 @@ export default defineConfig({
     __filename: 'import.meta.filename',
   },
   build: {
-    ssr: 'server/index.ts',
+    ssr: true,
     outDir: 'dist-server',
     target: 'node22',
     emptyOutDir: true,
     minify: false, // 服务端不在乎体积，可读的堆栈更有用
     rollupOptions: {
+      /*
+       * 两个入口：服务本体，和跑分层流水线的工作线程（为什么要单独一个线程见 server/segment-worker.ts）。
+       * 两边共用的代码拆成 chunks/ 下的文件，发版脚本整个目录一起传
+       */
+      input: { 'holocard-server': 'server/index.ts', 'segment-worker': 'server/segment-worker.ts' },
       external: ['sharp', '@huggingface/transformers', 'onnxruntime-node', /^node:/],
-      output: { format: 'esm', entryFileNames: 'holocard-server.mjs' },
+      output: { format: 'esm', entryFileNames: '[name].mjs', chunkFileNames: 'chunks/[name]-[hash].mjs' },
     },
   },
 });

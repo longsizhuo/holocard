@@ -1,8 +1,10 @@
 # server
 
-分层服务：一个 Node 进程发前端静态文件，同时提供 `/api`。打包成单文件 `dist-server/holocard-server.mjs` 部署。
+分层服务：一个 Node 进程发前端静态文件，同时提供 `/api`。打包成 `dist-server/` 下的 `holocard-server.mjs`（入口）、
+`segment-worker.mjs`（分层工作线程）和 `chunks/`（两边共用的代码），整个目录一起部署。
 
 - `index.ts`：HTTP 路由、任务队列、限流、分享页的 OG 标签、层文件和缩略图
+- `segment-worker.ts`：分层流水线的工作线程。模型推理和切层补洞放在主线程上会让整个服务卡几十秒，所以挪到这里
 - `db.ts` / `cards.ts`：卡片数据库（node:sqlite）、访问计数和过期清理
 - `moderation.ts`：裸露识别（NudeNet，只记录不拦），分层完成后跑，结果进 `cards.nsfw` / `nsfw_part`
 - `perf.ts`：性能埋点 `POST /api/perf` 的校验和表结构（前端见 `src/demo/perf.ts`，字段说明见 `deploy/README.md`）

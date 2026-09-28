@@ -46,7 +46,7 @@ ssh oracle 'cd /srv/holocard-web && ln -sfn releases/<版本> current.new && mv 
 
 | 路径 | 内容 |
 |---|---|
-| `/opt/holocard/holocard-server.mjs` | 服务本体（单文件 ESM） |
+| `/opt/holocard/holocard-server.mjs` | 服务入口（ESM）；同目录的 `segment-worker.mjs` 是分层工作线程，`chunks/` 是两者共用的代码 |
 | `/opt/holocard/node22/` | Node 22 运行时（系统自带的是 18，sharp 要求 ≥20.9） |
 | `/opt/holocard/node_modules/` | transformers.js + onnxruntime-node + sharp，约 483MB |
 | `/srv/holocard-models/` | Depth Anything V2-Small 权重（q8，27MB）；BiRefNet_lite 权重（fp32，214MB，抠主体用；不放就只按深度切层）；`nudenet/320n.onnx` 裸露识别（12MB） |

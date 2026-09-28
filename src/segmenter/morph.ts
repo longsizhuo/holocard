@@ -106,7 +106,13 @@ export function growForeground(
   return minMaxFilter(depth, width, height, radius).max;
 }
 
-/** 二值掩码膨胀，方形结构元，边长 2r+1 */
+/**
+ * 二值掩码膨胀，方形结构元，边长 2r+1。
+ *
+ * 横、竖各扫一遍，每遍维护滑动窗口里 1 的个数，耗时和半径无关。
+ * 以前每个像素都把整个窗口扫一遍，半径一大就慢：抠主体后要在 1400 宽的图上按 2% 图宽（28 像素）膨胀，
+ * 线上一张图光这个函数就在主线程上占了 4.5 秒
+ */
 export function dilateMask(
   mask: Uint8Array,
   width: number,
@@ -118,23 +124,27 @@ export function dilateMask(
   const rows = new Uint8Array(mask.length);
   for (let y = 0; y < height; y++) {
     const base = y * width;
+    let count = 0;
+    for (let x = 0; x <= Math.min(width - 1, radius); x++) if (mask[base + x]) count++;
     for (let x = 0; x < width; x++) {
-      const x0 = Math.max(0, x - radius);
-      const x1 = Math.min(width - 1, x + radius);
-      let hit = 0;
-      for (let k = x0; k <= x1 && hit === 0; k++) hit = mask[base + k] ?? 0;
-      rows[base + x] = hit;
+      rows[base + x] = count > 0 ? 1 : 0;
+      const enter = x + radius + 1;
+      if (enter < width && mask[base + enter]) count++;
+      const leave = x - radius;
+      if (leave >= 0 && mask[base + leave]) count--;
     }
   }
 
   const out = new Uint8Array(mask.length);
-  for (let y = 0; y < height; y++) {
-    const y0 = Math.max(0, y - radius);
-    const y1 = Math.min(height - 1, y + radius);
-    for (let x = 0; x < width; x++) {
-      let hit = 0;
-      for (let k = y0; k <= y1 && hit === 0; k++) hit = rows[k * width + x] ?? 0;
-      out[y * width + x] = hit;
+  for (let x = 0; x < width; x++) {
+    let count = 0;
+    for (let y = 0; y <= Math.min(height - 1, radius); y++) if (rows[y * width + x]) count++;
+    for (let y = 0; y < height; y++) {
+      out[y * width + x] = count > 0 ? 1 : 0;
+      const enter = y + radius + 1;
+      if (enter < height && rows[enter * width + x]) count++;
+      const leave = y - radius;
+      if (leave >= 0 && rows[leave * width + x]) count--;
     }
   }
   return out;
