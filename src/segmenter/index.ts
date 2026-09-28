@@ -207,10 +207,11 @@ export async function segmentToLayerSet(
      * 主体一定是最前面那层。按深度中位数它不一定最近：远处的人、脚下一大片近处的地面，
      * 背景层的中位数可以比主体还近。那样主体反而动得比背景少，看起来像陷进卡里。
      * 改过的值要写进 manifest：加载时 parseManifest 按 depth 重排层序，写原值的话主体会被排到
-     * 背景层底下，被那张铺满全卡的背景整个盖住
+     * 背景层底下，被那张铺满全卡的背景整个盖住。
+     * 封顶 1（depth 的约定是 0..1）。背景也到 1 时和主体相等：排序是稳定的，主体照样排在最后
      */
     const others = Math.max(...depths.slice(0, -1));
-    depths[depths.length - 1] = Math.max(depths[depths.length - 1] ?? 0, others + 0.05);
+    depths[depths.length - 1] = Math.min(1, Math.max(depths[depths.length - 1] ?? 0, others + 0.05));
   }
   const parallax = toParallax(depths, rigid);
   const nearest = parallax[stats.length - 1] ?? 0;

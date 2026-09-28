@@ -283,7 +283,10 @@ export function keepMainParts(
   }
   if (sizes.length === 0) return alpha;
 
-  const floor = Math.max(...sizes) * minShare;
+  // 不能 Math.max(...sizes)：满是噪点的抠图能有几十万块，展开成参数会超出调用栈上限
+  let largest = 0;
+  for (const size of sizes) if (size > largest) largest = size;
+  const floor = largest * minShare;
   const kept = new Uint8Array(n);
   for (let p = 0; p < n; p++) {
     const id = label[p] ?? -1;
