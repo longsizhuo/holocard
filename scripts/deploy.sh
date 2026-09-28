@@ -69,8 +69,8 @@ ssh -o BatchMode=yes "${HOST}" "
 
 echo "==> 上传服务到 ${HOST}:${APP_DIR}"
 tar -C dist-server -cf - . | ssh -o BatchMode=yes "${HOST}" "tar -xf - -C ${APP_DIR}"
-# 查库脚本跟着服务走：服务器上没装 sqlite3 命令行，用它查
-scp -q -o BatchMode=yes scripts/db.mjs "${HOST}:${APP_DIR}/db.mjs"
+# 查库、删卡脚本跟着服务走：服务器上没装 sqlite3 命令行，用它们查、用它们下架
+scp -q -o BatchMode=yes scripts/db.mjs scripts/takedown.mjs "${HOST}:${APP_DIR}/"
 
 echo "==> 重启分层服务"
 ssh -o BatchMode=yes "${HOST}" "

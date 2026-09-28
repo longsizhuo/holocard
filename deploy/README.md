@@ -49,7 +49,7 @@ ssh oracle 'cd /srv/holocard-web && ln -sfn releases/<版本> current.new && mv 
 | `/opt/holocard/holocard-server.mjs` | 服务本体（单文件 ESM） |
 | `/opt/holocard/node22/` | Node 22 运行时（系统自带的是 18，sharp 要求 ≥20.9） |
 | `/opt/holocard/node_modules/` | transformers.js + onnxruntime-node + sharp，约 483MB |
-| `/srv/holocard-models/` | Depth Anything V2-Small 权重（q8，27MB） |
+| `/srv/holocard-models/` | Depth Anything V2-Small 权重（q8，27MB）；`nudenet/320n.onnx` 裸露识别（12MB） |
 | `/srv/holocard-web/` | 前端 releases + current 软链 |
 | `/srv/holocard-layers/` | 每张卡一个目录：原图（去掉 EXIF）+ 层 PNG + manifest + 预览图 + 卡册缩略图 `thumb.jpg`（分层完成时做好；早期没存原图的卡在第一次有人要时用各层叠出来现做） |
 | `/srv/holocard-data/holocard.db` | 卡片数据库（SQLite），每张卡的状态、原图地址、结果地址、保留期、删除口令 |
@@ -86,6 +86,7 @@ Environment=PLAYWRIGHT_BROWSERS_PATH=/opt/holocard/browsers
 | `source_width/height` | 原图尺寸（摆正方向之后）。迁移来的老卡没有原图，这里是分层时的尺寸 |
 | `shared` `hits` `last_hit_at` | 保留期怎么算，见下一节 |
 | `delete_token` | 删除口令 |
+| `nsfw` `nsfw_part` | 裸露识别的分数（0..1）和部位，见「保留与删除」一节的「站长下架」 |
 
 `deleted` 和 `expired` 只删文件、不删行，留着做统计。
 
@@ -109,6 +110,32 @@ ssh oracle "cd /opt/holocard && node22/bin/node db.mjs \"SELECT ...\""  # 任意
 删除口令原样保留（那些用户浏览器里存着它）。旧卡没有原图，`original_url` 为空。
 回滚到数据库之前的版本需要注意：之后新建的卡没有 `meta.json`，旧代码会给它们生成新的删除口令，
 这些卡的上传者就删不了了。
+
+### 性能埋点（`perf` 表）
+
+有人反馈 4K 屏 + 高端显卡打开风扇狂转、卡顿，手机上却正常——这类问题只在某些屏幕和显卡的组合上出现，
+光靠口头反馈没法知道修好了没有、还有谁在卡。所以每次页面访问（`/`、`/c/<id>`，不含截图用的 `/render/`），
+页面静置 3 秒后用 `requestAnimationFrame` 量 10 秒的帧间隔，汇总成一条发到 `POST /api/perf`：
+
+| 字段 | 说明 |
+|---|---|
+| `fps` `p50` `p95` `max_ms` | 实际帧率，帧间隔的中位数、95 分位、最大值（毫秒） |
+| `hz` `dropped` | 估出来的刷新率（最快那一成帧的间隔），和按它算的掉帧比例。整页都卡的时候 `hz` 会偏低、`dropped` 会偏小，要和 `fps` 一起看 |
+| `screen_w/h` `view_w/h` `dpr` | 屏幕、窗口的 CSS 像素和缩放比。窗口 × dpr 是要画的物理像素；屏幕 × dpr 在浏览器缩放不是 100% 时不准（Chrome 的 dpr 含页面缩放） |
+| `gpu` `cores` `memory` | 显卡名（Safari 只报 Apple GPU）、CPU 核数、内存（只有 Chromium 有） |
+| `parallax` `busy` `interacted` `reduced_motion` | 视差开没开、有没有在处理照片、量的时候动没动鼠标、开没开减少动态效果 |
+| `ua` `country` | 服务端从请求头取的 User-Agent 和 Cloudflare 给的国家 |
+
+**不存 IP、不带任何能把两条连到同一个人的 id**。接口是公开的：每个字段按范围校验，不合规整条丢掉；
+每个 IP 10 分钟最多 30 条；只留 90 天、最多 20 万条（清理跟着过期卡片的清理一起跑）。
+写库失败只打日志，不影响服务。
+
+```bash
+ssh oracle 'cd /opt/holocard && node22/bin/node db.mjs perf'      # 最近 7 天：最近 30 条 + 按屏幕、浏览器、显卡分组
+ssh oracle 'cd /opt/holocard && node22/bin/node db.mjs perf 30'   # 最近 30 天
+```
+
+本地验证：`node scripts/verify-perf.mjs --url <地址> [--browser webkit]`，会真的写一条进那个服务的库，别对着线上跑。
 
 ## 搜索引擎与 AI 抓取
 
@@ -197,6 +224,31 @@ ssh oracle "cd /opt/holocard && node22/bin/node db.mjs \"SELECT ...\""  # 任意
 id 就是公开的。这个站没有账号，「所有者」就是「手上有口令的人」；用户清了浏览器数据
 就等于放弃删除权，页面上写明了这一点。
 
+### 站长下架（裸露识别）
+
+站点只不接受完全裸露：露出的生殖器、肛门、女性乳房。泳装、低胸、露背都没问题。
+每张卡分层完成后，服务端用 NudeNet（部位检测模型，不是给整张图打「色情程度」的分类模型）看原图，
+这几个部位里置信度最高的分数和部位名记进 `nsfw` / `nsfw_part`，≥ 0.4 的在日志里打一行 `[nsfw]`。
+**只记录不拦**：不影响上传和分享，没有任何对用户可见的变化。服务启动时会给还没识别过的存量卡补上。
+
+阈值 0.4 的依据：上线前把线上 93 张正常原图离线跑过，这几个部位的最高分是 0.21（多是低胸、紧身衣）；
+明确露出时一般在 0.5 以上。露出的臀部不算（丁字泳裤、紧身裙都会被认成它，实测穿裙子的照片就有 0.46）。
+
+```bash
+ssh oracle 'cd /opt/holocard && node22/bin/node db.mjs nsfw'                   # 列出疑似的卡：id、部位、分数、有没有分享出去、被看了几次。不打开图片
+ssh oracle 'cd /opt/holocard && node22/bin/node db.mjs nsfw 0.2'               # 换个阈值
+ssh oracle 'cd /opt/holocard && node22/bin/node takedown.mjs <id>'             # 下架
+ssh oracle 'cd /opt/holocard && node22/bin/node takedown.mjs restore <id>'     # 误判了，恢复
+```
+
+**下架是软删除**：文件不删，挪进 `/srv/holocard-layers/.removed/<id>`（700 权限，不是合法的卡片 id，没有路由能取到），
+库里状态改成 `removed`。对外和删掉一样，但误判能原样恢复，复核、留证也有东西可看；过期清理不会动它。
+上传者自己点删除仍然是真删（页面上写明了「删除后无法恢复、服务端上的层文件都已清掉」），连隔离区那份一起删。
+
+下架后层文件和原图在 Cloudflare 边缘最多还缓存 4 小时（`max-age=14400`）。要立刻失效，
+去 Cloudflare 后台「缓存 → 配置 → 自定义清除」按前缀清 `holocard.longsizhuo.com/api/layers/<id>/`
+（服务器上的两个 Cloudflare 令牌都没有清缓存的权限）。
+
 ## 导出动图
 
 卡片旁边的导出按钮按设备给格式，文件都是服务端生成的：
@@ -273,6 +325,17 @@ curl -sL $B/onnx/model_quantized.onnx -o $D/onnx/model_quantized.onnx
 ```
 
 用 q8 而不是 fp16：在 ARM CPU 上实测快一倍（2.7s 对 5s+）、内存省三成，而深度图差别在切层这一步看不出来。
+
+裸露识别用的 NudeNet（AGPL-3.0，和本项目的 GPL-3.0 可以组合，GPLv3 第 13 条；组合后要求通过网络使用的人能拿到源码，仓库本来就公开）。
+直接下载 GitHub 发布页的链接会被重定向到登录页，用 `gh`：
+
+```bash
+mkdir -p /srv/holocard-models/nudenet
+gh release download v3.4-weights -R notAI-tech/NudeNet -p 320n.onnx -D /srv/holocard-models/nudenet
+sha256sum /srv/holocard-models/nudenet/320n.onnx   # c15d8273adad2d0a92f014cc69ab2d6c311a06777a55545f2c4eb46f51911f0f，12150158 字节
+```
+
+没放这个文件服务照样跑，只是日志里提示一次、不做识别。
 
 **2.5 渲染 OG 预览图的浏览器**
 

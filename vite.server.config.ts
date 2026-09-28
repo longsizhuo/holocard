@@ -30,7 +30,7 @@ export default defineConfig({
     emptyOutDir: true,
     minify: false, // 服务端不在乎体积，可读的堆栈更有用
     rollupOptions: {
-      external: ['sharp', '@huggingface/transformers', /^node:/],
+      external: ['sharp', '@huggingface/transformers', 'onnxruntime-node', /^node:/],
       output: { format: 'esm', entryFileNames: 'holocard-server.mjs' },
     },
   },

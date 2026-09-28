@@ -4,6 +4,8 @@
 
 - `index.ts`：HTTP 路由、任务队列、限流、分享页的 OG 标签、层文件和缩略图
 - `db.ts` / `cards.ts`：卡片数据库（node:sqlite）、访问计数和过期清理
+- `moderation.ts`：裸露识别（NudeNet，只记录不拦），分层完成后跑，结果进 `cards.nsfw` / `nsfw_part`
+- `perf.ts`：性能埋点 `POST /api/perf` 的校验和表结构（前端见 `src/demo/perf.ts`，字段说明见 `deploy/README.md`）
 - `images.ts`：sharp 实现的图片编解码，原图规范化（摆正、去 EXIF），层图转 WebP，卡册缩略图
 - `preview.ts`：无头浏览器截分享图
 - `export.ts` / `motionphoto.ts`：导出动图（GIF、APNG、安卓动态照片）
