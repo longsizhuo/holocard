@@ -58,12 +58,15 @@ export interface ServerProgress {
   params?: Record<string, string | number>;
   /** 0..1，拿不到确切进度时为 undefined */
   ratio?: number;
+  /** 服务端估计还要多少秒（排队 + 处理），倒计时用；老版本服务端不给 */
+  eta?: number;
 }
 
 interface JobStatus {
   state: 'queued' | 'running' | 'done' | 'error';
   stage: string | null;
   position: number;
+  eta?: number;
   layers?: string;
   layerCount?: number;
   error?: string;
@@ -213,11 +216,18 @@ export async function segmentOnServer(
 
     if (status.state === 'queued') {
       deadline = Date.now() + TIMEOUT_MS;
-      onProgress?.({ key: 'progress.queued', params: { n: Math.max(0, status.position - 1) } });
+      onProgress?.({
+        key: 'progress.queued',
+        params: { n: Math.max(0, status.position - 1) },
+        ...(status.eta === undefined ? {} : { eta: status.eta }),
+      });
     } else if (status.state === 'running') {
-      onProgress?.({ key: STAGE_KEYS[status.stage ?? ''] ?? 'progress.serverWorking' });
+      onProgress?.({
+        key: STAGE_KEYS[status.stage ?? ''] ?? 'progress.serverWorking',
+        ...(status.eta === undefined ? {} : { eta: status.eta }),
+      });
     } else if (status.state === 'done' && status.layers) {
-      onProgress?.({ key: 'progress.fetching', ratio: 0.95 });
+      onProgress?.({ key: 'progress.fetching' });
       // 服务端返回的是绝对路径，base 已经包含在里面
       return { layers: status.layers, id, deleteToken };
     } else if (status.state === 'error') {

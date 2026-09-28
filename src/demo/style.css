@@ -431,11 +431,28 @@ select {
 }
 .progress__bar i {
   display: block;
+  position: relative;
+  overflow: hidden;
   height: 100%;
   width: 0%;
   background: linear-gradient(90deg, var(--p2), var(--p1), var(--p4));
-  transition: width 0.25s ease;
+  /* 进度每 250ms 算一次，线性过渡把台阶抹平 */
+  transition: width 0.25s linear;
 }
+/* 流动的高光：进度走得慢的时候也看得出还在干活。只动 transform，交给合成器，不重绘 */
+.progress__bar i::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.6), transparent);
+  transform: translateX(-100%);
+  animation: progress-flow 1.6s ease-in-out infinite;
+}
+@keyframes progress-flow {
+  to { transform: translateX(100%); }
+}
+.progress__eta { font-variant-numeric: tabular-nums; opacity: 0.8; }
+.progress__eta::before { content: ' · '; }
 
 /* ---------- 炫光读数 ---------- */
 
@@ -784,6 +801,7 @@ select {
  */
 @media (prefers-reduced-motion: reduce) {
   .page__head h1,
+  .progress__bar i::after,
   .drop::after,
   .share__btn::after,
   .gh::after {
