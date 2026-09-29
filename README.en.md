@@ -201,12 +201,22 @@ or driving it from external input such as a gyroscope.
 
 The main stage is a strip of the cards made during this visit: switch left and right, newest on the right. The arrow buttons sit in the gutters beside the card (arrow keys work too).
 After an upload a card pack appears on the far right; while it is being made you can press "<" and play with the previous card. When it is ready the pack lights up, and a dot shows on ">" if you are elsewhere.
-Swipe across the top edge to tear the pack open, or tap it to shake and burst it; the new card slides out. With reduced motion the pack opens at once, without animation.
+Swipe across the top seal to tear it: the part you have swiped over lifts with your finger, and past 60% the whole strip rips off and flies away;
+the card rises out of the opening and the empty pack drops away. Or tap it to shake and burst it. The new card then spins once to show itself, with a little thickness and a card back.
+With reduced motion the pack opens at once, without animation.
 
-The pack is simply a two-layer card (body and top strip) whose artwork is drawn in the browser (`src/demo/pack-art.ts`) and handed to the same renderer,
-so tilt, foil and glare come for free; tearing lifts the strip layer away. Its colour follows the foil on the card's background layer.
-Finished cards are kept in sessionStorage so a reload restores the strip. Code: `src/demo/deck.ts`, `src/demo/pack.ts`;
-after changing them run `node scripts/verify-pack.mjs` (no layering service needed, the API is faked in the browser).
+The pack is a real 3D foil bag drawn with WebGL (`src/demo/pack-gl.ts`): a bulging body, crimped serrated seals, rainbow foil that follows the foil type,
+and the involutionhell.com logo on the front. It defaults to rainbow glitter and only follows the card's background foil when someone has changed the foils (a tuned card shared by someone else).
+When the card clears the opening the pack hands its on-screen position to the strip, and the real holo card carries on spinning from there (`src/demo/deck.ts`).
+Devices without WebGL fall back to a flat pack: a two-layer card (body and top strip) whose artwork is drawn in the browser (`src/demo/pack-art.ts`) and handed to the same renderer.
+
+Opening has sound (tearing, the rip, the card sliding out, the spin, the burst, and a chime when the card is ready), all synthesised with Web Audio, no audio files (`src/demo/sfx.ts`).
+While there is a pack, a speaker button in the bottom-right corner of the strip turns it off; the choice is kept on the device.
+
+Finished cards are kept in sessionStorage so a reload restores the strip. After changing anything about pack opening:
+- `node scripts/verify-pack.mjs`: walks through the flow with assertions (no layering service needed, the API is faked in the browser)
+- `node scripts/film-pack.mjs`: steps a virtual clock and screenshots the opening frame by frame into contact sheets; watch the whole thing
+- `node scripts/render-sfx.mjs`: renders the sounds offline to wav for listening, and checks none is silent or clipping
 
 ## My album
 

@@ -394,6 +394,8 @@ body {
   color: var(--muted);
 }
 .pack.is-ready .pack__caption { color: var(--fg); font-weight: 600; }
+/* 开包动画一开始，「划开，或点一下」就没用了 */
+.pack.is-opening .pack__caption { visibility: hidden; }
 
 .pack__dismiss { display: none; }
 .pack.is-failed .pack__dismiss {
@@ -425,6 +427,116 @@ body {
   filter: blur(22px);
   opacity: 0;
   pointer-events: none;
+}
+
+/* WebGL 卡包（pack-gl.ts）：画布铺满卡包格，底下留一行字的位置 */
+.pack__gl {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: calc(100% - 40px);
+  display: block;
+  /* 竖着滑留给页面滚动，横着划是撕 */
+  touch-action: pan-y;
+  cursor: grab;
+}
+.pack.is-failed .pack__gl { filter: grayscale(1) opacity(0.55); }
+.pack:focus-visible .pack__gl { outline: 2px solid var(--accent); outline-offset: -2px; border-radius: 14px; }
+
+/* 音效开关：右边那列的底部 */
+.deck__sfx {
+  grid-column: 3;
+  grid-row: 1;
+  align-self: end;
+  justify-self: center;
+  width: 36px;
+  height: 36px;
+  padding: 0;
+  display: grid;
+  place-items: center;
+  border: 1px solid rgba(255, 255, 255, 0.85);
+  border-radius: 50%;
+  background: var(--surface);
+  backdrop-filter: blur(12px);
+  color: var(--muted);
+  cursor: pointer;
+}
+.deck__sfx:hover { background: var(--surface-solid); color: var(--fg); }
+.deck__sfx:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.deck__sfx svg {
+  width: 18px;
+  height: 18px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+.deck__sfx[aria-pressed='true'] .deck__sfx-off,
+.deck__sfx[aria-pressed='false'] .deck__sfx-on { display: none; }
+
+/*
+ * 新卡亮相转一圈（deck.ts 的 #spinIn）：卡片宿主整个绕竖轴转，闪卡是正面，
+ * 后面垫着几层薄片当厚度、左右两条竖边、一张卡背。尺寸、厚度由脚本按这张卡写进来
+ */
+.deck__card.is-spinning {
+  z-index: 1;
+  transform-style: preserve-3d;
+}
+.deck__thick {
+  position: absolute;
+  inset: 0;
+  margin: auto;
+  transform-style: preserve-3d;
+  pointer-events: none;
+}
+.deck__thick > * {
+  position: absolute;
+  inset: 0;
+  border-radius: 4.55% / 3.5%;
+}
+.deck__slice {
+  background: #e4dff0;
+  transform: translateZ(calc(var(--deck-t) * var(--z)));
+}
+.deck__edge {
+  inset: 3.5% auto 3.5% calc(50% - var(--deck-t) / 2);
+  width: var(--deck-t);
+  border-radius: 0;
+  background: linear-gradient(#f6f3fb, #d6cfe6);
+}
+.deck__edge--l { transform: translateX(calc(var(--deck-w) / -2)) rotateY(90deg); }
+.deck__edge--r { transform: translateX(calc(var(--deck-w) / 2)) rotateY(90deg); }
+.deck__back {
+  overflow: hidden;
+  backface-visibility: hidden;
+  transform: rotateY(180deg) translateZ(calc(var(--deck-t) / 2));
+  background:
+    radial-gradient(70% 50% at 50% 45%, rgba(165, 140, 240, 0.45), transparent 70%),
+    linear-gradient(160deg, #3b3558, #2a2640 55%, #1f1c30);
+}
+.deck__back::before {
+  content: '';
+  position: absolute;
+  inset: 6%;
+  border-radius: 3% / 2.3%;
+  border: 1.5px solid rgba(236, 230, 255, 0.35);
+}
+/* 背光时压暗 */
+.deck__back::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: #0d0a18;
+  opacity: var(--deck-shade, 0);
+}
+.deck__back img {
+  position: absolute;
+  left: 22%;
+  top: 38%;
+  width: 56%;
+  height: auto;
 }
 
 /* 卡带停在卡包上：面板里跟卡有关的调不了，先压暗；状态栏那句说明照常看得清 */
@@ -934,6 +1046,8 @@ body.is-render .deck,
 body.is-render .deck__view,
 body.is-render .deck__card { display: contents; }
 body.is-render .deck__nav,
+body.is-render .deck__sfx,
+body.is-render .deck__thick,
 body.is-render .deck__pack { display: none; }
 
 body.is-render .hc {

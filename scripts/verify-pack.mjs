@@ -1,6 +1,7 @@
 /**
- * 走一遍卡带和开包：上传 → 最右边出现卡包 → 按「<」回去玩上一张 → 做好后「>」亮小点 →
- * 回到卡包划开撕 → 新卡摆上来；再传一张点一下炸开；「减少动态效果」下按回车立刻开出来。
+ * 走一遍卡带和开包：上传 → 最右边出现（WebGL）卡包 → 按「<」回去玩上一张 → 做好后「>」亮小点 →
+ * 回到卡包划开撕 → 新卡转一圈摆上来；再传一张点一下炸开；「减少动态效果」下按回车立刻开出来。
+ * 动效本身逐帧看用 scripts/film-pack.mjs。
  * 每一步断言，关键时刻截图到 --out 给人看。改了 deck.ts / pack.ts / 相关样式之后跑一遍。
  *
  * 不需要分层服务：/api 的请求全部在浏览器里拦下来，假装服务端做好了，结果是 public/samples/demo 那张卡。
@@ -64,7 +65,20 @@ async function fakeBackend(page) {
 
 async function upload(page) {
   await page.setInputFiles('#file', image);
-  await page.waitForSelector('.deck__pack:not([hidden]) .hc', { timeout: 10_000 });
+  await page.waitForSelector('.deck__pack:not([hidden]) .pack__gl', { timeout: 10_000 });
+}
+
+/**
+ * WebGL 卡包顶部封口那一条在页面上的位置。和 pack-gl.ts 的相机一样算：
+ * 视角 32°，相机退到竖着放得下 1.95、横着放得下 1.3；卡包宽 1、高 1.62，撕开线在 0.648 高处
+ */
+async function tearLine(page) {
+  const box = await page.locator('.deck__pack:not([hidden]) .pack__gl').boundingBox();
+  const tan = Math.tan((16 * Math.PI) / 180);
+  const camZ = Math.max(1.95 / (2 * tan), 1.3 / (2 * tan * (box.width / box.height)));
+  const ppu = box.height / 2 / (camZ * tan);
+  const cx = box.x + box.width / 2, cy = box.y + box.height / 2;
+  return { y: cy - 0.73 * ppu, left: cx - 0.5 * ppu, right: cx + 0.5 * ppu, box };
 }
 
 const visible = (page, selector) => page.locator(selector).isVisible();
@@ -99,15 +113,20 @@ const browser = await chromium.launch({
   check(!(await page.locator('.deck__nav--next').isVisible()), '回到卡包，右边没有了');
   await page.screenshot({ path: `${out}/3-pack-ready.png` });
 
-  // 沿顶边从左划到右
-  const box = await page.locator('.deck__pack .hc').boundingBox();
-  const y = box.y + box.height * 0.07;
-  await page.mouse.move(box.x + box.width * 0.05, y);
+  check(await visible(page, '.deck__sfx'), '有卡包时出现音效开关');
+
+  // 沿顶部封口从左划到右
+  const line = await tearLine(page);
+  await page.mouse.move(line.left + 6, line.y);
   await page.mouse.down();
-  for (let i = 1; i <= 12; i++) await page.mouse.move(box.x + box.width * (0.05 + (0.85 * i) / 12), y);
+  for (let i = 1; i <= 12; i++) await page.mouse.move(line.left + 6 + ((line.right - line.left) * 0.8 * i) / 12, line.y);
   await page.screenshot({ path: `${out}/4-tearing.png` });
   await page.mouse.up();
-  await page.waitForFunction(() => !document.querySelector('.deck__pack'), null, { timeout: 5000 });
+  await page.waitForSelector('.deck__card.is-spinning', { timeout: 5000 });
+  await page.screenshot({ path: `${out}/4b-spinning.png` });
+  check(true, '卡出袋口后转圈亮相');
+  await page.waitForFunction(() => !document.querySelector('.deck__pack'), null, { timeout: 8000 });
+  check(!(await page.locator('.deck__card').evaluate((el) => el.classList.contains('is-spinning'))), '转完收干净');
   check(await visible(page, '.deck__card .hc'), '划开后新卡摆上来，卡包拆掉');
   check(/\/c\/00000000-/.test(page.url()), '地址栏换成了新卡的链接');
   await page.waitForTimeout(600);
@@ -115,13 +134,14 @@ const browser = await chromium.launch({
 
   await upload(page);
   await waitReady(page);
-  const pack = await page.locator('.deck__pack .hc').boundingBox();
+  const pack = await page.locator('.deck__pack:not([hidden]) .pack__gl').boundingBox();
   await page.mouse.click(pack.x + pack.width / 2, pack.y + pack.height * 0.6);
   await page.waitForTimeout(450);
   await page.screenshot({ path: `${out}/6-burst.png` });
-  await page.waitForFunction(() => !document.querySelector('.deck__pack'), null, { timeout: 5000 });
+  await page.waitForFunction(() => !document.querySelector('.deck__pack'), null, { timeout: 8000 });
   check(await visible(page, '.deck__card .hc'), '点一下炸开，新卡摆上来');
   check((await page.locator('.deck__nav--prev').isVisible()) && !(await page.locator('.deck__nav--next').isVisible()), '最新的在最右边');
+  check(!(await visible(page, '.deck__sfx')), '卡包都开完了，音效开关收起来');
 
   // 键盘左右切
   await page.keyboard.press('ArrowLeft');

@@ -1,67 +1,89 @@
 /**
- * 卡包：一个跟手倾斜的镭射卡包，做好了可以撕开或炸开。
+ * 卡包。两种画法，接口一样（PackView），卡带只认接口：
+ *   - pack-gl.ts 的 GlPack：WebGL 真 3D 铝箔袋，能用 WebGL 的设备都用它
+ *   - 这里的 Pack：平面版，退路。一个跟手倾斜的两层「卡」（图案见 pack-art.ts），
+ *     倾斜、箔面、炫光都是卡片渲染器现成的
  *
- * 渲染就是一张两层的卡（图案见 pack-art.ts），所以倾斜、箔面、炫光都是渲染器现成的。
- * 这里只管三件事：
- *   - 状态：在做（边缘呼吸微光）、做好（微光变亮、出提示）、失败（变灰、写原因）
+ * 两种都一样的部分：
+ *   - 状态：在做（边缘呼吸微光）、做好（微光变亮、出提示）、失败（变灰、写原因）——外壳在 PackChrome
  *   - 开法：沿顶边划过去撕开（swipe）；点一下或按回车、空格，抖几下炸开（tap / key）
- *   - 开包动画：播完 resolve；播放中再点一下直接跳到结尾
+ *   - 开包动画：到了该把卡摆上来的那一刻 resolve；播放中再点一下直接跳到这一刻
  * 开出来的卡怎么摆上来由卡带决定（deck.ts），这里不管。
  */
 
 import { HoloCard } from '../renderer/card';
-import type { FoilType } from '../format/types';
+import type { FoilType, LayerSet } from '../format/types';
 import { onLangChange, t, type MessageKey } from '../i18n';
 import { packLayerSet, TEAR_Y } from './pack-art';
 
 export type PackState = 'working' | 'ready' | 'failed';
 export type OpenMethod = 'swipe' | 'tap' | 'key';
 
+/** WebGL 卡包撕开时交给卡带的：袋子里那张卡此刻在屏幕上的位置，和手划的方向（1 往右、-1 往左） */
+export interface Handoff {
+  rect: DOMRect;
+  side: number;
+}
+
+export interface PackView {
+  /** 图案等资源都就位 */
+  readonly ready: Promise<void>;
+  setState(state: PackState, message?: string): void;
+  /** 卡包的箔面（颜色） */
+  setFoil(foil: FoilType): void;
+  /** 做好了：里面装的是哪张卡。WebGL 版撕开时要让这张卡从袋口升出来 */
+  setCard(set: LayerSet): void;
+  onOpen(handler: (method: OpenMethod) => void): void;
+  /**
+   * 播开包动画，到了该把卡摆上来的那一刻 resolve。
+   * WebGL 版撕开时卡从袋口升出来，带回它的位置，卡带从这里接着转；
+   * 其他情况是 null，卡带让卡从中间弹出来。zoom：闪卡静止时画面的放大系数，袋子里那张要画得一样大
+   */
+  playOpen(method: OpenMethod, zoom: number): Promise<Handoff | null>;
+  destroy(): void;
+}
+
 /** 顶部多高以内按下去算「撕」，占卡包高度的比例。封条本身占 13%，手指没那么准，放宽一点 */
 const TEAR_ZONE = 0.22;
 /** 划过卡包宽度的这么多就算撕开了，松手自动撕完；不够就弹回去 */
-const TEAR_DONE = 0.6;
+export const TEAR_DONE = 0.6;
 /** 位移小于这么多像素的按下松开算点击 */
-const TAP_SLOP = 8;
+export const TAP_SLOP = 8;
 
 /** 炸开那团光的颜色跟箔面走 */
-const FLASH: Record<FoilType, string> = {
+export const FLASH: Record<FoilType, string> = {
   sunpillar: 'conic-gradient(from 90deg, #ffb3c7, #ffe8a3, #b8f5c9, #a8e6ff, #c9b8ff, #ffb3c7)',
   rainbow: 'conic-gradient(from 0deg, #ff9ec4, #ffd36e, #8ef0b0, #7fd4ff, #b69cff, #ff9ec4)',
   holo: 'radial-gradient(circle, #ffffff, #cfe3ff)',
   none: 'radial-gradient(circle, #ffffff, #f1ecff)',
 };
 
-const reducedMotion = (): boolean =>
+export const reducedMotion = (): boolean =>
   typeof matchMedia === 'function' && matchMedia('(prefers-reduced-motion: reduce)').matches;
 
-export class Pack {
-  /** 图案、遮罩都就位 */
-  readonly ready: Promise<void>;
+/** 卡包默认的箔面：彩虹闪粉 */
+export const DEFAULT_PACK_FOIL: FoilType = 'rainbow';
 
-  readonly #host: HTMLElement;
-  readonly #card: HoloCard;
-  readonly #caption: HTMLElement;
-  readonly #flash: HTMLElement;
+/**
+ * 两种卡包共用的外壳：宿主上的状态 class 和无障碍属性、底下那行字、失败时的「关掉」、炸开的那团光。
+ * 画卡包的那部分（平面卡 / WebGL 画布）由各自塞到 flash 前面
+ */
+export class PackChrome {
+  readonly flash: HTMLElement;
   #state: PackState = 'working';
+  readonly #host: HTMLElement;
+  readonly #caption: HTMLElement;
   #captionText: { key: MessageKey; params?: Record<string, string | number> } | null = null;
-  #foil: FoilType = 'sunpillar';
-  #onOpen: ((method: OpenMethod) => void) | null = null;
-  /** 开包动画播放中时是「直接跳到揭晓」，没在播时是 null */
-  #skip: (() => void) | null = null;
   readonly #offLang: () => void;
-  #destroyed = false;
 
   constructor(host: HTMLElement, onDismiss: () => void) {
     this.#host = host;
-    host.classList.add('pack', 'is-working');
+    host.classList.add('pack');
     host.tabIndex = 0;
     host.setAttribute('role', 'button');
 
-    const cardHost = document.createElement('div');
-    cardHost.className = 'pack__card hc-pack';
-    this.#flash = document.createElement('div');
-    this.#flash.className = 'pack__flash';
+    this.flash = document.createElement('div');
+    this.flash.className = 'pack__flash';
     this.#caption = document.createElement('p');
     this.#caption.className = 'pack__caption';
     const dismiss = document.createElement('button');
@@ -71,17 +93,8 @@ export class Pack {
       event.stopPropagation();
       onDismiss();
     });
-    host.append(cardHost, this.#flash, this.#caption, dismiss);
+    host.append(this.flash, this.#caption, dismiss);
 
-    this.#card = new HoloCard(cardHost, { amplitude: 0 });
-    this.ready = packLayerSet(this.#foil).then((set) => {
-      // 图案还没画完卡包就被拆了（做失败马上点了关掉）
-      if (this.#destroyed) return;
-      this.#card.setLayerSet(set);
-      return this.#card.ready;
-    });
-
-    this.#bindGestures();
     const relabel = (): void => {
       host.setAttribute('aria-label', t('pack.label'));
       dismiss.textContent = t('pack.dismiss');
@@ -90,6 +103,10 @@ export class Pack {
     relabel();
     this.#offLang = onLangChange(relabel);
     this.setState('working');
+  }
+
+  get state(): PackState {
+    return this.#state;
   }
 
   setState(state: PackState, message?: string): void {
@@ -105,7 +122,47 @@ export class Pack {
     this.#caption.textContent = t(this.#captionText.key, this.#captionText.params);
   }
 
-  /** 做好时换成这张卡背景层的箔面：卡包和里面那张卡是一套颜色 */
+  destroy(): void {
+    this.#offLang();
+    this.#host.remove();
+  }
+}
+
+export class Pack implements PackView {
+  /** 图案、遮罩都就位 */
+  readonly ready: Promise<void>;
+
+  readonly #host: HTMLElement;
+  readonly #chrome: PackChrome;
+  readonly #card: HoloCard;
+  #foil: FoilType = DEFAULT_PACK_FOIL;
+  #onOpen: ((method: OpenMethod) => void) | null = null;
+  /** 开包动画播放中时是「直接跳到揭晓」，没在播时是 null */
+  #skip: (() => void) | null = null;
+  #destroyed = false;
+
+  constructor(host: HTMLElement, onDismiss: () => void) {
+    this.#host = host;
+    this.#chrome = new PackChrome(host, onDismiss);
+    const cardHost = document.createElement('div');
+    cardHost.className = 'pack__card hc-pack';
+    host.prepend(cardHost);
+
+    this.#card = new HoloCard(cardHost, { amplitude: 0 });
+    this.ready = packLayerSet(this.#foil).then((set) => {
+      // 图案还没画完卡包就被拆了（做失败马上点了关掉）
+      if (this.#destroyed) return;
+      this.#card.setLayerSet(set);
+      return this.#card.ready;
+    });
+
+    this.#bindGestures();
+  }
+
+  setState(state: PackState, message?: string): void {
+    this.#chrome.setState(state, message);
+  }
+
   setFoil(foil: FoilType): void {
     this.#foil = foil;
     void this.ready.then(() => {
@@ -113,24 +170,29 @@ export class Pack {
     });
   }
 
+  /** 平面版开包时卡不从袋子里出来，用不着这张卡 */
+  setCard(): void {}
+
   onOpen(handler: (method: OpenMethod) => void): void {
     this.#onOpen = handler;
   }
 
   /**
-   * 播开包动画，到了该把卡摆上来的那一刻就 resolve：撕开是封条飞走一半，炸开是光最亮的时候。
-   * 剩下的（封条飞远、光散掉）接着播，和卡带那边的交叉淡出叠在一起。
-   * 播放中再点一下直接跳到这一刻；「减少动态效果」下立刻 resolve。
+   * 撕开在封条飞走一半时 resolve，炸开在光最亮的时候。
+   * 剩下的（封条飞远、光散掉）接着播，和卡带那边的淡出叠在一起。
+   * 平面版没有「卡从袋口出来」，总是带回 null；「减少动态效果」下立刻 resolve
    */
-  playOpen(method: OpenMethod): Promise<void> {
-    if (reducedMotion()) return Promise.resolve();
+  playOpen(method: OpenMethod): Promise<Handoff | null> {
+    if (reducedMotion()) return Promise.resolve(null);
     const animations = method === 'swipe' ? this.#flyStrip() : [...this.#shake(), this.#burst()];
     const revealAt = method === 'swipe' ? 200 : 615;
     return new Promise((resolve) => {
       const done = (): void => {
         window.clearTimeout(timer);
         this.#skip = null;
-        resolve();
+        resolve(null);
+        // 平面版没有「空袋子掉出画面」，剩下的袋身跟着卡转圈淡掉
+        this.#host.animate([{ opacity: 1 }, { opacity: 0 }], { duration: 360, easing: 'ease-out', fill: 'forwards' });
       };
       const timer = window.setTimeout(done, revealAt);
       this.#skip = () => {
@@ -143,9 +205,8 @@ export class Pack {
   /** 从 DOM 上拿掉，释放渲染器的资源 */
   destroy(): void {
     this.#destroyed = true;
-    this.#offLang();
     this.#card.destroy();
-    this.#host.remove();
+    this.#chrome.destroy();
   }
 
   // ---------- 手势 ----------
@@ -180,7 +241,7 @@ export class Pack {
         }
         const box = host.querySelector('.hc')?.getBoundingClientRect();
         if (!box) return;
-        const tearing = this.#state === 'ready' && event.clientY - box.top < box.height * TEAR_ZONE;
+        const tearing = this.#chrome.state === 'ready' && event.clientY - box.top < box.height * TEAR_ZONE;
         start = { x: event.clientX, y: event.clientY, id: event.pointerId, tearing, width: box.width };
         if (tearing) {
           // 接管这根指针：之后的移动都发给卡包自己，渲染器收不到，撕的时候卡包不跟着转
@@ -210,7 +271,7 @@ export class Pack {
         return;
       }
       if (!wasTearing) return;
-      if (progress >= TEAR_DONE && this.#state === 'ready') {
+      if (progress >= TEAR_DONE && this.#chrome.state === 'ready') {
         this.#request('swipe');
         return;
       }
@@ -238,9 +299,9 @@ export class Pack {
   }
 
   #request(method: OpenMethod): void {
-    if (this.#state !== 'ready') {
+    if (this.#chrome.state !== 'ready') {
       // 还没做好：轻轻晃一下，让人知道点到了
-      if (this.#state === 'working' && !reducedMotion()) {
+      if (this.#chrome.state === 'working' && !reducedMotion()) {
         this.#host.querySelector('.hc')?.animate(
           [{ translate: '0 0' }, { translate: '0 -6px' }, { translate: '0 0' }],
           { duration: 260, easing: 'ease-out' },
@@ -291,8 +352,8 @@ export class Pack {
 
   /** 点开：一团和箔面同色的光从卡包中间炸开 */
   #burst(): Animation {
-    this.#flash.style.background = FLASH[this.#foil];
-    return this.#flash.animate(
+    this.#chrome.flash.style.background = FLASH[this.#foil];
+    return this.#chrome.flash.animate(
       [
         { opacity: 0, scale: '0.2' },
         { opacity: 0, scale: '0.2', offset: 0.45 },

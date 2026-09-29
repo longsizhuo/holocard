@@ -2,17 +2,23 @@
  * 卡带：首页主舞台上这次访问做的卡，左右切换，最新的在右边。
  *
  * 一格是一张卡，或者一个卡包（正在做 / 做好了还没开）。同一时间只显示当前这一格：
- * 卡片格共用页面上那个 HoloCard（渲染器很重，不给每格都建一个），卡包格各有各的 Pack。
+ * 卡片格共用页面上那个 HoloCard（渲染器很重，不给每格都建一个），卡包格各有各的卡包（WebGL 版或平面版，见 pack.ts）。
  * 上传时最右边加一个卡包格并滑过去；等的时候可以按「<」回去玩之前的卡，
  * 做好了卡包亮起来，停在别的格上时「>」按钮上亮一个小点。开包后这一格变成卡片格。
  *
  * 做好的卡记在 sessionStorage：做完卡地址栏就换成了卡片链接，刷新后按它把卡带排回来。
  * 关掉标签页就没了——所有做过的卡在「我做过的」里一直都有。
+ *
+ * 开包后新卡绕竖轴转一圈亮相，带一点厚度、转过去能看到卡背（#spinIn）。
+ * 卡包是 WebGL 的就从袋口接着转：卡包交出它那张卡在屏幕上的位置，真正的闪卡从那里接手。
  */
 
-import type { FoilType, LayerSet } from '../format/types';
+import type { LayerSet } from '../format/types';
 import { onLangChange, t } from '../i18n';
-import { Pack, type OpenMethod } from './pack';
+import { Pack, reducedMotion, type Handoff, type OpenMethod, type PackView } from './pack';
+import { GlPack, packFoil } from './pack-gl';
+import { setSfxOn, sfx, sfxOn } from './sfx';
+import logoUrl from './ih-logo.svg';
 
 interface CardSlot {
   kind: 'card';
@@ -22,7 +28,7 @@ interface CardSlot {
 }
 interface PackSlot {
   kind: 'pack';
-  pack: Pack;
+  pack: PackView;
   host: HTMLElement;
   /** 做好了才有 */
   result: { set: LayerSet; id: string | null } | null;
@@ -76,13 +82,26 @@ function remember(id: string): void {
   }
 }
 
-/** 卡包的颜色跟这张卡背景层的箔面走；背景是哑光的就用离得最远的那层有箔的 */
-function backgroundFoil(set: LayerSet): FoilType {
-  return set.manifest.layers.find((layer) => layer.foil.type !== 'none')?.foil.type ?? 'sunpillar';
+/** 能用 WebGL 就用 3D 卡包，起不来（没有 WebGL、着色器编译不过）退回平面版 */
+function createPack(host: HTMLElement, onDismiss: () => void): PackView {
+  try {
+    return new GlPack(host, onDismiss);
+  } catch (error) {
+    console.info('[holocard] 3D 卡包起不来，换平面版：', error instanceof Error ? error.message : error);
+    return new Pack(host, onDismiss);
+  }
 }
 
-const reducedMotion = (): boolean =>
-  typeof matchMedia === 'function' && matchMedia('(prefers-reduced-motion: reduce)').matches;
+/** 新卡亮相转一圈多久 */
+const SPIN_MS = 1100;
+/** 卡的厚度占卡宽的比例（真卡约 0.5%，放大一点才看得出来） */
+const THICKNESS = 0.014;
+
+const clamp01 = (v: number): number => Math.min(1, Math.max(0, v));
+const lerp = (a: number, b: number, t: number): number => a + (b - a) * t;
+const easeOut = (t: number): number => 1 - Math.pow(1 - t, 3);
+const easeInOut = (t: number): number => (t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2);
+const easeOutBack = (t: number): number => 1 + 2.2 * Math.pow(t - 1, 3) + 1.2 * Math.pow(t - 1, 2);
 
 export class Deck {
   readonly #hooks: DeckHooks;
@@ -90,8 +109,13 @@ export class Deck {
   readonly #cardHost: HTMLElement;
   readonly #prev: HTMLButtonElement;
   readonly #next: HTMLButtonElement;
+  readonly #sfxToggle: HTMLButtonElement;
+  /** 转圈时的厚度和卡背，平时藏着 */
+  readonly #thick: HTMLElement;
   #slots: Slot[] = [];
   #index = 0;
+  /** 正在开包：动画播完之前不让左右切 */
+  #revealing = false;
 
   constructor(root: HTMLElement, hooks: DeckHooks) {
     this.#hooks = hooks;
@@ -107,6 +131,37 @@ export class Deck {
     this.#prev.addEventListener('click', () => this.#go(this.#index - 1));
     this.#next.addEventListener('click', () => this.#go(this.#index + 1));
 
+    // 音效开关：卡带里有卡包时才出现（声音都是开包时的）
+    this.#sfxToggle = need('.deck__sfx');
+    this.#sfxToggle.addEventListener('click', () => {
+      setSfxOn(!sfxOn());
+      this.#updateSfx();
+    });
+
+    // 卡的厚度：几层同色的片叠在正反两面之间，斜着看时连成一条边；正好侧对时靠左右两条竖边
+    this.#thick = document.createElement('div');
+    this.#thick.className = 'deck__thick';
+    this.#thick.hidden = true;
+    for (const z of [-0.25, 0, 0.25]) {
+      const slice = document.createElement('i');
+      slice.className = 'deck__slice';
+      slice.style.setProperty('--z', String(z));
+      this.#thick.append(slice);
+    }
+    for (const side of ['l', 'r']) {
+      const edge = document.createElement('i');
+      edge.className = `deck__edge deck__edge--${side}`;
+      this.#thick.append(edge);
+    }
+    const back = document.createElement('div');
+    back.className = 'deck__back';
+    const logo = document.createElement('img');
+    logo.src = logoUrl;
+    logo.alt = '';
+    back.append(logo);
+    this.#thick.append(back);
+    this.#cardHost.append(this.#thick);
+
     document.addEventListener('keydown', (event) => {
       if (event.key !== 'ArrowLeft' && event.key !== 'ArrowRight') return;
       if (event.altKey || event.ctrlKey || event.metaKey || event.shiftKey) return;
@@ -116,7 +171,11 @@ export class Deck {
       if (document.querySelector('dialog[open]')) return;
       this.#go(this.#index + (event.key === 'ArrowLeft' ? -1 : 1));
     });
-    onLangChange(() => this.#updateNav());
+    onLangChange(() => {
+      this.#updateNav();
+      this.#updateSfx();
+    });
+    this.#updateSfx();
   }
 
   /** 这台设备的卡片宿主，页面的 HoloCard 挂在这里 */
@@ -156,7 +215,7 @@ export class Deck {
     this.#view.append(host);
     const slot: PackSlot = {
       kind: 'pack',
-      pack: new Pack(host, () => this.#dismiss(slot)),
+      pack: createPack(host, () => this.#dismiss(slot)),
       host,
       result: null,
     };
@@ -167,8 +226,11 @@ export class Deck {
     return {
       done: (set, id) => {
         slot.result = { set, id };
-        slot.pack.setFoil(backgroundFoil(set));
+        slot.pack.setFoil(packFoil(set));
+        slot.pack.setCard(set);
         slot.pack.setState('ready');
+        // 可能正在玩别的卡：叮一声告诉人做好了
+        sfx.ready();
         if (id) remember(id);
         this.#updateNav();
       },
@@ -180,6 +242,7 @@ export class Deck {
   }
 
   #go(index: number): void {
+    if (this.#revealing) return;
     if (index < 0 || index >= this.#slots.length || index === this.#index) return;
     const direction = index > this.#index ? 1 : -1;
     this.#index = index;
@@ -229,6 +292,15 @@ export class Deck {
     this.#next.classList.toggle('has-new', waiting);
     this.#prev.setAttribute('aria-label', t('deck.prev'));
     this.#next.setAttribute('aria-label', t(waiting ? 'deck.nextReady' : 'deck.next'));
+    this.#updateSfx();
+  }
+
+  #updateSfx(): void {
+    this.#sfxToggle.hidden = !this.#revealing && !this.#slots.some((slot) => slot.kind === 'pack');
+    const on = sfxOn();
+    this.#sfxToggle.setAttribute('aria-pressed', String(on));
+    this.#sfxToggle.setAttribute('aria-label', t('deck.sfx'));
+    this.#sfxToggle.title = t(on ? 'deck.sfxOn' : 'deck.sfxOff');
   }
 
   /** 失败的卡包格「关掉」：拿掉这一格，停在它左边那格 */
@@ -242,33 +314,109 @@ export class Deck {
     this.#render(0);
   }
 
-  /** 开包：卡包动画播到揭晓那一刻，新卡从卡包的位置放大滑出，卡包淡出后拆掉 */
+  /**
+   * 开包。新卡一开始就挂到（藏着的）卡片宿主上：图片提前解码好，卡出袋口换手的那一下不会闪白；
+   * 卡包动画播到该摆卡的那一刻，新卡接着转一圈亮相，转完拆掉卡包
+   */
   async #reveal(slot: PackSlot, method: OpenMethod): Promise<void> {
     const result = slot.result;
     if (!result) return;
     slot.result = null;
-    await slot.pack.playOpen(method);
-
     const index = this.#slots.indexOf(slot);
     if (index < 0) return;
-    const card: CardSlot = { kind: 'card', id: result.id, set: result.set };
-    this.#slots[index] = card;
-    this.#cardHost.hidden = false;
+    this.#revealing = true;
+    this.#slots[index] = { kind: 'card', id: result.id, set: result.set };
+    const host = this.#cardHost;
+    host.style.visibility = 'hidden';
+    host.hidden = false;
     this.#hooks.revealed(result.set, result.id, method);
+    const hc = host.querySelector<HTMLElement>('.hc');
+    for (const img of host.querySelectorAll('img')) void img.decode().catch(() => undefined);
+    // 闪卡静止时画面放大的倍数：袋子里那张要画得一样大
+    const zoom = Number.parseFloat(hc?.style.getPropertyValue('--hc-scale') ?? '') || 1;
 
-    if (!reducedMotion()) {
-      this.#cardHost.animate(
-        [
-          { opacity: 0, scale: '0.7', translate: '0 10%' },
-          { opacity: 1, scale: '1', translate: '0 0' },
-        ],
-        { duration: 480, easing: 'cubic-bezier(.2,.9,.25,1)' },
-      );
-      await slot.host
-        .animate([{ opacity: 1 }, { opacity: 0 }], { duration: 360, easing: 'ease-out', fill: 'forwards' })
-        .finished.catch(() => undefined);
-    }
+    const handoff = await slot.pack.playOpen(method, zoom);
+    // 卡包自己的尾巴（空袋子掉出画面、光散掉）和卡转圈叠在一起播，都比转圈短，转完再拆
+    slot.host.style.pointerEvents = 'none';
+    if (reducedMotion()) host.style.visibility = '';
+    else await this.#spinIn(handoff);
     slot.pack.destroy();
+    this.#revealing = false;
     this.#updateNav();
+  }
+
+  /**
+   * 新卡亮相：绕竖轴转一圈，带一点厚度，转过去看得到卡背。
+   * handoff：卡包里那张卡此刻在屏幕上的位置，卡从那里一边顺着手划的方向转、一边回到原位；
+   * 没有（点开炸出、平面版卡包）就从中间弹出来。
+   * 进来时卡片宿主是藏着的：先摆好第一帧的姿态再露出来，否则会有一帧原样大小的卡闪一下
+   */
+  async #spinIn(handoff: Handoff | null): Promise<void> {
+    const from = handoff?.rect ?? null;
+    const side = handoff?.side ?? 1;
+    const host = this.#cardHost;
+    const hc = host.querySelector<HTMLElement>('.hc');
+    if (!hc) {
+      host.style.visibility = '';
+      return;
+    }
+    const w = hc.offsetWidth, h = hc.offsetHeight;
+    const box = hc.getBoundingClientRect();
+    const dx = from ? from.left + from.width / 2 - (box.left + box.width / 2) : 0;
+    const dy = from ? from.top + from.height / 2 - (box.top + box.height / 2) : 0;
+    const s0 = from ? from.width / box.width : 0;
+    const thickness = Math.max(2, w * THICKNESS);
+
+    Object.assign(this.#thick.style, { width: `${w}px`, height: `${h}px` });
+    host.style.setProperty('--deck-t', `${thickness}px`);
+    host.style.setProperty('--deck-w', `${w}px`);
+    this.#thick.hidden = false;
+    host.classList.add('is-spinning');
+    // 透视和卡包那边的相机差不多：相机离卡约 2.4 个卡高
+    this.#view.style.perspective = `${h * 2.4}px`;
+    hc.style.transform = `translateZ(${thickness / 2}px)`;
+    sfx.spin();
+
+    /** 转圈进行到 p（0..1）时的姿态 */
+    const pose = (p: number): void => {
+      let x = 0, y = 0, scale: number, angle: number;
+      if (from) {
+        // 从袋口那个位置回到正中间放大，一边匀匀地转一圈
+        const m = easeInOut(Math.min(1, p * 1.5));
+        x = dx * (1 - m);
+        y = dy * (1 - m);
+        scale = lerp(s0, 1, m);
+        angle = side * Math.PI * 2 * easeInOut(p);
+      } else {
+        // 从光里弹出来，刚出来转得最快，慢慢停下
+        scale = Math.max(0.01, easeOutBack(Math.min(1, p / 0.45)));
+        angle = side * Math.PI * 2 * easeOut(p);
+      }
+      host.style.transform = `translate(${x}px, ${y}px) scale(${scale}) rotateY(${angle}rad)`;
+      // 转到背面时正面藏起来（闪卡里面自己也有 3D，不能指望 backface-visibility）；
+      // 卡背朝光的时候亮、侧过去暗
+      const facing = Math.cos(angle);
+      hc.style.visibility = facing < 0 ? 'hidden' : '';
+      this.#thick.style.setProperty('--deck-shade', (0.55 * (1 - Math.min(1, Math.max(0, -facing)))).toFixed(3));
+    };
+    const start = performance.now();
+    await new Promise<void>((resolve) => {
+      const frame = (): void => {
+        const p = clamp01((performance.now() - start) / SPIN_MS);
+        pose(p);
+        if (p < 1) requestAnimationFrame(frame);
+        else resolve();
+      };
+      pose(0);
+      host.style.visibility = '';
+      requestAnimationFrame(frame);
+    });
+
+    host.style.transform = '';
+    host.classList.remove('is-spinning');
+    this.#view.style.perspective = '';
+    hc.style.transform = '';
+    hc.style.visibility = '';
+    this.#thick.hidden = true;
   }
 }

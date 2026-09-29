@@ -73,6 +73,14 @@
             <button type="button" class="deck__nav deck__nav--next" hidden aria-label="下一张">
               <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M9 5l7 7-7 7" /></svg>
             </button>
+            <!-- 开包音效开关：卡带里有卡包时才出现，在右边那列底部，不压在卡上；选择记在本机（src/demo/sfx.ts） -->
+            <button type="button" class="deck__sfx" hidden aria-pressed="true" aria-label="开包音效">
+              <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+                <path d="M4 9.5h3.5L12 6v12l-4.5-3.5H4z" />
+                <path class="deck__sfx-on" d="M15.5 9a4.5 4.5 0 0 1 0 6M18 6.5a8 8 0 0 1 0 11" />
+                <path class="deck__sfx-off" d="M16 9.5l5 5M21 9.5l-5 5" />
+              </svg>
+            </button>
           </div>
         </div>
 
