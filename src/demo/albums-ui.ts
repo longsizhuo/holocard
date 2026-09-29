@@ -2,6 +2,7 @@
  * 卡册的界面
  *
  * 页头「我的卡册」打开管理窗口，面板上「加入卡册」打开选择窗口，两者共用一个 <dialog>。
+ * 列表最前面固定一格「我做过的」：这台设备上做好的卡，不用手动加，自动都在（数据是删除口令那份记录）。
  * 用原生 dialog：遮罩、Esc 关闭、焦点圈在窗口里，这些浏览器都管了。
  * 内容整块重画——卡册是几个到几十个的量级，不值得做细粒度更新；切换语言时也按当前视图重画一遍。
  * 数据读写全在 albums.ts。
@@ -19,11 +20,13 @@ import {
   updateAlbum,
   type Album,
 } from './albums';
+import { ownedCards } from './api';
 import { onLangChange, t, type MessageKey } from '../i18n';
 import { track } from './track';
 
 type View =
   | { kind: 'list' }
+  | { kind: 'mine' }
   | { kind: 'detail'; id: string }
   /** id 为 null 是新建；addCard：从「加入卡册」进来新建的，建好直接把这张卡放进去 */
   | { kind: 'edit'; id: string | null; back: View; addCard?: string }
@@ -88,7 +91,15 @@ function render(): void {
   if (!body) return;
   const v = view;
   const nodes =
-    v.kind === 'list' ? listView() : v.kind === 'detail' ? detailView(v.id) : v.kind === 'edit' ? editView(v) : pickView(v);
+    v.kind === 'list'
+      ? listView()
+      : v.kind === 'mine'
+        ? mineView()
+        : v.kind === 'detail'
+          ? detailView(v.id)
+          : v.kind === 'edit'
+            ? editView(v)
+            : pickView(v);
   body.replaceChildren(
     ...(failed ? [el('p', { className: 'albums__error', role: 'alert', textContent: t('albums.saveFailed') })] : []),
     ...nodes.filter((node): node is Node | string => Boolean(node)),
@@ -149,12 +160,20 @@ function listView(): Child[] {
     el('h2', { id: TITLE_ID, textContent: t('albums.title') }),
     button(t('albums.new'), () => show({ kind: 'edit', id: null, back: { kind: 'list' } }), 'is-primary'),
   );
-  if (albums.length === 0) return [head, el('p', { className: 'albums__empty', textContent: t('albums.empty') }), note()];
+  const mine = mineTile();
+  if (albums.length === 0) {
+    return [
+      head,
+      mine && el('div', { className: 'albums__grid' }, mine),
+      el('p', { className: 'albums__empty', textContent: t('albums.empty') }),
+      note(),
+    ];
+  }
 
   const shown = showArchived ? albums : albums.filter((album) => !album.archived);
   return [
     head,
-    el('div', { className: 'albums__grid' }, ...shown.map(albumTile)),
+    el('div', { className: 'albums__grid' }, mine, ...shown.map(albumTile)),
     archived > 0 &&
       button(
         showArchived ? t('albums.hideArchived') : t('albums.showArchived', { n: archived }),
@@ -184,6 +203,39 @@ function albumTile(album: Album): HTMLElement {
   );
   tile.addEventListener('click', () => show({ kind: 'detail', id: album.id }));
   return tile;
+}
+
+// ---------- 我做过的 ----------
+
+/** 列表里「我做过的」那一格，封面是最新做的那张。一张都没做过就不出现 */
+function mineTile(): HTMLElement | null {
+  const cards = ownedCards();
+  if (cards.length === 0) return null;
+  const tile = el(
+    'button',
+    { type: 'button', className: 'atile' },
+    thumb(cards[0] ?? null),
+    el('strong', { textContent: t('albums.mine') }),
+    el('span', { textContent: t('albums.count', { n: cards.length }) }),
+  );
+  tile.addEventListener('click', () => show({ kind: 'mine' }));
+  return tile;
+}
+
+function mineView(): Child[] {
+  const cards = ownedCards().map((cardId, index) =>
+    el(
+      'div',
+      { className: 'acard' },
+      el('a', { href: `${BASE}c/${cardId}`, ariaLabel: t('albums.cardN', { n: index + 1 }) }, thumb(cardId)),
+    ),
+  );
+  return [
+    button(`← ${t('albums.back')}`, () => show({ kind: 'list' }), 'is-link'),
+    el('h2', { id: TITLE_ID, textContent: t('albums.mine') }),
+    el('p', { className: 'albums__intro', textContent: t('albums.mineHint') }),
+    el('div', { className: 'albums__grid' }, ...cards),
+  ];
 }
 
 // ---------- 卡册详情 ----------

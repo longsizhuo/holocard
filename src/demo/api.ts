@@ -270,6 +270,11 @@ export function rememberOwned(id: string, token: string): void {
   }
 }
 
+/** 这台设备上做过的卡，最新的在前。存的顺序就是做好的先后（对象的字符串键按插入顺序遍历） */
+export function ownedCards(): string[] {
+  return Object.keys(readOwned()).reverse();
+}
+
 export function ownedToken(id: string): string | null {
   return readOwned()[id] ?? null;
 }
