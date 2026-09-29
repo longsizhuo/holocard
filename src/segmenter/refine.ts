@@ -92,7 +92,7 @@ export function guideFromImage(rgba: Uint8ClampedArray, width: number, height: n
 }
 
 /** 方窗均值，用积分图实现，复杂度与窗口大小无关 */
-function boxMean(src: Float32Array, width: number, height: number, radius: number): Float32Array {
+export function boxMean(src: Float32Array, width: number, height: number, radius: number): Float32Array {
   const iw = width + 1;
   const integral = new Float64Array(iw * (height + 1));
   for (let y = 0; y < height; y++) {

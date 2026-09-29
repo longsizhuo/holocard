@@ -19,7 +19,7 @@
 import './card.css';
 import './foils.css';
 import type { HaloEffect, HaloLight, LayerFoil, LayerSet } from '../format/types';
-import { cardMask, layerMask } from './highlight';
+import { groupMask, layerMask } from './highlight';
 import { Spring } from './spring';
 import { ensureTextures } from './textures';
 
@@ -144,7 +144,8 @@ export class HoloCard {
 
   #root: HTMLDivElement | null = null;
   #shines: HTMLDivElement[] = [];
-  #haloEl: HTMLDivElement | null = null;
+  /** 每个视差组各一份整卡炫光（见 setLayerSet） */
+  #haloEls: HTMLDivElement[] = [];
   #halo: HaloEffect | null = null;
 
   /** 当前持有的 object URL，切换卡片和销毁时必须全部 revoke，否则内存泄漏 */
@@ -224,6 +225,11 @@ export class HoloCard {
 
     // 景深层：由远及近，每层 = 画面 + 这一层自己的箔面
     const masks: Promise<void>[] = [];
+    // 拷一份，不持有调用方的对象。共用引用的话，外面对 manifest 的原地修改
+    // 会不经 setHalo 就影响下一帧的炫光计算，而 --hc-halo-intensity 还停在旧值，
+    // 强度和角度两条线对不上。
+    this.#halo = { ...manifest.effects.halo, light: { ...manifest.effects.halo.light } };
+    let group: Blob[] = [];
     manifest.layers.forEach((layer, index) => {
       const blob = images[index];
       if (!blob) return; // 上面已校验过长度，这里只为满足类型收窄
@@ -248,38 +254,53 @@ export class HoloCard {
       const shine = document.createElement('div');
       shine.className = 'hc__shine';
       shine.style.setProperty('--hc-mask', `url("${url}")`);
-      masks.push(this.#applyMask(root, layerMask(blob), shine, '--hc-mask'));
+      const mask = layerMask(blob);
+      masks.push(this.#applyMask(root, mask, shine, '--hc-mask'));
       this.#applyFoil(shine, layer.foil);
       this.#shines.push(shine);
 
       plane.append(art, shine);
       stack.append(plane);
+
+      /*
+       * 整卡炫光、高光：视差相同的相邻层是一组（它们一起动），每组上面各压一份，
+       * 遮罩只按这一组的画面算亮部保护、并且跟着这一组平移和放大（见 card.css 的 .hc__fx）。
+       * 更近的组画上来时盖住下面那份，所以每个像素最后吃到的是它最上面那一组的炫光。
+       * 以前是整卡一份、遮罩静止不动，层一动遮罩里的轮廓就和人物错开，人物边上多出一道白带。
+       * 渐变本身不动，还是整卡一片光。
+       *
+       * 遮罩位置：plane 是先平移 −n·s·amp（s = 这组视差 − 焦平面，百分比相对 plane 自身）再放大 k 倍，
+       * k = 1 + 2·maxOffset·amp。遮罩尺寸取 k 倍后，百分比位置 P 对应的偏移是 (1 − k)·P，
+       * 要等于 (1 − k)/2 − n·s·amp，解得 P = 50% + n·s / (2·maxOffset)，和振幅无关
+       */
+      group.push(blob);
+      if (manifest.layers[index + 1]?.parallax === layer.parallax) return;
+      const fx = document.createElement('div');
+      fx.className = 'hc__fx';
+      const shift = this.#maxOffset > 0 ? (layer.parallax - focus) / (2 * this.#maxOffset) : 0;
+      fx.style.setProperty('--hc-fx-shift', `${round(shift * 100, 4)}%`);
+      const halo = document.createElement('div');
+      halo.className = 'hc__halo';
+      halo.style.setProperty('--hc-halo-intensity', String(manifest.effects.halo.intensity));
+      this.#haloEls.push(halo);
+      fx.append(halo);
+      if (manifest.effects.glare) {
+        const glare = document.createElement('div');
+        glare.className = 'hc__glare';
+        fx.append(glare);
+      }
+      stack.append(fx);
+      // 只有一层的组（主体一般就是），遮罩和这一层箔面的是同一张，不用再算一遍
+      const fxMask = group.length === 1 ? mask : groupMask(group);
+      masks.push(this.#applyMask(root, fxMask, fx, '--hc-card-mask'));
+      group = [];
     });
-
-    // 整卡效果压在所有景深层之上，不参与视差
-    const haloEl = document.createElement('div');
-    haloEl.className = 'hc__halo';
-    stack.append(haloEl);
-    this.#haloEl = haloEl;
-    // 拷一份，不持有调用方的对象。共用引用的话，外面对 manifest 的原地修改
-    // 会不经 setHalo 就影响下一帧的炫光计算，而 --hc-halo-intensity 还停在旧值，
-    // 强度和角度两条线对不上。
-    this.#halo = { ...manifest.effects.halo, light: { ...manifest.effects.halo.light } };
-    haloEl.style.setProperty('--hc-halo-intensity', String(manifest.effects.halo.intensity));
-
-    if (manifest.effects.glare) {
-      const glare = document.createElement('div');
-      glare.className = 'hc__glare';
-      stack.append(glare);
-    }
 
     rotator.append(stack);
     translater.append(rotator);
     root.append(translater);
     this.#host.append(root);
     this.#root = root;
-    // 整卡炫光、高光也按画面亮度收一收，变量挂在 .hc 上，两者共用（见 card.css）
-    masks.push(this.#applyMask(root, cardMask(images), root, '--hc-card-mask'));
     this.#ready = Promise.all(masks).then(() => undefined);
 
     this.#writeVars();
@@ -306,7 +327,7 @@ export class HoloCard {
   /** 改整卡炫光，立即生效 */
   setHalo(halo: HaloEffect): void {
     this.#halo = { ...halo, light: { ...halo.light } };
-    this.#haloEl?.style.setProperty('--hc-halo-intensity', String(halo.intensity));
+    for (const el of this.#haloEls) el.style.setProperty('--hc-halo-intensity', String(halo.intensity));
     this.#writeVars();
   }
 
@@ -579,7 +600,7 @@ export class HoloCard {
     }
     this.#objectUrls = [];
     this.#shines = [];
-    this.#haloEl = null;
+    this.#haloEls = [];
     this.#halo = null;
 
     // 换卡后弹簧从静止姿态重新开始，否则新卡一出来就是歪的

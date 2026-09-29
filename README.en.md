@@ -79,8 +79,12 @@ Growing nearer regions outward makes object edges travel with the object. But th
 which gives subjects in front of white walls or sky a bright rim, so the growth is only 2 pixels; keeping object edges out of the background is done instead by widening the occluded area of the background layer before filling it.
 
 **Soft edges have the background colour removed.** A semi-transparent edge pixel mixes foreground and background: `C = a·F + (1 − a)·B`.
-Storing C as-is makes hair and fur edges carry the colour of the old background along when they move. Compositing far to near, B is whatever currently sits behind the layer,
-and F is solved for and stored: stacked back together at rest the layers still reproduce the original exactly, while in motion the soft edge carries only the foreground's own colour.
+Storing C as-is makes hair and fur edges carry the colour of the old background along when they move. Compositing far to near, B is whatever currently sits behind the layer.
+Where that is the original image (gentle depth transitions), F is solved for and stored: stacked back together at rest the layers still reproduce the original exactly.
+Where it was filled in (real object edges), solving is unsafe: the fill is a guess, and its error is amplified by `(1 − a)/a`,
+so a glow or rim light around the subject, or a matte that is a little too wide, pushes F to pure white and the subject drags a white outline around.
+There F comes from a neighbourhood estimate instead, `F = C + (1 − a)·(local foreground mean − local background mean)` (blur-fusion, the same family as BiRefNet's own foreground estimation),
+whose error is only scaled by `1 − a`, never amplified.
 
 **Every layer except the front one is completed, not just the bottom one.** When the foreground moves away, what shows through should be a continuation of the layer right behind it.
 How: for each covered pixel, find which layer the nearest visible pixel belongs to, and treat that layer as extending to it.
@@ -181,6 +185,8 @@ With one shared factor the card at rest matches the original photo pixel for pix
 **Highlight protection.** Most foils use `color-dodge` (base ÷ (1 − foil)) and the card-wide glare uses `overlay`, so bright areas clip to pure white and the texture of white clothes or fur disappears.
 Every foil mask, and the masks of the halo and glare, are therefore attenuated by image brightness: unchanged below luminance 0.6, easing down to 0.2 at pure white (`renderer/highlight.ts`).
 Shadows and midtones keep the full effect; only what is about to clip is held back.
+The halo and glare are laid once per parallax group, each masked by that group's own image and shifted and scaled with it; the light itself still spans the whole card.
+With one static mask for the whole card, the outline in the mask drifted off the subject as soon as the layers moved: where a dark outline used to be now sat bright background under full glare, leaving a white band beside the subject.
 
 **Tuning previews at the peak.** While a slider is being dragged the pointer is not on the card, so the card is at rest, and foils and halo only show when it tilts, parallax only when it leans.
 `preview()` therefore turns the card to the halo's brightest angle while any slider moves, holds it briefly, then eases back.

@@ -148,16 +148,32 @@
 /* ---------- 整卡炫光与高光的高光保护 ---------- */
 
 /*
- * 两者都铺满卡面、压在所有层之上，亮部同样会被推成纯白。
- * --hc-card-mask 是按整张画面亮度算的遮罩（亮处透得少，见 renderer/highlight.ts），
+ * 两者都铺满卡面，亮部同样会被推成纯白。
+ * --hc-card-mask 是按画面亮度算的遮罩（亮处透得少，见 renderer/highlight.ts），
  * 算好之前是 none，也就是不遮，和以前一样。
+ *
+ * 视差相同的一组层上面各压一份（.hc__fx，见 card.ts），遮罩只按这一组的画面算，并且跟着这一组走：
+ * 和 .hc__plane 一样按 --hc-scale 放大、按视差平移。炫光本身的渐变不动，还是整卡一片。
+ * 以前是整卡一张静止的遮罩，层一动，遮罩里人物的轮廓就和人物错开了：
+ * 深色描边原来的位置落到亮背景上，那里炫光全开，人物边上多出一道白带。
+ * 遮罩比元素大 --hc-scale 倍时，百分比位置 50% + n·shift 正好就是 plane 的位移，推导见 card.ts
  */
+.hc__fx {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+
 .hc__halo,
 .hc__glare {
   -webkit-mask-image: var(--hc-card-mask, none);
   mask-image: var(--hc-card-mask, none);
-  -webkit-mask-size: 100% 100%;
-  mask-size: 100% 100%;
+  -webkit-mask-size: calc(var(--hc-scale) * 100%) calc(var(--hc-scale) * 100%);
+  mask-size: calc(var(--hc-scale) * 100%) calc(var(--hc-scale) * 100%);
+  -webkit-mask-position:
+    calc(50% + var(--hc-nx) * var(--hc-fx-shift)) calc(50% + var(--hc-ny) * var(--hc-fx-shift));
+  mask-position:
+    calc(50% + var(--hc-nx) * var(--hc-fx-shift)) calc(50% + var(--hc-ny) * var(--hc-fx-shift));
   -webkit-mask-repeat: no-repeat;
   mask-repeat: no-repeat;
 }
@@ -232,5 +248,14 @@
   .hc__plane {
     transform: none !important;
     transition: none !important;
+  }
+
+  /* 层不放大也不平移了，炫光的遮罩也得跟着原样对齐 */
+  .hc__halo,
+  .hc__glare {
+    -webkit-mask-size: 100% 100% !important;
+    mask-size: 100% 100% !important;
+    -webkit-mask-position: 0 0 !important;
+    mask-position: 0 0 !important;
   }
 }

@@ -26,10 +26,10 @@ export function protection(luminance: number): number {
 
 /**
  * 把几张图按顺序叠到一张画布上，按叠好的画面亮度算遮罩，返回 object URL（调用方负责 revoke）。
- * keepAlpha：遮罩再乘上画面自己的 alpha——每层的箔面只该出现在这一层有内容的地方；
- * 整卡效果铺满卡面，不需要。遮罩只看 alpha 通道，颜色通道原样留着没关系。
+ * 遮罩再乘上画面自己的 alpha：箔面、炫光都只该出现在这一层（组）有内容的地方。
+ * 遮罩只看 alpha 通道，颜色通道原样留着没关系。
  */
-async function maskFrom(images: Blob[], keepAlpha: boolean): Promise<string> {
+async function maskFrom(images: Blob[]): Promise<string> {
   const bitmaps = await Promise.all(images.map((image) => createImageBitmap(image)));
   const first = bitmaps[0];
   if (!first) throw new Error('没有图');
@@ -48,7 +48,7 @@ async function maskFrom(images: Blob[], keepAlpha: boolean): Promise<string> {
   const pixels = ctx.getImageData(0, 0, canvas.width, canvas.height);
   const d = pixels.data;
   for (let i = 0; i < d.length; i += 4) {
-    const alpha = keepAlpha ? (d[i + 3] ?? 0) : 255;
+    const alpha = d[i + 3] ?? 0;
     if (alpha === 0) continue;
     // Rec.709 亮度，直接在 sRGB 值上算：要的是「看起来多亮」，不需要先转线性
     const luminance = (0.2126 * (d[i] ?? 0) + 0.7152 * (d[i + 1] ?? 0) + 0.0722 * (d[i + 2] ?? 0)) / 255;
@@ -63,14 +63,13 @@ async function maskFrom(images: Blob[], keepAlpha: boolean): Promise<string> {
 
 /** 某一层箔面的遮罩：这一层的 alpha × 高光保护 */
 export function layerMask(layer: Blob): Promise<string> {
-  return maskFrom([layer], true);
+  return maskFrom([layer]);
 }
 
 /**
- * 整卡炫光、高光的遮罩：按所有层由远及近叠出来的画面（约等于原图）算高光保护。
- * 这两样压在所有层上面、不跟视差走，所以用一张静止的整图就够；
- * 层动起来时边缘差几个像素，而炫光和高光本身都是柔和的大片渐变，看不出来。
+ * 一组视差相同的层上面那份炫光、高光的遮罩：这一组由远及近叠出来的画面 × 它的 alpha。
+ * 这一组没画到的地方透明，露的是下面那一组自己的炫光（见 card.ts 的分组）
  */
-export function cardMask(layers: Blob[]): Promise<string> {
-  return maskFrom(layers, false);
+export function groupMask(layers: Blob[]): Promise<string> {
+  return maskFrom(layers);
 }
