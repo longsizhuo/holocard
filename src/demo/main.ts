@@ -19,6 +19,7 @@ import {
 } from './api';
 import { initAlbums, openAlbums } from './albums-ui';
 import { Deck, forgetSession } from './deck';
+import { reducedMotion } from './pack';
 import { initTracking, pageView, track } from './track';
 import { measurePerf } from './perf';
 import { parseRoute, shareUrl } from './route';
@@ -121,6 +122,7 @@ const deck = new Deck(need<HTMLElement>('.deck'), {
   revealed: (set, id, method) => {
     show(set, id);
     track('pack-open', { how: method });
+    if (id && ownedToken(id) === null) markSeen(id);
     // 地址栏换成这张卡的链接：用浏览器菜单分享、复制地址、刷新，拿到的都是这张卡而不是首页。
     // replaceState 只改地址，不刷新页面，也不多一条后退记录
     if (id) history.replaceState(history.state, '', shareUrl(id, lang()));
@@ -959,6 +961,37 @@ function exposeExportHooks(): void {
 
 // ---------- 启动 ----------
 
+/** 这台设备上开过包的、别人分享的卡。存最近的几百张就够了 */
+const SEEN_KEY = 'holocard:seen';
+const SEEN_MAX = 300;
+
+function seenCards(): string[] {
+  try {
+    const parsed: unknown = JSON.parse(localStorage.getItem(SEEN_KEY) ?? '[]');
+    return Array.isArray(parsed) ? parsed.filter((id): id is string => typeof id === 'string') : [];
+  } catch {
+    // 隐私模式下可能直接抛：那就每次都出卡包
+    return [];
+  }
+}
+
+function markSeen(id: string): void {
+  try {
+    const ids = seenCards().filter((other) => other !== id);
+    localStorage.setItem(SEEN_KEY, JSON.stringify([...ids, id].slice(-SEEN_MAX)));
+  } catch {
+    // 同上
+  }
+}
+
+/**
+ * 分享链接要不要先出卡包：别人分享的卡、在这台设备上第一次打开才出。
+ * 自己做的卡、开过包的卡直接看；截图和导出用的 render 页面、「减少动态效果」下也不出
+ */
+function sharedPackDue(id: string): boolean {
+  return route.mode === 'card' && ownedToken(id) === null && !reducedMotion() && !seenCards().includes(id);
+}
+
 /** 按路由决定首屏加载什么 */
 async function boot(): Promise<void> {
   // 服务端发页面时已经按语言换好了文字；这里再过一遍，本地开发（vite 直接发页面）时也对
@@ -989,6 +1022,11 @@ async function boot(): Promise<void> {
   if (route.id) {
     try {
       const set = await loadLayerSet(`${import.meta.env.BASE_URL}api/layers/${route.id}`);
+      if (sharedPackDue(route.id)) {
+        // 卡包格：面板那句「开包之后就能……」由卡带写，这里不覆盖
+        deck.addPack(set, route.id);
+        return;
+      }
       deck.addCard(set, route.id);
       if (route.mode !== 'render') deck.restore();
       setText(status, 'status.layers', { n: set.manifest.layers.length });

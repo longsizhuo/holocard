@@ -17,6 +17,7 @@ import { defaultFoilFor, type FoilType, type LayerSet } from '../format/types';
 import {
   DEFAULT_PACK_FOIL,
   FLASH,
+  Pack,
   PackChrome,
   reducedMotion,
   TAP_SLOP,
@@ -314,6 +315,16 @@ export function packFoil(set: LayerSet): FoilType {
   const custom = layers.some((layer, i) => layer.foil.type !== defaultFoilFor(i, layers.length).type);
   if (!custom) return DEFAULT_PACK_FOIL;
   return layers.find((layer) => layer.foil.type !== 'none')?.foil.type ?? DEFAULT_PACK_FOIL;
+}
+
+/** 能用 WebGL 就用 3D 卡包，起不来（没有 WebGL、着色器编译不过）退回平面版 */
+export function createPack(host: HTMLElement, onDismiss: () => void): PackView {
+  try {
+    return new GlPack(host, onDismiss);
+  } catch (error) {
+    console.info('[holocard] 3D 卡包起不来，换平面版：', error instanceof Error ? error.message : error);
+    return new Pack(host, onDismiss);
+  }
 }
 
 /** 着色器里的箔面编号 */

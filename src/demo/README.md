@@ -10,7 +10,7 @@
 - `pack.ts` / `pack-art.ts`：两种卡包共用的接口和外壳（状态、底下那行字、炸开的光）；平面版卡包（没有 WebGL 时的退路）和它的图案
 - `sfx.ts`：开包音效，Web Audio 现合成，不带音频文件；开关记在本机
 - `ih-logo.svg`：involutionhell.com 的 logo（深色底版），印在卡包正面和卡背上
-- `albums-ui.ts`：「我的卡册」，这台设备上做过的卡（数据是 `api.ts` 里删除口令那份记录），原生 `<dialog>`
+- `albums-ui.ts`：「我的卡册」，这台设备上做过的卡（数据是 `api.ts` 里删除口令那份记录），原生 `<dialog>`；每次打开先开一包，再发牌进网格
 - `route.ts`：路由和分享链接
 - `track.ts`：自建 umami 埋点，没配站点 id 时一个字节都不加载
 - `perf.ts`：性能埋点。静置时量 10 秒帧率，发给自己的服务端（staging 和线上都有，不走 umami）
