@@ -28,7 +28,7 @@ import { basename, dirname, extname, join, resolve, sep } from 'node:path';
 import { env } from '@huggingface/transformers';
 import { Worker } from 'node:worker_threads';
 import type { LayerManifest } from '../src/format/types';
-import { MATTE_MODEL_ID } from '../src/segmenter/matte';
+import { MATTE_MODEL_ID, matteWeightsFile, type MatteModelConfig } from '../src/segmenter/matte';
 import { normalizeOriginal, layerToWebp, makeThumb, ImageError } from './images';
 import type { SegmentReply, SegmentRequest, SegmenterConfig } from './segment-worker';
 import { enterStage, finishJob, queuedEta, runningEta, startJob } from './eta';
@@ -113,7 +113,18 @@ env.allowRemoteModels = false;
  * 三样不是同一步到位的，所以在这里自己挡住：上限不够就当没有权重。
  */
 const MATTE_MIN_MEMORY = 8 * 2 ** 30;
-const MATTE_WEIGHTS = existsSync(join(MODEL_DIR, MATTE_MODEL_ID, 'onnx', 'model.onnx'));
+/**
+ * 抠图模型，默认 lite。换型号、做盲评对比时用环境变量指定，不用改代码（流程见 scripts/blind/README.md）：
+ *   HOLOCARD_MATTE_MODEL  模型名，比如 onnx-community/BiRefNet_512x512-ONNX
+ *   HOLOCARD_MATTE_SIZE   输入边长，要和这份 ONNX 导出时的尺寸一致
+ *   HOLOCARD_MATTE_DTYPE  fp32 / fp16 / q8
+ */
+const MATTE_MODEL: MatteModelConfig = {
+  id: process.env.HOLOCARD_MATTE_MODEL ?? MATTE_MODEL_ID,
+  size: Number(process.env.HOLOCARD_MATTE_SIZE ?? 1024),
+  dtype: (process.env.HOLOCARD_MATTE_DTYPE ?? 'fp32') as MatteModelConfig['dtype'],
+};
+const MATTE_WEIGHTS = existsSync(join(MODEL_DIR, matteWeightsFile(MATTE_MODEL)));
 // 没有限制时是 0（或者一个天文数字）
 const MEMORY_CAP = process.constrainedMemory();
 const MATTE_READY = MATTE_WEIGHTS && (MEMORY_CAP === 0 || MEMORY_CAP >= MATTE_MIN_MEMORY);
@@ -156,7 +167,7 @@ function cpuShare(): number {
 const CPU_SHARE = cpuShare();
 
 function spawnSegmenter(): Worker {
-  const config: SegmenterConfig = { modelDir: MODEL_DIR, matte: MATTE_READY, threads: CPU_SHARE };
+  const config: SegmenterConfig = { modelDir: MODEL_DIR, matte: MATTE_READY, threads: CPU_SHARE, matteModel: MATTE_MODEL };
   const worker = new Worker(new URL('./segment-worker.mjs', import.meta.url), { workerData: config });
   let ready = false;
   worker.on('message', (reply: SegmentReply) => {
@@ -1550,7 +1561,7 @@ server.listen(PORT, '127.0.0.1', () => {
   console.log(`holocard 分层服务已启动 127.0.0.1:${PORT}`);
   console.log(`  产物目录 ${OUT_DIR}`);
   const matteNote = MATTE_READY
-    ? ''
+    ? `（抠主体用 ${MATTE_MODEL.id}，${MATTE_MODEL.size}，${MATTE_MODEL.dtype}）`
     : MATTE_WEIGHTS
       ? `（内存上限 ${(MEMORY_CAP / 2 ** 30).toFixed(1)}G 不够抠主体，只按深度切层）`
       : '（没有抠图权重，只按深度切层）';

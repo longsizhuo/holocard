@@ -1,0 +1,225 @@
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>抠图盲评</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@500;600&family=Noto+Sans+SC:wght@400;500;700&display=swap">
+<link rel="stylesheet" href="blind.css">
+<style>
+  :root {
+    --bg: #eeedf2;
+    --surface: #ffffff;
+    --line: #dcd9e4;
+    --ink: #1d1b24;
+    --muted: #6a6676;
+    --chip: #ecebf1;
+    --a: #c2255c;
+    --b: #2d5bd0;
+    --same: #5d5a68;
+    --bad: #a15c00;
+    --on-accent: #ffffff;
+    --well: #e3e1ea;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      color-scheme: dark;
+      --bg: #121116;
+      --surface: #1c1b22;
+      --line: #302e39;
+      --ink: #edebf3;
+      --muted: #9b97a7;
+      --chip: #27252f;
+      --a: #ee5f8e;
+      --b: #7196f2;
+      --same: #b3b0bd;
+      --bad: #f0a64a;
+      --on-accent: #121116;
+      --well: #17161c;
+    }
+  }
+  :root[data-theme="dark"] {
+    color-scheme: dark;
+    --bg: #121116;
+    --surface: #1c1b22;
+    --line: #302e39;
+    --ink: #edebf3;
+    --muted: #9b97a7;
+    --chip: #27252f;
+    --a: #ee5f8e;
+    --b: #7196f2;
+    --same: #b3b0bd;
+    --bad: #f0a64a;
+    --on-accent: #121116;
+    --well: #17161c;
+  }
+
+  body {
+    background: var(--bg);
+    color: var(--ink);
+    font-family: 'Noto Sans SC', 'PingFang SC', 'Microsoft YaHei', system-ui, sans-serif;
+    font-size: 15px;
+    line-height: 1.6;
+  }
+  .num { font-family: 'IBM Plex Mono', ui-monospace, monospace; font-variant-numeric: tabular-nums; }
+  .wrap { max-width: 1320px; margin: 0 auto; padding-inline: 20px; padding-block: 22px 40px; display: grid; gap: 18px; }
+
+  header { display: flex; flex-wrap: wrap; gap: 6px 24px; align-items: baseline; justify-content: space-between; }
+  h1 { margin: 0; font-size: 24px; letter-spacing: 0.02em; }
+  .hint { margin: 0; color: var(--muted); font-size: 14px; max-width: 70ch; }
+  kbd {
+    font-family: 'IBM Plex Mono', ui-monospace, monospace;
+    font-size: 12px;
+    padding: 1px 6px;
+    border: 1px solid var(--line);
+    border-bottom-width: 2px;
+    border-radius: 4px;
+    background: var(--surface);
+    color: var(--ink);
+  }
+
+  .panel { background: var(--surface); border: 1px solid var(--line); border-radius: 12px; padding: 16px 18px 20px; display: grid; gap: 14px; }
+  .top { display: flex; flex-wrap: wrap; gap: 10px 14px; align-items: center; }
+  #no { font-size: 26px; font-weight: 600; min-width: 3.2ch; }
+  .nav { font: inherit; padding: 6px 12px; border-radius: 6px; border: 1px solid var(--line); background: var(--chip); color: var(--ink); cursor: pointer; }
+  .nav:focus-visible { outline: 2px solid var(--ink); outline-offset: 2px; }
+  .sweep { display: inline-flex; gap: 6px; align-items: center; color: var(--muted); font-size: 14px; margin-left: auto; }
+
+  #stage { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; position: relative; }
+  #stage.is-loading .card { opacity: 0.35; }
+  .col { display: grid; gap: 8px; justify-items: center; background: var(--well); border-radius: 10px; padding: 14px 12px 22px; }
+  .col h2 { margin: 0; justify-self: start; font-size: 15px; font-weight: 700; letter-spacing: 0.14em; }
+  .col--a h2 { color: var(--a); }
+  .col--b h2 { color: var(--b); }
+  .holder { position: relative; width: min(100%, 440px); }
+  .card { width: 100%; transition: opacity 0.15s; }
+  .card .hc { width: 100%; }
+  .shield { position: absolute; inset: -18px; z-index: 5; cursor: crosshair; touch-action: none; }
+  #error { margin: 0; color: var(--bad); }
+
+  /* 上一行是偏好，下一行是「坏了」：bug 按钮放在对应那一侧的正下方 */
+  #vote { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
+  #vote .bug { font-size: 14px; color: var(--muted); }
+  #vote button {
+    font: inherit;
+    padding: 10px 8px;
+    border-radius: 8px;
+    border: 1px solid var(--line);
+    background: var(--chip);
+    color: var(--ink);
+    cursor: pointer;
+    display: flex;
+    gap: 8px;
+    justify-content: center;
+    align-items: center;
+  }
+  #vote button:hover { border-color: var(--muted); }
+  #vote button:focus-visible { outline: 2px solid var(--ink); outline-offset: 2px; }
+  #vote button[aria-pressed="true"] { color: var(--on-accent); border-color: transparent; font-weight: 500; }
+  #vote button[aria-pressed="true"] kbd { background: transparent; color: inherit; border-color: currentColor; }
+  #vote [data-v="A"][aria-pressed="true"] { background: var(--a); }
+  #vote [data-v="B"][aria-pressed="true"] { background: var(--b); }
+  #vote [data-v="="][aria-pressed="true"] { background: var(--same); }
+  #vote [data-v="X"][aria-pressed="true"],
+  #vote [data-v="A!"][aria-pressed="true"],
+  #vote [data-v="B!"][aria-pressed="true"] { background: var(--bad); color: var(--on-accent); }
+
+  .sheet { display: grid; gap: 10px; }
+  .sheet__head { display: flex; flex-wrap: wrap; gap: 8px 16px; align-items: center; }
+  .progress { font-size: 15px; }
+  .progress .num { font-size: 17px; font-weight: 600; }
+  #dots { display: grid; grid-template-columns: repeat(auto-fill, minmax(38px, 1fr)); gap: 6px; }
+  #dots button {
+    font-family: 'IBM Plex Mono', ui-monospace, monospace;
+    font-size: 12px;
+    padding: 5px 0;
+    border-radius: 5px;
+    border: 1px solid var(--line);
+    background: var(--surface);
+    color: var(--muted);
+    cursor: pointer;
+  }
+  #dots button[aria-current="true"] { outline: 2px solid var(--ink); outline-offset: 1px; color: var(--ink); }
+  #dots button[data-v="A"] { background: var(--a); color: var(--on-accent); border-color: transparent; }
+  #dots button[data-v="B"] { background: var(--b); color: var(--on-accent); border-color: transparent; }
+  #dots button[data-v="="] { background: var(--same); color: var(--on-accent); border-color: transparent; }
+  #dots button[data-v="X"] { background: var(--bad); color: var(--on-accent); border-color: transparent; }
+  /* 因为对面有 bug 才赢的：底色是赢的那边，底下一道 bug 色 */
+  #dots button[data-v="A!"] { background: var(--a); color: var(--on-accent); border-color: transparent; box-shadow: inset 0 -4px 0 var(--bad); }
+  #dots button[data-v="B!"] { background: var(--b); color: var(--on-accent); border-color: transparent; box-shadow: inset 0 -4px 0 var(--bad); }
+  .out { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; }
+  #result {
+    flex: 1 1 320px;
+    min-width: 0;
+    height: 38px;
+    resize: none;
+    font-family: 'IBM Plex Mono', ui-monospace, monospace;
+    font-size: 13px;
+    padding: 8px 10px;
+    border-radius: 6px;
+    border: 1px solid var(--line);
+    background: var(--bg);
+    color: var(--ink);
+  }
+  .copy { font: inherit; font-weight: 500; padding: 8px 16px; border-radius: 6px; border: 0; background: var(--ink); color: var(--bg); cursor: pointer; }
+  .copy:focus-visible { outline: 2px solid var(--a); outline-offset: 2px; }
+  #copied { color: var(--muted); font-size: 14px; }
+
+  @media (max-width: 760px) {
+    .wrap { padding-inline: 16px; }
+    #stage { grid-template-columns: 1fr; }
+    #vote { grid-template-columns: repeat(3, 1fr); }
+    #vote button { font-size: 13px; padding: 9px 4px; }
+    #vote kbd { display: none; }
+    .sweep { margin-left: 0; }
+  }
+</style>
+
+<div class="wrap">
+  <header>
+    <h1>抠图盲评</h1>
+    <p class="hint">每一对是同一张原图用两种做法各出的一张卡。A、B 分别是哪种做法，每一对单独随机，页面上看不出来。鼠标放在任意一张卡上，两张会转到完全相同的角度；手拿开时两张一起慢慢摆。<span id="focus"></span></p>
+  </header>
+
+  <section class="panel" aria-label="当前这一对">
+    <div class="top">
+      <span id="no" class="num">#1</span>
+      <button type="button" class="nav" id="prev">← 上一对</button>
+      <button type="button" class="nav" id="next">下一对 →</button>
+      <label class="sweep"><input type="checkbox" id="sweep"> 手不在卡上时自动摆动</label>
+    </div>
+    <div id="stage">
+      <div class="col col--a">
+        <h2>A</h2>
+        <div class="holder"><div class="card" id="card-a"></div><div class="shield" id="shield-a"></div></div>
+      </div>
+      <div class="col col--b">
+        <h2>B</h2>
+        <div class="holder"><div class="card" id="card-b"></div><div class="shield" id="shield-b"></div></div>
+      </div>
+    </div>
+    <p id="error" hidden></p>
+    <div id="vote" role="group" aria-label="哪边更好">
+      <button type="button" data-v="A"><kbd>1</kbd> A 更好</button>
+      <button type="button" data-v="="><kbd>2</kbd> 差不多</button>
+      <button type="button" data-v="B"><kbd>3</kbd> B 更好</button>
+      <button type="button" data-v="B!" class="bug"><kbd>5</kbd> A 有明显 bug</button>
+      <button type="button" data-v="X" class="bug"><kbd>4</kbd> 都有问题</button>
+      <button type="button" data-v="A!" class="bug"><kbd>6</kbd> B 有明显 bug</button>
+    </div>
+  </section>
+
+  <section class="panel sheet" aria-label="全部">
+    <div class="sheet__head">
+      <span class="progress">已评 <span class="num" id="done">0</span> / <span class="num" id="total">0</span></span>
+      <span class="hint">选完自动跳到下一对没评的；<kbd>←</kbd> <kbd>→</kbd> 翻页，点下面的编号直接跳。编号底下带一道橙色的，是因为对面有明显 bug 才赢的。</span>
+    </div>
+    <div id="dots"></div>
+    <div class="out">
+      <textarea id="result" readonly aria-label="评分结果" placeholder="还没有评分"></textarea>
+      <button type="button" class="copy" id="copy">复制结果</button>
+      <span id="copied" aria-live="polite"></span>
+    </div>
+  </section>
+</div>
+
+<script type="module" src="blind.js"></script>

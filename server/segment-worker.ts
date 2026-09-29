@@ -15,7 +15,7 @@ import { env } from '@huggingface/transformers';
 import type { LayerManifest } from '../src/format/types';
 import { segmentToLayerSet } from '../src/segmenter';
 import { loadDepthModel } from '../src/segmenter/depth';
-import { estimateMatte, loadMatteModel } from '../src/segmenter/matte';
+import { estimateMatte, loadMatteModel, setMatteModel, type MatteModelConfig } from '../src/segmenter/matte';
 import { setCpuThreads } from '../src/segmenter/runtime';
 import { SERVER_REFINE_OPTIONS } from '../src/segmenter/refine';
 import { sharpImages } from './images';
@@ -27,6 +27,8 @@ export interface SegmenterConfig {
   matte: boolean;
   /** onnxruntime 每次推理开几个线程，按服务分到的核数，见 src/segmenter/runtime.ts 的 setCpuThreads */
   threads: number;
+  /** 抠图用哪个模型，见 server/index.ts 的 MATTE_MODEL */
+  matteModel: MatteModelConfig;
 }
 
 export interface SegmentRequest {
@@ -49,6 +51,7 @@ const config = workerData as SegmenterConfig;
 env.localModelPath = config.modelDir;
 env.allowRemoteModels = false;
 setCpuThreads(config.threads);
+setMatteModel(config.matteModel);
 
 // 能走到这里，说明这个线程要用的模块（transformers、onnxruntime-node、sharp……）都加载好了。
 // 主线程据此判断健康检查过不过，见 server/index.ts 的 spawnSegmenter
@@ -65,6 +68,7 @@ port.on('message', (request: SegmentRequest) => {
   void (async () => {
     try {
       const set = await segmentToLayerSet(new Blob([request.bytes]), {
+        subjectModel: config.matteModel.id,
         extract: { images: sharpImages, refine: SERVER_REFINE_OPTIONS },
         onProgress: (p) => port.postMessage({ type: 'stage', stage: p.stage } satisfies SegmentReply),
         ...(request.matte
