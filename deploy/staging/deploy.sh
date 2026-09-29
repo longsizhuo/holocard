@@ -51,10 +51,13 @@ if [ ! -d "$SRC/.git" ]; then
   git clone --quiet --bare "https://github.com/$REPO.git" "$SRC/.git"
 fi
 git -C "$SRC" fetch --quiet origin "+refs/pull/$PR/head:refs/pr/$PR"
-# 导出成一份干净的文件树交给 holocard-stg。不带 .git，也没有 .env.production：前端不带统计 id
+# 导出成一份干净的文件树交给 holocard-stg，不带 .git
 sudo rm -rf "$BUILD/tree"
 sudo install -d -o ubuntu -g ubuntu "$BUILD/tree"
 git -C "$SRC" archive "$SHA" | tar -x -C "$BUILD/tree"
+# 统计和线上用同一个 umami 站点：staging 会给别人长期用，不统计就看不到这部分人。
+# umami 每条访问都记着域名，面板里按域名筛就能和线上分开。站点 id 本来就写在线上的前端代码里，不是密钥
+if [ -f "$STATE_DIR/env.production" ]; then cp "$STATE_DIR/env.production" "$BUILD/tree/.env.production"; fi
 sudo chown -R holocard-stg:holocard-stg "$BUILD/tree"
 
 # ---------- 装依赖、构建（holocard-stg，沙箱里） ----------

@@ -31,6 +31,13 @@ rm -rf /opt/holocard-staging/samples
 # 早期版本的源码是完整克隆（带工作区），现在只要裸仓库
 if [ -f /var/lib/holocard-staging/src/package.json ]; then rm -rf /var/lib/holocard-staging/src; fi
 
+# 构建时带上线上的 .env.production（umami 站点 id），见 deploy.sh。在仓库根目录有这个文件时才装
+if [ -f ../../.env.production ]; then
+  install -m 600 -o ubuntu -g ubuntu ../../.env.production /var/lib/holocard-staging/env.production
+else
+  echo "仓库根目录没有 .env.production，staging 前端不带统计" >&2
+fi
+
 install -d /usr/local/lib/holocard-staging
 install -m 755 deploy.sh poll.py /usr/local/lib/holocard-staging/
 install -m 644 firewall.nft /usr/local/lib/holocard-staging/
