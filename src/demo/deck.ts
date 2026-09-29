@@ -15,8 +15,8 @@
 
 import type { LayerSet } from '../format/types';
 import { onLangChange, t } from '../i18n';
-import { Pack, reducedMotion, type Handoff, type OpenMethod, type PackView } from './pack';
-import { GlPack, packFoil } from './pack-gl';
+import { reducedMotion, type Handoff, type OpenMethod, type PackView } from './pack';
+import { createPack, packFoil } from './pack-gl';
 import { setSfxOn, sfx, sfxOn } from './sfx';
 import logoUrl from './ih-logo.svg';
 
@@ -79,16 +79,6 @@ function remember(id: string): void {
     if (!ids.includes(id)) sessionStorage.setItem(SESSION_KEY, JSON.stringify([...ids, id]));
   } catch {
     // 存不下只是刷新后卡带里少这一张，「我做过的」里还有
-  }
-}
-
-/** 能用 WebGL 就用 3D 卡包，起不来（没有 WebGL、着色器编译不过）退回平面版 */
-function createPack(host: HTMLElement, onDismiss: () => void): PackView {
-  try {
-    return new GlPack(host, onDismiss);
-  } catch (error) {
-    console.info('[holocard] 3D 卡包起不来，换平面版：', error instanceof Error ? error.message : error);
-    return new Pack(host, onDismiss);
   }
 }
 
@@ -210,6 +200,33 @@ export class Deck {
 
   /** 开一个卡包格（正在做），滑到它上面 */
   startPack(): PackHandle {
+    const slot = this.#packSlot();
+    this.#go(this.#slots.length - 1);
+
+    return {
+      done: (set, id) => {
+        this.#fill(slot, set, id);
+        // 可能正在玩别的卡：叮一声告诉人做好了
+        sfx.ready();
+        if (id) remember(id);
+        this.#updateNav();
+      },
+      fail: (message) => {
+        slot.pack.setState('failed', message);
+        this.#updateNav();
+      },
+    };
+  }
+
+  /** 别人分享的卡在这台设备上第一次打开：首屏先放一个做好了的卡包，开了才是卡 */
+  addPack(set: LayerSet, id: string): void {
+    const slot = this.#packSlot();
+    this.#fill(slot, set, id);
+    this.#index = this.#slots.length - 1;
+    this.#render(0);
+  }
+
+  #packSlot(): PackSlot {
     const host = document.createElement('div');
     host.className = 'deck__pack';
     this.#view.append(host);
@@ -221,24 +238,15 @@ export class Deck {
     };
     slot.pack.onOpen((method) => void this.#reveal(slot, method));
     this.#slots.push(slot);
-    this.#go(this.#slots.length - 1);
+    return slot;
+  }
 
-    return {
-      done: (set, id) => {
-        slot.result = { set, id };
-        slot.pack.setFoil(packFoil(set));
-        slot.pack.setCard(set);
-        slot.pack.setState('ready');
-        // 可能正在玩别的卡：叮一声告诉人做好了
-        sfx.ready();
-        if (id) remember(id);
-        this.#updateNav();
-      },
-      fail: (message) => {
-        slot.pack.setState('failed', message);
-        this.#updateNav();
-      },
-    };
+  /** 卡包里装好这张卡，亮起来等人开 */
+  #fill(slot: PackSlot, set: LayerSet, id: string | null): void {
+    slot.result = { set, id };
+    slot.pack.setFoil(packFoil(set));
+    slot.pack.setCard(set);
+    slot.pack.setState('ready');
   }
 
   #go(index: number): void {

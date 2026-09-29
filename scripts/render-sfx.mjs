@@ -69,12 +69,14 @@ const results = await page.evaluate(async () => {
   const all = { tear, ...recipes };
   const result = {};
   for (const [name, recipe] of Object.entries(all)) result[name] = await render(1.6, (c, out) => recipe(c, out, 0.02));
-  // 试听：按开包的顺序排——做好了、撕、扯下来、卡滑出、转圈；再来一包点开：抖、炸、转圈；最后是没做好时点一下
+  // 试听：按开包的顺序排——做好了、撕、扯下来、卡滑出、转圈；再来一包点开：抖、炸、转圈；
+  // 没做好时点一下；最后是卡册里发 8 张牌
   const reel = [
     ['ready', 0.1], ['tear', 1.2], ['rip', 1.82], ['slide', 1.94], ['spin', 3.05],
     ['shake', 5.2], ['burst', 5.65], ['spin', 5.8], ['nudge', 7.6],
+    ...Array.from({ length: 8 }, (_, i) => ['deal', 8.4 + i * 0.08]),
   ];
-  result.reel = await render(8.2, (c, out) => reel.forEach(([name, at]) => all[name](c, out, at)));
+  result.reel = await render(9.6, (c, out) => reel.forEach(([name, at]) => all[name](c, out, at)));
   return result;
 });
 await browser.close();

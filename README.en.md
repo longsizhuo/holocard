@@ -210,7 +210,10 @@ and the involutionhell.com logo on the front. It defaults to rainbow glitter and
 When the card clears the opening the pack hands its on-screen position to the strip, and the real holo card carries on spinning from there (`src/demo/deck.ts`).
 Devices without WebGL fall back to a flat pack: a two-layer card (body and top strip) whose artwork is drawn in the browser (`src/demo/pack-art.ts`) and handed to the same renderer.
 
-Opening has sound (tearing, the rip, the card sliding out, the spin, the burst, and a chime when the card is ready), all synthesised with Web Audio, no audio files (`src/demo/sfx.ts`).
+The first time a card someone else shared is opened on a device, the stage also starts with a ready pack; once opened it is remembered on the device (`holocard:seen`) and the card shows directly next time.
+Your own cards, and the pages used for screenshots and exports, never show a pack.
+
+Opening has sound (tearing, the rip, the card sliding out, the spin, the burst, dealing, and a chime when the card is ready), all synthesised with Web Audio, no audio files (`src/demo/sfx.ts`).
 While there is a pack, a speaker button in the bottom-right corner of the strip turns it off; the choice is kept on the device.
 
 Finished cards are kept in sessionStorage so a reload restores the strip. After changing anything about pack opening:
@@ -220,7 +223,9 @@ Finished cards are kept in sessionStorage so a reload restores the strip. After 
 
 ## My album
 
-"My album" is simply every card made on this device: it opens straight to a grid, newest first, with nothing to add by hand.
+"My album" is simply every card made on this device, in a grid, newest first, with nothing to add by hand.
+Each time it opens you first open a pack: tear or tap it and the cards fly out one by one into the grid, all dealt within 2 seconds (tap to land them all at once).
+With no cards, or with reduced motion, it goes straight to the grid.
 It is read from the delete-token record (each finished card stores its id and token), which lives only in this device's browser, just like delete tokens, since the site has no accounts.
 The cards themselves live on the server and show as "Expired" once they are gone. Hand-made albums used to exist too; with few people using them, only this automatic one is kept for now.
 Grid thumbnails (`/api/layers/<id>/thumb.jpg`, longest side 480) are made when layering finishes; early cards that never stored an original get one on first request, stacked from their layers, made once per card and queued one at a time. Code: `src/demo/albums-ui.ts`.

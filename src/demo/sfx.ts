@@ -188,6 +188,11 @@ export const recipes = {
     tone(c, out, t, 170, 0.7, 0.38, 42);
     burst(c, out, t, { buffer: 'noise', filter: 'lowpass', from: 4000, to: 300, q: 0.7, attack: 0.01, peak: 0.4, decay: 0.5 });
   },
+  /** 发牌：一张卡落进卡册，轻轻一声「嗒」 */
+  deal(c, out, t) {
+    burst(c, out, t, { buffer: 'noise', filter: 'bandpass', from: 2600, to: 1200, q: 1.1, attack: 0.002, peak: 1.4, decay: 0.06 });
+    tone(c, out, t, 190, 0.14, 0.05, 140);
+  },
   /** 还没做好就点：轻轻一声「咚」 */
   nudge(c, out, t) {
     tone(c, out, t, 330, 0.45, 0.12, 220);
@@ -206,6 +211,7 @@ export const sfx = {
   shake: () => play(recipes.shake),
   burst: () => play(recipes.burst),
   nudge: () => play(recipes.nudge),
+  deal: () => play(recipes.deal),
   ready: () => play(recipes.ready),
 };
 
