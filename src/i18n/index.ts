@@ -46,8 +46,10 @@ export function t(key: MessageKey, params?: Record<string, string | number>): st
 }
 
 /** 语言变了之后要重画的动态文字（按钮当前状态、层列表之类）在这里登记 */
-export function onLangChange(listener: (lang: Lang) => void): void {
+/** 返回取消订阅的函数：跟着页面活到底的调用方不用管它，会被拆掉的组件（卡包）拆的时候调一下 */
+export function onLangChange(listener: (lang: Lang) => void): () => void {
   listeners.add(listener);
+  return () => listeners.delete(listener);
 }
 
 /** 按 data-i18n 系列标记把静态文字换成当前语言。约定见 core.ts 的 localizeHtml */

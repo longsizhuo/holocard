@@ -18,6 +18,7 @@ import {
   segmentOnServer,
 } from './api';
 import { initAlbums, openAlbums } from './albums-ui';
+import { Deck, forgetSession } from './deck';
 import { initTracking, pageView, track } from './track';
 import { measurePerf } from './perf';
 import { parseRoute, shareUrl } from './route';
@@ -55,7 +56,6 @@ const FOIL_LABEL: Record<FoilType, MessageKey> = {
   rainbow: 'foil.rainbow',
 };
 
-const stage = need<HTMLDivElement>('#stage');
 const status = need<HTMLParagraphElement>('#status');
 const foilList = need<HTMLDivElement>('#foil-list');
 
@@ -108,7 +108,26 @@ function amplitude(): number {
 }
 ctlAmp.disabled = !ctlParallax.checked;
 
-const card = new HoloCard(stage, { amplitude: amplitude() });
+const card = new HoloCard(need<HTMLDivElement>('.deck__card'), { amplitude: amplitude() });
+const panel = need<HTMLElement>('.panel');
+
+/*
+ * 卡带：这次访问做的卡左右切换，上传时最右边先放一个卡包（见 deck.ts）。
+ * 卡片格用上面这个 HoloCard，面板跟着当前这张卡走；切到卡包格时面板上跟卡有关的先收起来
+ */
+const deck = new Deck(need<HTMLElement>('.deck'), {
+  showCard: (set, id) => show(set, id),
+  showPack: showPackPanel,
+  revealed: (set, id, method) => {
+    show(set, id);
+    track('pack-open', { how: method });
+    // 地址栏换成这张卡的链接：用浏览器菜单分享、复制地址、刷新，拿到的都是这张卡而不是首页。
+    // replaceState 只改地址，不刷新页面，也不多一条后退记录
+    if (id) history.replaceState(history.state, '', shareUrl(id, lang()));
+  },
+  load: (id) => loadLayerSet(`${import.meta.env.BASE_URL}api/layers/${id}`),
+  loadFailed: (error) => setText(status, 'status.cardFailed', { message: describeError(error) }),
+});
 
 /** 当前这张卡在服务端的 id。只有服务端产出的卡才有，手工素材没有 */
 let currentId: string | null = null;
@@ -247,6 +266,7 @@ function buildFoilControls(set: LayerSet): void {
 
 /** 换一组层：渲染 + 重建面板 + 让面板上的全局参数继续生效 */
 function show(set: LayerSet, id: string | null = null): void {
+  panel.classList.remove('is-pack');
   current = set;
   currentId = id;
   // 只有服务端产出的卡才能分享；换卡时把上一张的链接收起来。
@@ -273,6 +293,18 @@ function show(set: LayerSet, id: string | null = null): void {
 
   card.setLayerSet(set);
   buildFoilControls(set);
+}
+
+/** 卡带停在卡包上：还没有卡可调、可分享，面板上跟卡有关的先收起来 */
+function showPackPanel(): void {
+  panel.classList.add('is-pack');
+  current = null;
+  currentId = null;
+  shareBox.hidden = true;
+  exportBox.hidden = true;
+  ownerBox.hidden = true;
+  foilList.replaceChildren();
+  setText(status, 'pack.panelNote');
 }
 
 function applyHalo(): void {
@@ -485,6 +517,8 @@ async function processImage(file: File): Promise<void> {
   if (busy) return;
   busy = true;
   drop.classList.remove('is-over');
+  // 卡带最右边先放一个卡包，做好了等人来开；等的时候可以回去玩之前的卡
+  const pack = deck.startPack();
   showProgress('progress.preparing');
   setText(status, 'status.processing', { name: file.name });
   // 只报体积档位，不报文件名和具体大小
@@ -528,17 +562,13 @@ async function processImage(file: File): Promise<void> {
       });
     }
 
-    show(set, serverId);
+    pack.done(set, serverId);
     hideProgress();
-    if (serverId) {
-      // 地址栏换成这张卡的链接：用浏览器菜单分享、复制地址、刷新，拿到的都是这张卡而不是首页。
-      // replaceState 只改地址，不刷新页面，也不多一条后退记录
-      history.replaceState(history.state, '', shareUrl(serverId, lang()));
-      // 同时转成分享状态，地址栏里的链接发出去就是正式链接：保留期按访问量延长，预览图提前渲染好
-      void doShare(true);
-    }
+    // 做好就转成分享状态，不等开包：保留期按访问量延长，预览图提前渲染好，没开包就刷新了卡也还在
+    if (serverId) void doShare(true, serverId);
   } catch (error) {
     hideProgress();
+    pack.fail(describeError(error));
     const message = error instanceof Error ? error.message : String(error);
     // 只报错误信息和走到哪一步，不报文件名——那是用户的东西
     track('segment-fail', { stage, message: message.slice(0, 120) });
@@ -618,11 +648,13 @@ drop.addEventListener('drop', (event) => {
  * auto：做完卡时自动调的。不算用户的分享动作，不选中输入框（手机上会弹出选择手柄、把页面滚过去），
  * 失败也不提示——按钮还在，用户自己点一下就行。
  */
-async function doShare(auto = false): Promise<void> {
-  const id = currentId;
+async function doShare(auto = false, id: string | null = currentId): Promise<void> {
   if (!id) return;
-  shareBtn.disabled = true;
-  setText(shareBtn, 'share.creating');
+  // 给还没开包的卡在后台转分享状态时，面板上显示的不是它，按钮别跟着变
+  if (id === currentId) {
+    shareBtn.disabled = true;
+    setText(shareBtn, 'share.creating');
+  }
 
   try {
     const res = await fetch(`${import.meta.env.BASE_URL}api/cards/${id}/share`, {
@@ -665,6 +697,7 @@ async function doDelete(): Promise<void> {
   setText(deleteBtn, 'delete.deleting');
   try {
     await deleteCard(currentId);
+    forgetSession(currentId);
     track('delete');
     // 卡没了，地址栏退回首页，别留着一个打开就是 404 的链接
     history.replaceState(history.state, '', `${import.meta.env.BASE_URL}${location.search}`);
@@ -956,7 +989,8 @@ async function boot(): Promise<void> {
   if (route.id) {
     try {
       const set = await loadLayerSet(`${import.meta.env.BASE_URL}api/layers/${route.id}`);
-      show(set, route.id);
+      deck.addCard(set, route.id);
+      if (route.mode !== 'render') deck.restore();
       setText(status, 'status.layers', { n: set.manifest.layers.length });
 
       if (route.mode === 'render') {
@@ -987,7 +1021,8 @@ async function boot(): Promise<void> {
   try {
     // 首页默认摆的就是分享图（og.jpg）上那张卡，进来第一眼和分享出去的样子一致
     const sample = await loadLayerSet(`${import.meta.env.BASE_URL}samples/demo`);
-    show(sample);
+    deck.addCard(sample, null);
+    deck.restore();
     setText(status, 'status.layers', { n: sample.manifest.layers.length });
   } catch (error) {
     setText(status, 'status.sampleFailed', { message: describeError(error) });
