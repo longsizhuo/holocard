@@ -29,7 +29,7 @@
         -->
         <!-- GitHub 按钮和语言切换放一组，一起靠右；分开放的话副标题一长，切换就被挤到下一行最左边 -->
         <div class="page__actions">
-        <!-- 卡册只存在本机浏览器里，见 src/demo/albums.ts -->
+        <!-- 我的卡册：这台设备上做过的卡，只存在本机浏览器里，见 src/demo/albums-ui.ts -->
         <button type="button" class="albums-open" id="albums-open" data-i18n="albums.open">我的卡册</button>
         <a
           class="gh"
@@ -58,7 +58,31 @@
       </header>
 
       <section class="page__body">
-        <div class="stage" id="stage"></div>
+        <!--
+          卡带：这次访问做的卡左右切换，最新的在右边（src/demo/deck.ts）。
+          按钮在卡牌两侧的留白里，不压在卡上；卡包格由脚本按需加进 .deck__view
+        -->
+        <div class="stage" id="stage">
+          <div class="deck">
+            <button type="button" class="deck__nav deck__nav--prev" hidden aria-label="上一张">
+              <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M15 5l-7 7 7 7" /></svg>
+            </button>
+            <div class="deck__view">
+              <div class="deck__card"></div>
+            </div>
+            <button type="button" class="deck__nav deck__nav--next" hidden aria-label="下一张">
+              <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M9 5l7 7-7 7" /></svg>
+            </button>
+            <!-- 开包音效开关：卡带里有卡包时才出现，在右边那列底部，不压在卡上；选择记在本机（src/demo/sfx.ts） -->
+            <button type="button" class="deck__sfx" hidden aria-pressed="true" aria-label="开包音效">
+              <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+                <path d="M4 9.5h3.5L12 6v12l-4.5-3.5H4z" />
+                <path class="deck__sfx-on" d="M15.5 9a4.5 4.5 0 0 1 0 6M18 6.5a8 8 0 0 1 0 11" />
+                <path class="deck__sfx-off" d="M16 9.5l5 5M21 9.5l-5 5" />
+              </svg>
+            </button>
+          </div>
+        </div>
 
         <aside class="panel">
           <!--
@@ -94,12 +118,6 @@
           <div class="export" id="export" hidden>
             <button type="button" class="export__btn" id="export-btn"></button>
             <small class="field__hint" id="export-hint"></small>
-          </div>
-
-          <!-- 加入卡册：有服务端 id 的卡才有，自己做的、别人分享来的都能收 -->
-          <div class="export" id="collect" hidden>
-            <button type="button" class="export__btn" id="collect-btn" data-i18n="albums.add">加入卡册</button>
-            <small class="field__hint" id="collect-hint"></small>
           </div>
 
           <div class="danger" id="owner" hidden>
@@ -157,7 +175,7 @@
         </aside>
       </section>
 
-      <!-- 卡册窗口：管理卡册和「加入卡册」共用，内容由 src/demo/albums-ui.ts 画 -->
+      <!-- 我的卡册窗口，内容由 src/demo/albums-ui.ts 画 -->
       <dialog class="albums" id="albums" aria-labelledby="albums-title">
         <button type="button" class="albums__close" aria-label="关闭" data-i18n-aria="albums.close">×</button>
         <div class="albums__body"></div>

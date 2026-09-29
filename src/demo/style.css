@@ -264,6 +264,287 @@ body {
   max-height: none;
 }
 
+/* ---------- 卡带 ---------- */
+
+/*
+ * 左右按钮各占一列，卡在中间那列里按「装进去」缩放（上面 .stage .hc 的规则，容器换成了 .deck__view）。
+ * 两边的列宽是写死的：按钮藏起来时列还在，卡不会左右跳；按钮也永远不会压在卡上
+ */
+.deck {
+  width: 100%;
+  height: 100%;
+  display: grid;
+  grid-template-columns: 44px minmax(0, 1fr) 44px;
+  align-items: center;
+  gap: 8px;
+}
+.deck__nav--prev { grid-column: 1; }
+.deck__view { grid-column: 2; grid-row: 1; }
+.deck__nav--next { grid-column: 3; }
+
+.deck__view {
+  position: relative;
+  height: 100%;
+  min-width: 0;
+  container-type: size;
+}
+.deck__card,
+.deck__pack {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.deck__nav {
+  position: relative;
+  width: 44px;
+  height: 44px;
+  padding: 0;
+  display: grid;
+  place-items: center;
+  border: 1px solid rgba(255, 255, 255, 0.85);
+  border-radius: 50%;
+  background: var(--surface);
+  backdrop-filter: blur(12px);
+  color: var(--fg);
+  cursor: pointer;
+  box-shadow: 0 8px 20px -12px rgba(60, 50, 90, 0.5);
+}
+.deck__nav:hover { background: var(--surface-solid); }
+.deck__nav:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.deck__nav svg {
+  width: 20px;
+  height: 20px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 2.2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+/* 右边有做好了还没开的卡包 */
+.deck__nav--next.has-new::after {
+  content: '';
+  position: absolute;
+  top: 3px;
+  right: 3px;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: var(--accent);
+  box-shadow: 0 0 0 2px var(--surface-solid);
+}
+
+/* ---------- 卡包 ---------- */
+
+.pack { outline: none; }
+.pack__card {
+  position: absolute;
+  inset: 0 0 40px;
+  container-type: size;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.pack__card .hc { position: relative; z-index: 1; }
+.pack:focus-visible .hc { outline: 2px solid var(--accent); outline-offset: 8px; }
+
+/* 卡包不是矩形：去掉卡片的矩形投影、圆角和深色底，投影改成跟着锯齿形状走 */
+.hc-pack .hc { --hc-radius: 0; }
+.hc-pack .hc__rotator {
+  box-shadow: none;
+  filter: drop-shadow(0 16px 22px rgba(30, 22, 60, 0.45));
+}
+.hc-pack .hc__stack { background: transparent; }
+
+/* 卡包后面的一圈微光：在做的时候慢慢呼吸，做好了变亮、变快 */
+.pack__card::before {
+  content: '';
+  position: absolute;
+  width: min(100cqw, 100cqh * 0.7);
+  aspect-ratio: 0.7;
+  border-radius: 14%;
+  background: radial-gradient(closest-side, #b9a6ff, rgba(185, 166, 255, 0));
+  filter: blur(26px);
+  opacity: 0.3;
+  will-change: opacity;
+  animation: pack-breathe 2.6s ease-in-out infinite alternate;
+}
+.pack.is-ready .pack__card::before {
+  background: radial-gradient(closest-side, #ffe3f6, #c9b8ff 55%, rgba(201, 184, 255, 0));
+  scale: 1.12;
+  animation-duration: 1.2s;
+}
+.pack.is-failed .pack__card { filter: grayscale(1) opacity(0.55); }
+.pack.is-failed .pack__card::before { display: none; }
+@keyframes pack-breathe {
+  from { opacity: 0.25; }
+  to { opacity: 0.65; }
+}
+
+.pack__caption {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 10px;
+  margin: 0;
+  text-align: center;
+  font-size: 13px;
+  color: var(--muted);
+}
+.pack.is-ready .pack__caption { color: var(--fg); font-weight: 600; }
+/* 开包动画一开始，「划开，或点一下」就没用了 */
+.pack.is-opening .pack__caption { visibility: hidden; }
+
+.pack__dismiss { display: none; }
+.pack.is-failed .pack__dismiss {
+  display: block;
+  position: absolute;
+  z-index: 2;
+  left: 50%;
+  top: calc(50% - 20px);
+  translate: -50% -50%;
+  padding: 8px 18px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: var(--surface-solid);
+  color: var(--fg);
+  font: inherit;
+  cursor: pointer;
+}
+
+/* 点开时炸开的那团光，颜色由 pack.ts 按箔面填 */
+.pack__flash {
+  position: absolute;
+  z-index: 2;
+  left: 50%;
+  top: calc(50% - 20px);
+  width: min(90%, 420px);
+  aspect-ratio: 1;
+  translate: -50% -50%;
+  border-radius: 50%;
+  filter: blur(22px);
+  opacity: 0;
+  pointer-events: none;
+}
+
+/* WebGL 卡包（pack-gl.ts）：画布铺满卡包格，底下留一行字的位置 */
+.pack__gl {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: calc(100% - 40px);
+  display: block;
+  /* 竖着滑留给页面滚动，横着划是撕 */
+  touch-action: pan-y;
+  cursor: grab;
+}
+.pack.is-failed .pack__gl { filter: grayscale(1) opacity(0.55); }
+.pack:focus-visible .pack__gl { outline: 2px solid var(--accent); outline-offset: -2px; border-radius: 14px; }
+
+/* 音效开关：右边那列的底部 */
+.deck__sfx {
+  grid-column: 3;
+  grid-row: 1;
+  align-self: end;
+  justify-self: center;
+  width: 36px;
+  height: 36px;
+  padding: 0;
+  display: grid;
+  place-items: center;
+  border: 1px solid rgba(255, 255, 255, 0.85);
+  border-radius: 50%;
+  background: var(--surface);
+  backdrop-filter: blur(12px);
+  color: var(--muted);
+  cursor: pointer;
+}
+.deck__sfx:hover { background: var(--surface-solid); color: var(--fg); }
+.deck__sfx:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.deck__sfx svg {
+  width: 18px;
+  height: 18px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+.deck__sfx[aria-pressed='true'] .deck__sfx-off,
+.deck__sfx[aria-pressed='false'] .deck__sfx-on { display: none; }
+
+/*
+ * 新卡亮相转一圈（deck.ts 的 #spinIn）：卡片宿主整个绕竖轴转，闪卡是正面，
+ * 后面垫着几层薄片当厚度、左右两条竖边、一张卡背。尺寸、厚度由脚本按这张卡写进来
+ */
+.deck__card.is-spinning {
+  z-index: 1;
+  transform-style: preserve-3d;
+}
+.deck__thick {
+  position: absolute;
+  inset: 0;
+  margin: auto;
+  transform-style: preserve-3d;
+  pointer-events: none;
+}
+.deck__thick > * {
+  position: absolute;
+  inset: 0;
+  border-radius: 4.55% / 3.5%;
+}
+.deck__slice {
+  background: #e4dff0;
+  transform: translateZ(calc(var(--deck-t) * var(--z)));
+}
+.deck__edge {
+  inset: 3.5% auto 3.5% calc(50% - var(--deck-t) / 2);
+  width: var(--deck-t);
+  border-radius: 0;
+  background: linear-gradient(#f6f3fb, #d6cfe6);
+}
+.deck__edge--l { transform: translateX(calc(var(--deck-w) / -2)) rotateY(90deg); }
+.deck__edge--r { transform: translateX(calc(var(--deck-w) / 2)) rotateY(90deg); }
+.deck__back {
+  overflow: hidden;
+  backface-visibility: hidden;
+  transform: rotateY(180deg) translateZ(calc(var(--deck-t) / 2));
+  background:
+    radial-gradient(70% 50% at 50% 45%, rgba(165, 140, 240, 0.45), transparent 70%),
+    linear-gradient(160deg, #3b3558, #2a2640 55%, #1f1c30);
+}
+.deck__back::before {
+  content: '';
+  position: absolute;
+  inset: 6%;
+  border-radius: 3% / 2.3%;
+  border: 1.5px solid rgba(236, 230, 255, 0.35);
+}
+/* 背光时压暗 */
+.deck__back::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: #0d0a18;
+  opacity: var(--deck-shade, 0);
+}
+.deck__back img {
+  position: absolute;
+  left: 22%;
+  top: 38%;
+  width: 56%;
+  height: auto;
+}
+
+/* 卡带停在卡包上：面板里跟卡有关的调不了，先压暗；状态栏那句说明照常看得清 */
+.panel.is-pack .panel__scroll > :not(.panel__note) {
+  opacity: 0.45;
+  pointer-events: none;
+}
+
 /* ---------- 面板 ---------- */
 
 .panel {
@@ -614,37 +895,7 @@ select {
 }
 .albums__body { padding: 18px 20px 20px; }
 .albums__body h2 { margin: 0 0 6px; font-size: 18px; letter-spacing: -0.01em; overflow-wrap: anywhere; }
-.albums__head { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin: 0 40px 14px 0; }
-.albums__head h2 { margin: 0; }
-.albums__meta { margin: 0 0 8px; font-size: 12px; color: var(--muted); }
 .albums__intro { margin: 0 0 12px; font-size: 13px; white-space: pre-line; overflow-wrap: anywhere; }
-.albums__note { margin: 14px 0 0; font-size: 11px; color: var(--muted); }
-.albums__empty { margin: 18px 0; font-size: 13px; color: var(--muted); }
-.albums__error { color: #a63b53; min-height: 1.5em; }
-.albums__actions { display: flex; flex-wrap: wrap; gap: 8px; margin: 10px 0 14px; }
-
-/* 按钮：默认白底描边；主按钮珠光；危险操作红字；链接样式；卡片上的小按钮 */
-.abtn {
-  padding: 7px 12px;
-  border-radius: 10px;
-  border: 1px solid var(--line);
-  background: var(--surface-solid);
-  color: var(--fg);
-  font: inherit;
-  font-size: 13px;
-  font-weight: 600;
-  cursor: pointer;
-}
-.abtn:hover { border-color: rgba(123, 95, 208, 0.45); }
-.abtn.is-primary {
-  margin-left: auto;
-  border-color: rgba(255, 255, 255, 0.9);
-  background: linear-gradient(120deg, var(--p5), var(--p2) 50%, var(--p3));
-  box-shadow: 0 1px 0 rgba(255, 255, 255, 0.9) inset;
-}
-.abtn.is-danger { color: #a63b53; border-color: rgba(190, 70, 90, 0.3); background: transparent; }
-.abtn.is-link { padding: 4px 0; border: 0; background: none; color: var(--accent); font-weight: 500; }
-.abtn.is-mini { padding: 3px 7px; border-radius: 7px; font-size: 11px; font-weight: 500; }
 
 /* 缩略图：固定竖卡比例，照片 cover 进去；没有封面时就是一块珠光 */
 .athumb {
@@ -660,87 +911,14 @@ select {
 
 .albums__grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(132px, 1fr)); gap: 14px; }
 
-.atile {
-  display: grid;
-  gap: 4px;
-  padding: 0;
-  border: 0;
-  background: none;
-  color: var(--fg);
-  font: inherit;
-  text-align: left;
-  cursor: pointer;
-}
-.atile strong { font-size: 13px; overflow-wrap: anywhere; }
-.atile span { font-size: 11px; color: var(--muted); }
-.atile:hover .athumb { box-shadow: 0 8px 20px -10px rgba(60, 50, 90, 0.7); }
-.atile.is-archived .athumb { opacity: 0.55; }
-
 .acard { display: grid; gap: 6px; }
 .acard a { display: block; border-radius: 10px; }
-.acard__tools { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; }
-.acard__cover { font-size: 11px; color: var(--accent); font-weight: 600; padding: 3px 0; }
-
-/* 加入卡册：一行一个卡册，整行都能点 */
-.albums__picks { display: grid; gap: 8px; margin: 12px 0; }
-.apick {
-  display: grid;
-  grid-template-columns: auto 44px 1fr;
-  align-items: center;
-  gap: 12px;
-  padding: 8px 10px;
-  border-radius: 12px;
-  border: 1px solid var(--line);
-  cursor: pointer;
-}
-.apick:has(input:checked) { border-color: rgba(123, 95, 208, 0.55); background: rgba(123, 95, 208, 0.06); }
-.apick input { width: 18px; height: 18px; accent-color: var(--accent); }
-.apick > span { display: grid; min-width: 0; }
-.apick strong { font-size: 13px; overflow-wrap: anywhere; }
-.apick small { font-size: 11px; color: var(--muted); }
-
-/* 表单 */
-.albums__form input[type='text'],
-.albums__form textarea,
-.albums__form select {
-  width: 100%;
-  padding: 8px 10px;
-  border-radius: 9px;
-  border: 1px solid var(--line);
-  background: #fff;
-  color: var(--fg);
-  font: inherit;
-  font-size: 14px; /* 手机上改成 16px，见下面的媒体查询 */
-}
-.albums__form select + input { margin-top: 8px; }
-.albums__form textarea { resize: vertical; }
-.acovers { display: grid; grid-template-columns: repeat(auto-fill, minmax(64px, 1fr)); gap: 8px; }
-.acovers__item {
-  padding: 0;
-  border: 2px solid transparent;
-  border-radius: 12px;
-  background: none;
-  cursor: pointer;
-}
-.acovers__item.is-on { border-color: var(--accent); }
-.acovers__item > span {
-  display: grid;
-  place-items: center;
-  aspect-ratio: 3 / 4;
-  border-radius: 10px;
-  background: var(--line);
-  font-size: 11px;
-  color: var(--muted);
-}
+.acard a:hover .athumb { box-shadow: 0 8px 20px -10px rgba(60, 50, 90, 0.7); }
 
 @media (max-width: 900px) {
   .albums-open { font-size: 12px; padding: 5px 10px; }
   .albums__body { padding: 16px 14px 18px; }
   .albums__grid { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
-  /* iOS 上输入框字号小于 16px，一聚焦整页就被放大，退出后还缩不回来 */
-  .albums__form input[type='text'],
-  .albums__form textarea,
-  .albums__form select { font-size: 16px; }
 }
 
 /* ---------- 页脚 ---------- */
@@ -783,6 +961,8 @@ select {
    * 「一屏内」在手机上做不到（卡片加面板塞不下），但主动作不该掉到屏幕外。
    */
   .stage { height: 44vh; }
+  .deck { grid-template-columns: 36px minmax(0, 1fr) 36px; gap: 4px; }
+  .deck__nav { width: 36px; height: 36px; }
   .page__head h1 { font-size: 22px; }
   .page__sub { font-size: 12px; order: 3; }
   /* 手机上标题和按钮一行，副标题整行放下面 */
@@ -804,7 +984,8 @@ select {
   .progress__bar i::after,
   .drop::after,
   .share__btn::after,
-  .gh::after {
+  .gh::after,
+  .pack__card::before {
     animation: none;
   }
   /* 停在色相带中段，不是渐变的边缘，否则标题只剩单色 */
@@ -859,6 +1040,15 @@ body.is-render .stage { padding: 0; flex: none; }
  * size 容器不看内容，宽高会塌成 0，卡片就溢出到文案上去了。
  */
 body.is-render .stage { container-type: normal; }
+
+/* 卡带的几层包装在渲染页上不参与布局，卡片还是直接挂在 .stage 下面，分享图、动图的尺寸和以前一样 */
+body.is-render .deck,
+body.is-render .deck__view,
+body.is-render .deck__card { display: contents; }
+body.is-render .deck__nav,
+body.is-render .deck__sfx,
+body.is-render .deck__thick,
+body.is-render .deck__pack { display: none; }
 
 body.is-render .hc {
   /*
