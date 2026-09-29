@@ -58,7 +58,23 @@
       </header>
 
       <section class="page__body">
-        <div class="stage" id="stage"></div>
+        <!--
+          卡带：这次访问做的卡左右切换，最新的在右边（src/demo/deck.ts）。
+          按钮在卡牌两侧的留白里，不压在卡上；卡包格由脚本按需加进 .deck__view
+        -->
+        <div class="stage" id="stage">
+          <div class="deck">
+            <button type="button" class="deck__nav deck__nav--prev" hidden aria-label="上一张">
+              <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M15 5l-7 7 7 7" /></svg>
+            </button>
+            <div class="deck__view">
+              <div class="deck__card"></div>
+            </div>
+            <button type="button" class="deck__nav deck__nav--next" hidden aria-label="下一张">
+              <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M9 5l7 7-7 7" /></svg>
+            </button>
+          </div>
+        </div>
 
         <aside class="panel">
           <!--

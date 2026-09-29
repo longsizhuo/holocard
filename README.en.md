@@ -197,6 +197,17 @@ with a wide and a narrow lobe added together. With the default parameters the in
 **`setPose({x, y})`** puts the card straight into a pose without animation, for rendering static previews
 or driving it from external input such as a gyroscope.
 
+## The card strip and pack opening
+
+The main stage is a strip of the cards made during this visit: switch left and right, newest on the right. The arrow buttons sit in the gutters beside the card (arrow keys work too).
+After an upload a card pack appears on the far right; while it is being made you can press "<" and play with the previous card. When it is ready the pack lights up, and a dot shows on ">" if you are elsewhere.
+Swipe across the top edge to tear the pack open, or tap it to shake and burst it; the new card slides out. With reduced motion the pack opens at once, without animation.
+
+The pack is simply a two-layer card (body and top strip) whose artwork is drawn in the browser (`src/demo/pack-art.ts`) and handed to the same renderer,
+so tilt, foil and glare come for free; tearing lifts the strip layer away. Its colour follows the foil on the card's background layer.
+Finished cards are kept in sessionStorage so a reload restores the strip. Code: `src/demo/deck.ts`, `src/demo/pack.ts`;
+after changing them run `node scripts/verify-pack.mjs` (no layering service needed, the API is faked in the browser).
+
 ## Albums
 
 Cards you made and cards shared with you can be collected into albums, and one card can sit in several albums. Albums live only in this device's browser (localStorage),
