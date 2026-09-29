@@ -197,11 +197,12 @@ with a wide and a narrow lobe added together. With the default parameters the in
 **`setPose({x, y})`** puts the card straight into a pose without animation, for rendering static previews
 or driving it from external input such as a gyroscope.
 
-## Albums
+## My album
 
-Cards you made and cards shared with you can be collected into albums, and one card can sit in several albums. Albums live only in this device's browser (localStorage),
-just like delete tokens, since the site has no accounts. An album stores card ids only; the cards themselves live on the server and show as "Expired" once they are gone.
-Grid thumbnails (`/api/layers/<id>/thumb.jpg`, longest side 480) are made when layering finishes; early cards that never stored an original get one on first request, stacked from their layers, made once per card and queued one at a time. Code: `src/demo/albums*.ts`.
+"My album" is simply every card made on this device: it opens straight to a grid, newest first, with nothing to add by hand.
+It is read from the delete-token record (each finished card stores its id and token), which lives only in this device's browser, just like delete tokens, since the site has no accounts.
+The cards themselves live on the server and show as "Expired" once they are gone. Hand-made albums used to exist too; with few people using them, only this automatic one is kept for now.
+Grid thumbnails (`/api/layers/<id>/thumb.jpg`, longest side 480) are made when layering finishes; early cards that never stored an original get one on first request, stacked from their layers, made once per card and queued one at a time. Code: `src/demo/albums-ui.ts`.
 
 ## The `.layers` format
 
