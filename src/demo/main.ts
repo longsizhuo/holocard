@@ -959,6 +959,36 @@ function exposeExportHooks(): void {
   };
 }
 
+/**
+ * 手机上卡片跟着倾斜。iOS 13+ 要在用户手势里申请权限，所以等第一次点卡带再问
+ * （挂在整个卡带上而不是卡面上：分享链接打开先是卡包，第一下点的是卡包）；
+ * 别的平台直接开。render 模式不开：无头截图要的是固定姿态
+ */
+function initGyro(): void {
+  if (!('DeviceOrientationEvent' in window)) return;
+  const request = (
+    DeviceOrientationEvent as unknown as { requestPermission?: () => Promise<string> }
+  ).requestPermission;
+  if (typeof request !== 'function') {
+    card.enableGyro();
+    return;
+  }
+  need<HTMLDivElement>('.deck').addEventListener(
+    'click',
+    () => {
+      void request
+        .call(DeviceOrientationEvent)
+        .then((state) => {
+          if (state === 'granted') card.enableGyro();
+        })
+        .catch(() => {
+          // 拒绝了就只能用手指拨，不算错误
+        });
+    },
+    { once: true },
+  );
+}
+
 // ---------- 启动 ----------
 
 /** 这台设备上开过包的、别人分享的卡。存最近的几百张就够了 */
@@ -1010,6 +1040,7 @@ async function boot(): Promise<void> {
      * 会把「分享后有多少人真的点开」这个最关心的数字打歪。
      */
     initTracking();
+    initGyro();
     // /c/<uuid> 归一成 /c，否则页面列表会被几千个 uuid 撑爆
     pageView(route.mode === 'card' ? '/c' : '/');
     // 哪张卡带来的流量另走一个事件——pageview 的 payload 塞不下自定义字段

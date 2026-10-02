@@ -19,6 +19,7 @@
 import './card.css';
 import './foils.css';
 import type { HaloEffect, HaloLight, LayerFoil, LayerSet } from '../format/types';
+import { DEADZONE_DEGREES, TiltTracker } from './gyro';
 import { groupMask, layerMask } from './highlight';
 import { Spring } from './spring';
 import { ensureTextures } from './textures';
@@ -42,6 +43,11 @@ const DEFAULT_OPTIONS: HoloCardOptions = {
 
 /** 跟手时的弹簧参数（上游 springInteractSettings） */
 const INTERACT_SPRING = { stiffness: 0.066, damping: 0.25 };
+/**
+ * 陀螺仪驱动时的弹簧参数。传感器读数本来就平滑，再套跟手那根软弹簧会明显跟不上手（真机反馈「粘」），
+ * 这里接近临界阻尼：几帧就到位、不晃
+ */
+const GYRO_SPRING = { stiffness: 0.25, damping: 0.85 };
 /** 松手回正时的弹簧参数：很软，配合 soft 启动，卡片会迟疑一下再缓缓归位 */
 const SNAP_SPRING = { stiffness: 0.01, damping: 0.06 };
 /** 指针离开后多久才开始回正，毫秒 */
@@ -50,6 +56,8 @@ const SNAP_DELAY_MS = 500;
 const PREVIEW_HOLD_MS = 1200;
 /** 指针位置 → 转角的除数。50 / 3.5 ≈ 14.3°，即最大转角 */
 const ROTATE_DIVISOR = 3.5;
+/** 手指离开卡面后，陀螺仪等多久再接管，毫秒。比松手回正的延迟长，不和回正抢 */
+const POINTER_PRIORITY_MS = 1000;
 
 const round = (value: number, precision = 3): number => parseFloat(value.toFixed(precision));
 
@@ -162,6 +170,15 @@ export class HoloCard {
   #rafId = 0;
   #lastTime = 0;
   #snapTimer = 0;
+
+  /** enableGyro() 调过了。跨换卡保留，每组层绑定时据此挂监听 */
+  #gyro = false;
+  readonly #tilt = new TiltTracker();
+  #lastOrientTime = 0;
+  /** 这个时刻之前陀螺仪不接管：手指在卡上、或者 preview() 正在展示 */
+  #gyroYieldUntil = 0;
+  /** 卡片现在是陀螺仪摆的姿态。回到死区时据此回正一次，不每帧都回 */
+  #gyroAiming = false;
 
   /** 监听器的生命周期跟随当前这组层，换卡时整体解绑 */
   #listenerAbort: AbortController | null = null;
@@ -386,6 +403,20 @@ export class HoloCard {
     if (!this.#root || !halo) return;
     this.#aim(50 + halo.light.peakAt[0] * 50, 50 + halo.light.peakAt[1] * 50);
     this.#interactEnd(PREVIEW_HOLD_MS);
+    // 手机上拖滑块时手难免在动，别让陀螺仪把要展示的姿态立刻盖掉
+    this.#gyroYieldUntil = performance.now() + PREVIEW_HOLD_MS + POINTER_PRIORITY_MS;
+    this.#gyroAiming = false;
+  }
+
+  /**
+   * 让卡片跟着手机倾斜。iOS 要先在用户手势里拿到 DeviceOrientationEvent.requestPermission()
+   * 的授权再调这里，渲染器不管权限。没有陀螺仪的设备调了也无害，只是收不到事件
+   */
+  enableGyro(): void {
+    if (this.#gyro) return;
+    this.#gyro = true;
+    const signal = this.#listenerAbort?.signal;
+    if (signal) this.#bindGyro(signal);
   }
 
   destroy(): void {
@@ -459,15 +490,51 @@ export class HoloCard {
       );
     }
 
+    if (this.#gyro) this.#bindGyro(signal);
+
     // 上游在 visibilitychange 时会把卡片整个复位，因为 svelte 的弹簧没有 dt 封顶，
     // 切回前台时攒下的时间差会把卡片甩飞。我们的循环已经把 dt 封顶（见 #ensureLoop），
     // 回到前台只会从原姿态平滑继续，所以不需要那个复位。
+  }
+
+  #bindGyro(signal: AbortSignal): void {
+    window.addEventListener('deviceorientation', (event) => this.#orient(event), {
+      signal,
+      passive: true,
+    });
+  }
+
+  /** 手机倾斜：相对一个会慢慢跟上来的基准姿态算偏转（见 gyro.ts），所以拿着不动会自己回正 */
+  #orient(event: DeviceOrientationEvent): void {
+    if (event.beta === null || event.gamma === null) return;
+    if (!this.#root || document.visibilityState !== 'visible' || prefersReducedMotion()) return;
+
+    const now = performance.now();
+    // 切到后台再回来 dt 会很大，基准一步跟到当前姿态，等于重新校准，正是想要的
+    const dt = this.#lastOrientTime === 0 ? 0 : (now - this.#lastOrientTime) / 1000;
+    this.#lastOrientTime = now;
+    // 手指在卡上时基准也照常跟，手指一走接回来不会猛地一跳
+    const tilt = this.#tilt.update(event.beta, event.gamma, screen.orientation?.angle ?? 0, dt);
+    if (now < this.#gyroYieldUntil) return;
+
+    if (Math.hypot(tilt.dx, tilt.dy) < DEADZONE_DEGREES) {
+      // 回正用同一根弹簧，不走松手回正那套「迟疑一下再软软归位」，那在手机上就是粘
+      if (this.#gyroAiming) {
+        this.#gyroAiming = false;
+        this.#aim(50, 50, GYRO_SPRING, 0);
+      }
+      return;
+    }
+    this.#gyroAiming = true;
+    this.#aim(tilt.x, tilt.y, GYRO_SPRING);
   }
 
   /** 指针在卡面上移动（对应上游 interact） */
   #interact(event: PointerEvent): void {
     const root = this.#root;
     if (!root || document.visibilityState !== 'visible') return;
+    this.#gyroYieldUntil = performance.now() + POINTER_PRIORITY_MS;
+    this.#gyroAiming = false;
 
     // 用不旋转的外框取矩形；旋转中的元素的包围盒会跟着变形，拿它算坐标会自激
     const rect = root.getBoundingClientRect();
@@ -480,12 +547,12 @@ export class HoloCard {
   }
 
   /** 让卡片跟着弹簧转向「指针停在卡面 (x, y) 百分比处」的姿态 */
-  #aim(x: number, y: number): void {
+  #aim(x: number, y: number, params = INTERACT_SPRING, opacity = 1): void {
     window.clearTimeout(this.#snapTimer);
 
     for (const spring of [this.#rotate, this.#glare, this.#background]) {
-      spring.stiffness = INTERACT_SPRING.stiffness;
-      spring.damping = INTERACT_SPRING.damping;
+      spring.stiffness = params.stiffness;
+      spring.damping = params.damping;
     }
 
     // 背景位移量故意收窄到中间一小段，箔面花纹只是微微游动而不是满屏乱扫
@@ -494,7 +561,7 @@ export class HoloCard {
       y: adjust(y, 0, 100, 33, 67),
     });
     this.#rotate.set(rotationFromPointer(x, y, this.#options.tiltScale));
-    this.#glare.set({ x: round(x), y: round(y), o: 1 });
+    this.#glare.set({ x: round(x), y: round(y), o: opacity });
 
     this.#ensureLoop();
   }
@@ -602,6 +669,7 @@ export class HoloCard {
     this.#shines = [];
     this.#haloEls = [];
     this.#halo = null;
+    this.#gyroAiming = false;
 
     // 换卡后弹簧从静止姿态重新开始，否则新卡一出来就是歪的
     this.#rotate.set({ x: 0, y: 0 }, { hard: true });
