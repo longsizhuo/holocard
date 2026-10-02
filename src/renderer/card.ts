@@ -43,6 +43,11 @@ const DEFAULT_OPTIONS: HoloCardOptions = {
 
 /** 跟手时的弹簧参数（上游 springInteractSettings） */
 const INTERACT_SPRING = { stiffness: 0.066, damping: 0.25 };
+/**
+ * 陀螺仪驱动时的弹簧参数。传感器读数本来就平滑，再套跟手那根软弹簧会明显跟不上手（真机反馈「粘」），
+ * 这里接近临界阻尼：几帧就到位、不晃
+ */
+const GYRO_SPRING = { stiffness: 0.25, damping: 0.85 };
 /** 松手回正时的弹簧参数：很软，配合 soft 启动，卡片会迟疑一下再缓缓归位 */
 const SNAP_SPRING = { stiffness: 0.01, damping: 0.06 };
 /** 指针离开后多久才开始回正，毫秒 */
@@ -513,14 +518,15 @@ export class HoloCard {
     if (now < this.#gyroYieldUntil) return;
 
     if (Math.hypot(tilt.dx, tilt.dy) < DEADZONE_DEGREES) {
+      // 回正用同一根弹簧，不走松手回正那套「迟疑一下再软软归位」，那在手机上就是粘
       if (this.#gyroAiming) {
         this.#gyroAiming = false;
-        this.#interactEnd(0);
+        this.#aim(50, 50, GYRO_SPRING, 0);
       }
       return;
     }
     this.#gyroAiming = true;
-    this.#aim(tilt.x, tilt.y);
+    this.#aim(tilt.x, tilt.y, GYRO_SPRING);
   }
 
   /** 指针在卡面上移动（对应上游 interact） */
@@ -541,12 +547,12 @@ export class HoloCard {
   }
 
   /** 让卡片跟着弹簧转向「指针停在卡面 (x, y) 百分比处」的姿态 */
-  #aim(x: number, y: number): void {
+  #aim(x: number, y: number, params = INTERACT_SPRING, opacity = 1): void {
     window.clearTimeout(this.#snapTimer);
 
     for (const spring of [this.#rotate, this.#glare, this.#background]) {
-      spring.stiffness = INTERACT_SPRING.stiffness;
-      spring.damping = INTERACT_SPRING.damping;
+      spring.stiffness = params.stiffness;
+      spring.damping = params.damping;
     }
 
     // 背景位移量故意收窄到中间一小段，箔面花纹只是微微游动而不是满屏乱扫
@@ -555,7 +561,7 @@ export class HoloCard {
       y: adjust(y, 0, 100, 33, 67),
     });
     this.#rotate.set(rotationFromPointer(x, y, this.#options.tiltScale));
-    this.#glare.set({ x: round(x), y: round(y), o: 1 });
+    this.#glare.set({ x: round(x), y: round(y), o: opacity });
 
     this.#ensureLoop();
   }

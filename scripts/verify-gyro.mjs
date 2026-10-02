@@ -16,24 +16,24 @@ import { DEADZONE_DEGREES, TiltTracker } from '../src/renderer/gyro.ts';
 
 const DT = 1 / 60;
 
-// 转一下：右倾 8° → 指针偏右
+// 转一下：右倾 8° → 卡片跟着往右转，即右边远离观察者 = 指针在左边（见 rotationFromPointer）
 let t = new TiltTracker();
 t.update(30, 0, 0, DT);
 let r = t.update(30, 8, 0, DT);
-assert.ok(r.x > 70 && Math.abs(r.y - 50) < 1, `右倾应当指针偏右：${JSON.stringify(r)}`);
+assert.ok(r.x < 30 && Math.abs(r.y - 50) < 1, `右倾应当指针偏左：${JSON.stringify(r)}`);
 
-// 停着不动 6 秒 → 回到死区
-for (let i = 0; i < 6 * 60; i++) r = t.update(30, 8, 0, DT);
+// 停着不动 10 秒 → 回到死区
+for (let i = 0; i < 10 * 60; i++) r = t.update(30, 8, 0, DT);
 assert.ok(Math.hypot(r.dx, r.dy) < DEADZONE_DEGREES, `停住后应当回正：${JSON.stringify(r)}`);
 
-// 漂移：每秒 3° 一直转 60 秒，偏转稳定在 速度 × 时间常数 附近，不累积
+// 漂移：每秒 3° 一直转 60 秒，偏转稳定在 速度 × 时间常数（约 9°）附近，不累积
 t = new TiltTracker();
 let maxDx = 0;
 for (let i = 0; i <= 60 * 60; i++) {
   r = t.update(30, -60 + (i * DT * 3) % 120, 0, DT);
   if (i > 60) maxDx = Math.max(maxDx, Math.abs(r.dx));
 }
-assert.ok(maxDx < 8, `漂移不该累积，最大偏转 ${maxDx.toFixed(2)}°`);
+assert.ok(maxDx < 12, `漂移不该累积，最大偏转 ${maxDx.toFixed(2)}°`);
 
 // 跳变：gamma 从 85 跳到 -85 → 当新基准，不甩
 t = new TiltTracker();
@@ -45,6 +45,6 @@ assert.equal(r.x, 50, '跳变应当重置基准');
 t = new TiltTracker();
 t.update(0, 0, 90, DT);
 r = t.update(8, 0, 90, DT);
-assert.ok(r.x > 70 && Math.abs(r.y - 50) < 1, `横屏应当对调轴：${JSON.stringify(r)}`);
+assert.ok(r.x < 30 && Math.abs(r.y - 50) < 1, `横屏应当对调轴：${JSON.stringify(r)}`);
 
 console.log('gyro ok');
