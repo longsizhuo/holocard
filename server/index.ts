@@ -22,12 +22,13 @@
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
 import { createReadStream, existsSync, readFileSync } from 'node:fs';
 import { availableParallelism } from 'node:os';
-import { mkdir, rm, writeFile, readFile, readdir, stat } from 'node:fs/promises';
+import { mkdir, rename, rm, writeFile, readFile, readdir, stat } from 'node:fs/promises';
 import { randomUUID, timingSafeEqual } from 'node:crypto';
 import { basename, dirname, extname, join, resolve, sep } from 'node:path';
 import { env } from '@huggingface/transformers';
 import { Worker } from 'node:worker_threads';
 import type { LayerManifest } from '../src/format/types';
+import { applyConfig, parseConfig } from '../src/format/config';
 import { MATTE_MODEL_ID, matteWeightsFile, type MatteModelConfig } from '../src/segmenter/matte';
 import { normalizeOriginal, layerToWebp, makeThumb, ImageError } from './images';
 import type { SegmentReply, SegmentRequest, SegmenterConfig } from './segment-worker';
@@ -1316,6 +1317,72 @@ const server = createServer((req, res) => {
       exportQueue.push(job);
       pumpExports();
       json(res, 202, await exportStatus(job));
+      return;
+    }
+
+    /*
+     * 卡的主人存作者配置（箔面、炫光、视差，见 src/format/config.ts）。
+     * 分享页、OG 预览图、导出的动图都读磁盘上的 manifest，存进去之后它们才按作者调的样子来。
+     * 鉴权和删除一样用口令；口令走自定义头，跨站请求会触发预检，这个服务不答 OPTIONS，所以借不了访客的浏览器
+     */
+    const configMatch = /^\/api\/cards\/([0-9a-f-]{36})\/config$/.exec(url.pathname);
+    if (req.method === 'PUT' && configMatch) {
+      const id = configMatch[1] ?? '';
+      const dir = join(OUT_DIR, id);
+      const header = req.headers['x-holocard-token'];
+      const token = typeof header === 'string' ? header : '';
+
+      const card = db.get(id);
+      if (!card || card.status !== 'done') {
+        fail(res, 404, 'card_not_found', '这张卡不存在或已过期');
+        return;
+      }
+      if (!timingSafeEqualStr(token, card.delete_token)) {
+        fail(res, 403, 'wrong_token', '口令不对，只有生成这张卡的人能改它');
+        return;
+      }
+
+      // 这个处理函数外面没有兜底的 catch，读写盘、解析出错都得在这里接住，不然整个服务挂掉
+      let manifest: LayerManifest;
+      try {
+        manifest = JSON.parse(await readFile(join(dir, 'manifest.json'), 'utf8')) as LayerManifest;
+      } catch {
+        fail(res, 404, 'card_not_found', '这张卡不存在或已过期');
+        return;
+      }
+      let config;
+      try {
+        config = parseConfig(JSON.parse((await readBody(req, 8192)).toString('utf8')), manifest.layers.length);
+      } catch {
+        config = null;
+      }
+      if (!config) {
+        fail(res, 400, 'bad_config', '配置不合法');
+        return;
+      }
+      applyConfig(manifest, config);
+      try {
+        // 先写临时文件再改名：同一时刻可能有人正在读这份 manifest（分享页、导出），不能让他读到写了一半的
+        const tmp = join(dir, `manifest.json.${randomUUID()}.tmp`);
+        await writeFile(tmp, JSON.stringify(manifest));
+        await rename(tmp, join(dir, 'manifest.json'));
+      } catch (error) {
+        console.error(`[config] ${id} 写 manifest 失败`, error);
+        fail(res, 500, 'save_failed', '保存失败');
+        return;
+      }
+
+      // 导出的动图自己会拿修改时间和 manifest 比，旧的自动作废（见 exportReady）。
+      // 预览图只在「还没有」时才生成，得删掉旧的、按原来有的语言重新排队；
+      // 新图修改时间变了，og:image 地址上的 ?v= 跟着变，抓取方会重新拿。
+      // ponytail: 正在渲染的那张会按旧配置写完，要严格的话给预览任务带上 manifest 的修改时间再比
+      for (const lang of LANGS) {
+        const file = join(dir, previewFile(lang));
+        if (!(await stat(file).catch(() => null))) continue;
+        await rm(file, { force: true });
+        queuePreview(id, lang);
+      }
+      json(res, 200, { saved: true });
       return;
     }
 

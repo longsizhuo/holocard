@@ -261,10 +261,13 @@ mycard.layers/
   ],
   "effects": {
     "halo": { "intensity": 0.35, "light": { "peakAt": [0.7, -0.7], "sharpness": 120 } },
-    "glare": true
+    "glare": true,
+    "parallax": { "enabled": true, "amplitude": 0.1 }
   }
 }
 ```
+
+`effects.parallax` 是作者存过的立体视差（`enabled` 开关、`amplitude` 振幅，0～0.16），可以没有，没有时看的人按自己本机的偏好。卡的主人在面板上调的箔面、炫光、视差会自动存回服务端（`PUT /api/cards/<id>/config`，校验见 `src/format/config.ts`），分享页、预览图、导出的动图都按存进去的来。
 
 层图可以是浏览器能解的任何格式；服务端存的是 WebP（画面有损、alpha 无损），体积约为 PNG 的十分之一。
 
