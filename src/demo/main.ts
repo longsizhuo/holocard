@@ -960,7 +960,8 @@ function exposeExportHooks(): void {
 }
 
 /**
- * 手机上卡片跟着倾斜。iOS 13+ 要在用户手势里申请权限，所以等第一次点卡片再问；
+ * 手机上卡片跟着倾斜。iOS 13+ 要在用户手势里申请权限，所以等第一次点卡带再问
+ * （挂在整个卡带上而不是卡面上：分享链接打开先是卡包，第一下点的是卡包）；
  * 别的平台直接开。render 模式不开：无头截图要的是固定姿态
  */
 function initGyro(): void {
@@ -972,7 +973,7 @@ function initGyro(): void {
     card.enableGyro();
     return;
   }
-  need<HTMLDivElement>('.deck__card').addEventListener(
+  need<HTMLDivElement>('.deck').addEventListener(
     'click',
     () => {
       void request
