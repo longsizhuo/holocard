@@ -7,4 +7,5 @@
 - `card.css`：结构样式、逐层箔面遮罩、整卡炫光（遮罩跟着所在的组平移、放大）
 - `highlight.ts`：高光保护，按画面亮度给箔面 / 炫光 / 高光的遮罩打折
 - `spring.ts`：弹簧积分，语义对齐 svelte/motion
+- `gyro.ts`：手机倾斜 → 指针位置。基准姿态会慢慢跟上当前姿态（自动回正），拿着不动卡片自己归位；`node scripts/verify-gyro.mjs` 自检
 - `textures.ts`：箔面用的颗粒和闪粉纹理，运行时程序化生成
