@@ -179,6 +179,21 @@ export function layerToWebp(png: Buffer): Promise<Buffer> {
   return sharp(png).webp({ quality: 88, alphaQuality: 100, effort: 4 }).toBuffer();
 }
 
+/** 深度图存盘的最长边。深度本来就是糊的，按原图分辨率存（四千像素的照片就是 1MB 多）纯属浪费 */
+const DEPTH_SIDE = 512;
+
+/**
+ * 深度图存成单通道灰度 PNG，缩到 DEPTH_SIDE 以内。流水线给的是 R=G=B 的 RGBA，只留一个通道。
+ * 必须无损：有损压缩的块状噪声会被浮雕放大成画面上的抖动
+ */
+export function depthToPng(png: Buffer): Promise<Buffer> {
+  return sharp(png)
+    .extractChannel(0)
+    .resize({ width: DEPTH_SIDE, height: DEPTH_SIDE, fit: 'inside', withoutEnlargement: true })
+    .png({ compressionLevel: 9 })
+    .toBuffer();
+}
+
 /** 卡册缩略图的最长边。手机上一行两张，480 在三倍屏上也够清楚 */
 const THUMB_SIDE = 480;
 

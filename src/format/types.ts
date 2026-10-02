@@ -145,6 +145,11 @@ export interface LayerManifest {
   /** 按深度从远到近排序，layers[0] 最远 */
   layers: LayerEntry[];
   effects: LayerEffects;
+  /**
+   * 整张图的深度图（灰度，越亮越近），相对 manifest.json 的文件名，如 "depth.png"。
+   * 渲染器拿它在层内做逐像素视差（浮雕），没有就只有整层平移。老卡没有这个字段
+   */
+  depthMap?: string;
   /** 生成者标识，便于排查是哪条流水线产出的，如 "holocard-web/0.1.0 da2-small" */
   generator?: string;
 }
@@ -161,4 +166,6 @@ export interface LayerSet {
   manifest: LayerManifest;
   /** 与 manifest.layers 一一对应的图片数据，顺序相同 */
   images: Blob[];
+  /** manifest.depthMap 指向的深度图。没有或者下载失败就是 undefined，渲染器退回整层平移 */
+  depth?: Blob;
 }

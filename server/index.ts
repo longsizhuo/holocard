@@ -29,7 +29,7 @@ import { env } from '@huggingface/transformers';
 import { Worker } from 'node:worker_threads';
 import type { LayerManifest } from '../src/format/types';
 import { MATTE_MODEL_ID, matteWeightsFile, type MatteModelConfig } from '../src/segmenter/matte';
-import { normalizeOriginal, layerToWebp, makeThumb, ImageError } from './images';
+import { normalizeOriginal, layerToWebp, depthToPng, makeThumb, ImageError } from './images';
 import type { SegmentReply, SegmentRequest, SegmenterConfig } from './segment-worker';
 import { enterStage, finishJob, queuedEta, runningEta, startJob } from './eta';
 import {
@@ -188,14 +188,20 @@ function spawnSegmenter(): Worker {
   return worker;
 }
 
+interface SegmentResult {
+  manifest: LayerManifest;
+  images: Uint8Array[];
+  depth?: Uint8Array | undefined;
+}
+
 function segmentInWorker(
   bytes: Uint8Array<ArrayBuffer>,
   matte: boolean,
   onStage: (stage: string) => void,
-): Promise<{ manifest: LayerManifest; images: Uint8Array[] }> {
+): Promise<SegmentResult> {
   const run = segmentTail.then(
     () =>
-      new Promise<{ manifest: LayerManifest; images: Uint8Array[] }>((resolve, reject) => {
+      new Promise<SegmentResult>((resolve, reject) => {
         // 和本文件打包在同一个目录里，见 vite.server.config.ts
         const worker = (segmenter ??= spawnSegmenter());
         const finish = (): void => {
@@ -209,7 +215,7 @@ function segmentInWorker(
             return;
           }
           finish();
-          if (reply.type === 'done') resolve({ manifest: reply.manifest, images: reply.images });
+          if (reply.type === 'done') resolve({ manifest: reply.manifest, images: reply.images, depth: reply.depth });
           else reject(new Error(reply.message));
         };
         // 线程自己崩了（未捕获的异常）：这张算失败，下一张重新起一个
@@ -608,6 +614,17 @@ async function runJob(id: string): Promise<void> {
         await writeFile(join(dir, layer.file), webp);
       }),
     );
+    // 深度图转成单通道灰度再存，比流水线给的 RGBA 小两三倍。转不了就不带，卡照样能用，只是没有浮雕
+    if (set.depth && set.manifest.depthMap) {
+      try {
+        await writeFile(join(dir, set.manifest.depthMap), await depthToPng(Buffer.from(set.depth)));
+      } catch (error) {
+        console.error(`[segment] ${id} 存深度图失败`, error);
+        delete set.manifest.depthMap;
+      }
+    } else {
+      delete set.manifest.depthMap;
+    }
     await writeFile(join(dir, 'manifest.json'), JSON.stringify(set.manifest));
 
     db.update(id, {
@@ -801,7 +818,7 @@ const SPA_ROUTES = [
  * 导出的动图另见 export.ts 的 EXPORT_FILE
  */
 const LAYER_FILE =
-  /^(?:manifest\.json|layer-\d{1,2}\.(?:png|webp)|preview(?:-(?:en|ja))?\.jpg|thumb\.jpg|original\.(?:jpg|png|webp))$/;
+  /^(?:manifest\.json|depth\.png|layer-\d{1,2}\.(?:png|webp)|preview(?:-(?:en|ja))?\.jpg|thumb\.jpg|original\.(?:jpg|png|webp))$/;
 
 /** HTML 属性转义。卡片 id 是我们自己生成的 UUID，但注入前仍然一律转义 */
 function escapeAttr(value: string): string {

@@ -268,6 +268,8 @@ mycard.layers/
 
 Layer images can be any format the browser can decode; the server stores them as WebP (lossy image, lossless alpha), about a tenth of the PNG size.
 
+`depthMap` points to a depth map of the whole image (single-channel greyscale PNG, brighter is nearer, longest side 512); the renderer uses it for relief inside each layer. It is optional, and older cards don't have one; without it every layer is flat.
+
 `foil.type` currently has four values: `none` (matte), `holo` (classic holo), `sunpillar` (V-card sunpillar), `rainbow` (rainbow glitter).
 
 ## Running it

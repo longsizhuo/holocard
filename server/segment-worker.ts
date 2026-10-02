@@ -40,7 +40,7 @@ export interface SegmentRequest {
 export type SegmentReply =
   | { type: 'ready' }
   | { type: 'stage'; stage: string }
-  | { type: 'done'; manifest: LayerManifest; images: Uint8Array[] }
+  | { type: 'done'; manifest: LayerManifest; images: Uint8Array[]; depth?: Uint8Array }
   | { type: 'error'; message: string };
 
 const port = parentPort;
@@ -83,9 +83,10 @@ port.on('message', (request: SegmentRequest) => {
           : {}),
       });
       const images = await Promise.all(set.images.map(async (blob) => new Uint8Array(await blob.arrayBuffer())));
+      const depth = set.depth ? new Uint8Array(await set.depth.arrayBuffer()) : undefined;
       port.postMessage(
-        { type: 'done', manifest: set.manifest, images } satisfies SegmentReply,
-        images.map((image) => image.buffer as ArrayBuffer),
+        { type: 'done', manifest: set.manifest, images, ...(depth ? { depth } : {}) } satisfies SegmentReply,
+        [...images, ...(depth ? [depth] : [])].map((image) => image.buffer as ArrayBuffer),
       );
     } catch (error) {
       port.postMessage({ type: 'error', message: error instanceof Error ? error.message : String(error) } satisfies SegmentReply);

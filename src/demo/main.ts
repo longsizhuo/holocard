@@ -109,7 +109,15 @@ function amplitude(): number {
 }
 ctlAmp.disabled = !ctlParallax.checked;
 
-const card = new HoloCard(need<HTMLDivElement>('.deck__card'), { amplitude: amplitude() });
+/**
+ * 浮雕强度可以在地址上临时调（?relief=2、?relief=0 关掉），在 staging 上对比手感用。
+ * 不进面板、不存进卡片配置：效果还在调，定下来之前不给用户一个旋钮
+ */
+const reliefParam = Number(new URLSearchParams(location.search).get('relief') ?? NaN);
+const card = new HoloCard(need<HTMLDivElement>('.deck__card'), {
+  amplitude: amplitude(),
+  ...(Number.isFinite(reliefParam) && reliefParam >= 0 ? { relief: Math.min(reliefParam, 5) } : {}),
+});
 const panel = need<HTMLElement>('.panel');
 
 /*

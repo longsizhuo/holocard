@@ -146,6 +146,10 @@ export function parseManifest(raw: unknown): LayerManifest {
   if (typeof o['generator'] === 'string') {
     manifest.generator = o['generator'];
   }
+  // 只认同目录下的一个文件名，不让 manifest 指到别的路径去
+  if (typeof o['depthMap'] === 'string' && /^[\w-]+\.(?:png|webp)$/.test(o['depthMap'])) {
+    manifest.depthMap = o['depthMap'];
+  }
   return manifest;
 }
 
@@ -185,10 +189,13 @@ export async function loadLayerSet(baseUrl: string, signal?: AbortSignal): Promi
   const manifestBlob = await fetchBlob(`${base}/manifest.json`, signal);
   const manifest = parseManifest(JSON.parse(await manifestBlob.text()));
 
-  // 并行拉取所有层，层数很少（2~5），不必限流
-  const images = await Promise.all(
-    manifest.layers.map((layer) => fetchBlob(`${base}/${layer.file}`, signal)),
-  );
+  // 并行拉取所有层，层数很少（2~5），不必限流。深度图一起拉，拉不到不算失败：卡照样能看，只是没有浮雕
+  const [images, depth] = await Promise.all([
+    Promise.all(manifest.layers.map((layer) => fetchBlob(`${base}/${layer.file}`, signal))),
+    manifest.depthMap
+      ? fetchBlob(`${base}/${manifest.depthMap}`, signal).catch(() => undefined)
+      : Promise.resolve(undefined),
+  ]);
 
-  return { manifest, images };
+  return depth ? { manifest, images, depth } : { manifest, images };
 }

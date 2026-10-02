@@ -20,6 +20,7 @@ import './card.css';
 import './foils.css';
 import type { HaloEffect, HaloLight, LayerFoil, LayerSet } from '../format/types';
 import { DEADZONE_DEGREES, TiltTracker } from './gyro';
+import { Relief, sampleDepth } from './relief';
 import { groupMask, layerMask } from './highlight';
 import { Spring } from './spring';
 import { ensureTextures } from './textures';
@@ -33,12 +34,19 @@ export interface HoloCardOptions {
   amplitude: number;
   /** 倾斜幅度倍率。1 与上游一致，最大转角约 14° */
   tiltScale: number;
+  /**
+   * 浮雕强度：层内按深度图逐像素视差（见 relief.ts）。1 表示深度差 1 的两个像素
+   * 错开的距离和「视差差 1 的两层」一样；0 关掉。卡片没带深度图、浏览器没有 WebGL 时不起作用。
+   * ponytail: 建卡时是 0 就不建画布，之后再调大不会生效，要用得重新 setLayerSet
+   */
+  relief: number;
 }
 
 const DEFAULT_OPTIONS: HoloCardOptions = {
   // 以前是 0.06、而且只有主体在动，用户反馈分层感太弱（issue #3 第 3 条）
   amplitude: 0.1,
   tiltScale: 1,
+  relief: 1,
 };
 
 /** 跟手时的弹簧参数（上游 springInteractSettings） */
@@ -156,6 +164,9 @@ export class HoloCard {
   #haloEls: HTMLDivElement[] = [];
   #halo: HaloEffect | null = null;
 
+  /** 开了浮雕的层：画布 + 这一层的参考深度。没有深度图或者建不起来就是空的 */
+  #reliefs: { relief: Relief; ref: number }[] = [];
+
   /** 当前持有的 object URL，切换卡片和销毁时必须全部 revoke，否则内存泄漏 */
   #objectUrls: string[] = [];
   /** 各层相对焦平面的最大视差偏移，放大补偿按它算（见 #scale） */
@@ -242,6 +253,7 @@ export class HoloCard {
 
     // 景深层：由远及近，每层 = 画面 + 这一层自己的箔面
     const masks: Promise<void>[] = [];
+    const arts: { art: HTMLImageElement; ref: number }[] = [];
     // 拷一份，不持有调用方的对象。共用引用的话，外面对 manifest 的原地修改
     // 会不经 setHalo 就影响下一帧的炫光计算，而 --hc-halo-intensity 还停在旧值，
     // 强度和角度两条线对不上。
@@ -264,6 +276,7 @@ export class HoloCard {
       art.alt = '';
       art.decoding = 'async';
       art.draggable = false;
+      arts.push({ art, ref: layer.depth });
 
       // 箔面用这一层自己的图当遮罩，于是箔只出现在该层的 alpha 形状里。
       // 先直接用层图，高光保护遮罩（亮部箔面减弱，见 highlight.ts）异步算好再换上。
@@ -318,6 +331,7 @@ export class HoloCard {
     root.append(translater);
     this.#host.append(root);
     this.#root = root;
+    if (set.depth && this.#options.relief > 0) masks.push(this.#setupRelief(root, set.depth, arts));
     this.#ready = Promise.all(masks).then(() => undefined);
 
     this.#writeVars();
@@ -450,6 +464,60 @@ export class HoloCard {
     } catch {
       // 见上
     }
+  }
+
+  /**
+   * 给每层建浮雕画布，顶替原来的 <img>。<img> 留在原处只是藏起来：
+   * 演示页、截图脚本还要读它的 src；画布的上下文丢了也要靠它顶回去。
+   * 任何一层建不起来就全部不要——一半层有浮雕一半没有，层与层的接缝会错开
+   */
+  async #setupRelief(
+    root: HTMLDivElement,
+    depthBlob: Blob,
+    arts: { art: HTMLImageElement; ref: number }[],
+  ): Promise<void> {
+    const url = URL.createObjectURL(depthBlob);
+    this.#objectUrls.push(url);
+    const depth = new Image();
+    depth.src = url;
+    try {
+      await Promise.all([depth.decode(), ...arts.map(({ art }) => art.decode())]);
+    } catch {
+      return;
+    }
+    if (this.#root !== root) return; // 等解码的功夫卡片已经换掉了
+
+    const created: { relief: Relief; ref: number; art: HTMLImageElement }[] = [];
+    try {
+      const grid = sampleDepth(depth);
+      // 画布跟着 plane 放大了 --hc-scale 倍，按放大后的宽度建。
+      // 隐藏中的卡（卡带切换时）宽度是 0，按一个常见的卡片宽度建
+      const width = (root.clientWidth || 480) * this.#scale();
+      for (const { art, ref } of arts) {
+        const relief = new Relief(art, grid, width, () => this.#dropRelief());
+        created.push({ relief, ref, art });
+      }
+    } catch (error) {
+      for (const { relief } of created) relief.destroy();
+      console.info('[holocard] 浮雕不可用，用平的层：', error instanceof Error ? error.message : error);
+      return;
+    }
+    for (const { relief, art } of created) {
+      relief.canvas.className = 'hc__relief';
+      art.after(relief.canvas);
+      art.style.visibility = 'hidden';
+    }
+    this.#reliefs = created.map(({ relief, ref }) => ({ relief, ref }));
+    this.#writeVars();
+  }
+
+  /** 有一块画布的 WebGL 上下文丢了（系统回收显存）：全部退回 <img>，理由同上 */
+  #dropRelief(): void {
+    for (const { relief } of this.#reliefs) {
+      relief.canvas.previousElementSibling?.removeAttribute('style');
+      relief.destroy();
+    }
+    this.#reliefs = [];
   }
 
   /**
@@ -645,6 +713,15 @@ export class HoloCard {
     style.setProperty('--hc-nx', String(round(clamp((glare.x - 50) / 50, -1, 1), 4)));
     style.setProperty('--hc-ny', String(round(clamp((glare.y - 50) / 50, -1, 1), 4)));
 
+    // 浮雕：层内每单位深度差比整层多挪多少。和 CSS 的整层平移同方向（近处朝指针反方向），
+    // 除以放大倍数是因为画布跟着 plane 放大了，同样的屏幕位移在纹理坐标里要小一些
+    if (this.#reliefs.length > 0) {
+      const k = (this.#options.amplitude * this.#options.relief) / this.#scale();
+      const sx = -clamp((glare.x - 50) / 50, -1, 1) * k;
+      const sy = -clamp((glare.y - 50) / 50, -1, 1) * k;
+      for (const { relief, ref } of this.#reliefs) relief.draw(sx, sy, ref);
+    }
+
     const halo = this.#halo;
     const haloValue =
       halo && halo.intensity > 0
@@ -666,6 +743,8 @@ export class HoloCard {
       URL.revokeObjectURL(url);
     }
     this.#objectUrls = [];
+    for (const { relief } of this.#reliefs) relief.destroy();
+    this.#reliefs = [];
     this.#shines = [];
     this.#haloEls = [];
     this.#halo = null;

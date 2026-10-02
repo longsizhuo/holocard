@@ -21,11 +21,11 @@ import {
 } from '../format/types';
 import { estimateDepth } from './depth';
 import type { LoadProgress } from './runtime';
-import { analyzeDepth, buildCutEvidence, fitCutsToSubject, type SliceOptions } from './slice';
+import { analyzeDepth, buildCutEvidence, fitCutsToSubject, type DepthMap, type SliceOptions } from './slice';
 import type { Matte } from './matte';
 import { keepMainParts } from './morph';
 import { extractLayers, type ExtractOptions } from './extract';
-import { browserImages } from './image-io';
+import { browserImages, type ImageBackend } from './image-io';
 
 /** 算梯度证据时把原图缩到多大。只用于统计，不参与出图，512 足够且便宜 */
 const EVIDENCE_SIZE = 512;
@@ -244,6 +244,9 @@ export async function segmentToLayerSet(
       : defaultFoilFor((parallax[i] ?? 0) === farthest ? 0 : i, stats.length),
   }));
 
+  // 深度图也交出去，渲染器拿它在层内做逐像素视差。编不出来不影响出卡，只是没有浮雕
+  const depthPng = await encodeDepth(depth, backend).catch(() => null);
+
   report('done');
 
   return {
@@ -256,9 +259,28 @@ export async function segmentToLayerSet(
         halo: defaultHalo(),
         glare: true,
       },
+      ...(depthPng ? { depthMap: 'depth.png' } : {}),
     },
     images,
+    ...(depthPng ? { depth: depthPng } : {}),
   };
+}
+
+/**
+ * 深度图存成灰度 PNG（越亮越近），用模型输出的分辨率，不放大到原图：
+ * 深度本来就是糊的，放大只是让文件变大。渲染器按 0..1 的纹理坐标采样，分辨率和层图对不上没关系。
+ * 8 位够用：浮雕位移最多百分之几卡宽，256 级加上纹理的双线性插值看不出台阶
+ */
+function encodeDepth(depth: DepthMap, backend: ImageBackend): Promise<Blob> {
+  const data = new Uint8ClampedArray(depth.width * depth.height * 4);
+  for (let i = 0; i < depth.data.length; i++) {
+    const v = Math.round((depth.data[i] ?? 0) * 255);
+    data[i * 4] = v;
+    data[i * 4 + 1] = v;
+    data[i * 4 + 2] = v;
+    data[i * 4 + 3] = 255;
+  }
+  return backend.encodePng({ data, width: depth.width, height: depth.height });
 }
 
 /** 导出给调试面板看的切层诊断信息 */
