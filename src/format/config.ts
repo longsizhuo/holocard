@@ -29,15 +29,24 @@ const SHARPNESS_MAX = 400;
 const inRange = (v: unknown, min: number, max: number): v is number =>
   typeof v === 'number' && Number.isFinite(v) && v >= min && v <= max;
 
-/** 从当前 manifest 取出作者配置 */
+const clamp = (v: number, min: number, max: number): number => Math.min(Math.max(v, min), max);
+
+/**
+ * 从当前 manifest 取出作者配置。
+ * 夹到 parseConfig 认的范围里：读 manifest 时（io.ts）只要求是有限数，不管范围，
+ * 存量 manifest 里万一有越界的值，原样发出去会被服务端 400，主人一打开卡就报「没存上」
+ */
 export function configOf(manifest: LayerManifest, parallax: ParallaxEffect): CardConfig {
   return {
-    foils: manifest.layers.map((layer) => ({ ...layer.foil })),
+    foils: manifest.layers.map((layer) => ({
+      type: layer.foil.type,
+      intensity: clamp(layer.foil.intensity, 0, 1),
+    })),
     halo: {
-      intensity: manifest.effects.halo.intensity,
-      sharpness: manifest.effects.halo.light.sharpness,
+      intensity: clamp(manifest.effects.halo.intensity, 0, 1),
+      sharpness: clamp(manifest.effects.halo.light.sharpness, SHARPNESS_MIN, SHARPNESS_MAX),
     },
-    parallax: { ...parallax },
+    parallax: { enabled: parallax.enabled, amplitude: clamp(parallax.amplitude, 0, PARALLAX_MAX) },
   };
 }
 

@@ -392,8 +392,15 @@ function flushSave(): Promise<void> {
   return saving;
 }
 
-// 调完马上关页面：还没到点的那次也发出去（saveConfig 带 keepalive）
-window.addEventListener('pagehide', () => void flushSave());
+// 调完马上关页面：还没到点的那次也发出去（saveConfig 带 keepalive）。
+// 不排进 saving 链：链上要是还有一发在路上，排在它后面的这一发得等它回来才发，那时页面已经没了。
+// 服务端是整份覆盖，和在路上那发乱序到达的话，后到的赢——两发只差几百毫秒，接受这点概率
+window.addEventListener('pagehide', () => {
+  window.clearTimeout(saveTimer);
+  const job = pendingSave;
+  pendingSave = null;
+  if (job) void saveConfig(job.id, job.config).catch(() => undefined);
+});
 
 /**
  * 把此刻炫光实际有多亮显示出来，纯读数：角度决定的那部分（渲染器算的 --hc-halo）× 炫光强度。

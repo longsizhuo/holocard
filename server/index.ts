@@ -355,8 +355,20 @@ function pumpPreviews(): void {
     return;
   }
   previewing = job;
-  void renderPreview(`http://127.0.0.1:${PORT}`, job.id, { lang: job.lang })
-    .then((buf) => writeFile(join(OUT_DIR, job.id, previewFile(job.lang)), buf))
+  const manifest = join(OUT_DIR, job.id, 'manifest.json');
+  const manifestTime = async (): Promise<number> => (await stat(manifest).catch(() => null))?.mtimeMs ?? 0;
+  void manifestTime()
+    .then(async (before) => {
+      const buf = await renderPreview(`http://127.0.0.1:${PORT}`, job.id, { lang: job.lang });
+      // 渲染途中主人存了新配置：这张是旧样子，不能落盘（预览图只在「没有」时才补，落了就一直是旧的）。
+      // 存配置时那次重排被「同一张正在渲染」去重吞掉了，所以在这里重排，不算失败次数
+      if ((await manifestTime()) !== before) {
+        console.log(`[preview] ${job.id} ${job.lang} 渲染途中配置变了，丢掉重渲`);
+        previewQueue.push(job);
+        return;
+      }
+      await writeFile(join(OUT_DIR, job.id, previewFile(job.lang)), buf);
+    })
     .catch((error: unknown) => {
       job.attempts++;
       const message = error instanceof Error ? (error.message.split('\n')[0] ?? '') : String(error);
@@ -1375,11 +1387,17 @@ const server = createServer((req, res) => {
       // 导出的动图自己会拿修改时间和 manifest 比，旧的自动作废（见 exportReady）。
       // 预览图只在「还没有」时才生成，得删掉旧的、按原来有的语言重新排队；
       // 新图修改时间变了，og:image 地址上的 ?v= 跟着变，抓取方会重新拿。
-      // ponytail: 正在渲染的那张会按旧配置写完，要严格的话给预览任务带上 manifest 的修改时间再比
+      // 正在渲染的那张由 pumpPreviews 自己发现 manifest 变了、重排，这里不用管
       for (const lang of LANGS) {
         const file = join(dir, previewFile(lang));
         if (!(await stat(file).catch(() => null))) continue;
-        await rm(file, { force: true });
+        try {
+          await rm(file, { force: true });
+        } catch (error) {
+          // 删不掉（权限、磁盘出错）不影响配置本身已经存上，只是分享图暂时还是旧的
+          console.error(`[config] ${id} 删旧预览图失败`, error);
+          continue;
+        }
         queuePreview(id, lang);
       }
       json(res, 200, { saved: true });

@@ -5,7 +5,7 @@
  *   - 合法配置原样收下，合并进 manifest 后其余字段不动
  *   - 层数对不上、箔面类型不认识、数值越界、多带字段想改文件名，一律拒收或忽略
  *
- * 用法：node scripts/verify-config.mjs（Node 22.6+，直接吃 .ts）
+ * 用法：node scripts/verify-config.mjs（Node 22.15+：直接吃 .ts，且要有 module.registerHooks）
  */
 
 import assert from 'node:assert/strict';
@@ -46,6 +46,12 @@ assert.equal(m.layers[0].file, 'layer-0.webp');
 assert.deepEqual(m.effects.halo, { intensity: 1, light: { peakAt: [0.7, -0.7], sharpness: 400 } });
 assert.deepEqual(m.effects.parallax, good.parallax);
 assert.deepEqual(configOf(m, good.parallax), good);
+
+// 存量 manifest 里有越界值时，取出来的配置也能过校验（不然主人一打开卡就存不上）
+const odd = manifest();
+odd.layers[0].foil.intensity = 1.5;
+odd.effects.halo = { intensity: -0.2, light: { peakAt: [0.7, -0.7], sharpness: 999 } };
+assert.notEqual(parseConfig(configOf(odd, { enabled: true, amplitude: 0.3 }), 2), null);
 
 // 多带的字段不会进 manifest
 const sneaky = parseConfig({ ...good, foils: good.foils.map((f) => ({ ...f, file: '../../etc/passwd' })) }, 2);
