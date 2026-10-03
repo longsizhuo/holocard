@@ -48,6 +48,24 @@ ssh oracle '/usr/local/lib/holocard/deploy.sh <旧 sha>'
 ssh oracle 'rm /var/lib/holocard/paused'             # 修好之后恢复自动发版
 ```
 
+## 对外接口的 key
+
+接口用法见仓库 README「对外接口」。key 只由站长发，库里只存哈希，key 本身只在发的时候显示一次：
+
+```bash
+ssh oracle 'cd /opt/holocard && node22/bin/node apikey.mjs create <调用方名字> [每天上限，默认 50]'
+ssh oracle 'cd /opt/holocard && node22/bin/node apikey.mjs list'          # 24 小时内各用了几张
+ssh oracle 'cd /opt/holocard && node22/bin/node apikey.mjs revoke <id>'    # 立即生效
+```
+
+**发第一个 key 之前**，这两件事必须先做完，否则 key 和额度都是摆设：
+- Caddy 里 holocard 的站点块只放行 Cloudflare 的 IP。不然别人直连源站伪造 `CF-Connecting-IP`，按 IP 的限流全部失效，网页的排队也能被占满。
+- Cloudflare 到源站这一段加密（SSL 从 Flexible 改成 Full）。不然 key 会在 Cloudflare 到 Oracle 之间明文传。
+
+排队时网页任务插在接口任务前面，接口在队列里最多 6 张（`HOLOCARD_MAX_API_QUEUE`），全站每天最多 500 张（`HOLOCARD_API_DAILY_LIMIT`）。
+被限流、排满、盘满拒绝的请求在日志里记一行 `[reject]`，`journalctl -u holocard | grep reject` 能看出有没有人在刷。
+产物目录所在的盘剩不到 5GB（`HOLOCARD_MIN_FREE_GB`）就不收上传，免得把和 Postgres 共用的根分区写满。
+
 ## 服务器上的布局
 
 | 路径 | 内容 |
