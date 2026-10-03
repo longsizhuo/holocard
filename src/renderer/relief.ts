@@ -18,15 +18,20 @@ attribute vec2 a_uv;
 attribute float a_depth;
 uniform vec2 u_shift;
 uniform float u_ref;
+// 这一层自己的深度区间。深度图是整张图的：背景层被主体挡住的那块（补全出来的）在深度图里是主体的深度，
+// 主体层轮廓外透明的那片是背景的深度。不钳的话，背景藏在主体身后的部分被当成近处推开，
+// 主体的网格从轮廓一路拉到外面那片远处，头发边上就被扯出一圈
+uniform vec2 u_band;
 varying vec2 v_uv;
 void main() {
   v_uv = a_uv;
+  float depth = clamp(a_depth, u_band.x, u_band.y);
   // 最外圈的顶点在垂直于边的方向上钉住：不然一挪，卡片边缘就露出一条透明缝
   //（CSS 的放大补偿只算了整层平移，管不到这里多出来的位移）
   vec2 free = step(0.001, a_uv) * step(a_uv, vec2(0.999));
   // 纹理坐标 → 裁剪空间（y 朝上），再按深度差平移。z 取近为小，配合默认的 LESS 深度测试
-  vec2 pos = a_uv + u_shift * (a_depth - u_ref) * free;
-  gl_Position = vec4(pos.x * 2.0 - 1.0, 1.0 - pos.y * 2.0, 0.5 - a_depth * 0.5, 1.0);
+  vec2 pos = a_uv + u_shift * (depth - u_ref) * free;
+  gl_Position = vec4(pos.x * 2.0 - 1.0, 1.0 - pos.y * 2.0, 0.5 - depth * 0.5, 1.0);
 }`;
 
 const FRAGMENT = `
@@ -49,11 +54,34 @@ const GRID = 64;
 const MAX_SIDE = 2048;
 type GL = WebGLRenderingContext | WebGL2RenderingContext;
 
+/** 一层在深度上的位置：ref 是参考深度，[lo, hi] 是这一层自己的深度区间（见顶点着色器的 u_band） */
+export interface ReliefLayer {
+  ref: number;
+  lo: number;
+  hi: number;
+}
+
+/**
+ * 由各层的代表深度（由远及近）推出每层的深度区间：相邻两层之间取中点当分界。
+ * 真正的切点在 manifest 里没有存（只在 generator 标签里），中点离它不远；
+ * 主体层是抠出来的、深度被往前提过（见 segmenter），中点也还是落在两层之间
+ */
+export function reliefLayers(depths: readonly number[]): ReliefLayer[] {
+  return depths.map((ref, i) => {
+    const prev = depths[i - 1];
+    const next = depths[i + 1];
+    const lo = prev === undefined ? 0 : (prev + ref) / 2;
+    const hi = next === undefined ? 1 : (ref + next) / 2;
+    return { ref: Math.min(Math.max(ref, lo), hi), lo, hi };
+  });
+}
+
 export class Relief {
   readonly canvas: HTMLCanvasElement;
   readonly #gl: GL;
   readonly #shift: WebGLUniformLocation | null;
   readonly #ref: WebGLUniformLocation | null;
+  readonly #band: WebGLUniformLocation | null;
   readonly #count: number;
   #lost = false;
 
@@ -138,6 +166,7 @@ export class Relief {
     gl.uniform1i(gl.getUniformLocation(program, 'u_art'), 0);
     this.#shift = gl.getUniformLocation(program, 'u_shift');
     this.#ref = gl.getUniformLocation(program, 'u_ref');
+    this.#band = gl.getUniformLocation(program, 'u_band');
 
     gl.viewport(0, 0, canvas.width, canvas.height);
     gl.enable(gl.DEPTH_TEST);
@@ -152,12 +181,16 @@ export class Relief {
     this.#gl = gl;
   }
 
-  /** shift：每单位深度差位移多少（纹理坐标，x、y 各自按宽、高）；ref：这一层的参考深度 */
-  draw(shiftX: number, shiftY: number, ref: number): void {
+  /**
+   * shift：每单位深度差位移多少（纹理坐标，x、y 各自按宽、高）；
+   * layer：这一层的参考深度（不额外挪的那个深度）和它自己的深度区间
+   */
+  draw(shiftX: number, shiftY: number, layer: ReliefLayer): void {
     if (this.#lost) return;
     const gl = this.#gl;
     gl.uniform2f(this.#shift, shiftX, shiftY);
-    gl.uniform1f(this.#ref, ref);
+    gl.uniform1f(this.#ref, layer.ref);
+    gl.uniform2f(this.#band, layer.lo, layer.hi);
     gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
     gl.drawElements(gl.TRIANGLES, this.#count, gl.UNSIGNED_SHORT, 0);
   }

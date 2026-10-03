@@ -3,7 +3,7 @@
 import './style.css';
 // 珠光底的漂移动画，由 scripts/pearl-keyframes.mjs 生成
 import './pearl-drift.css';
-import { HoloCard } from '../renderer/card';
+import { DEFAULT_RELIEF, HoloCard } from '../renderer/card';
 import { ensureTextures } from '../renderer/textures';
 import { LayerFormatError, loadLayerSet } from '../format/io';
 import { FOIL_TYPES, type FoilType, type LayerSet } from '../format/types';
@@ -109,15 +109,43 @@ function amplitude(): number {
 }
 ctlAmp.disabled = !ctlParallax.checked;
 
+const ctlRelief = need<HTMLInputElement>('#ctl-relief');
+const reliefHint = need<HTMLElement>('#relief-hint');
 /**
- * 浮雕强度可以在地址上临时调（?relief=2、?relief=0 关掉），在 staging 上对比手感用。
- * 不进面板、不存进卡片配置：效果还在调，定下来之前不给用户一个旋钮
+ * 浮雕开着时用多大强度。地址上 ?relief=2 可以临时调（staging 上对比手感用），?relief=0 一进来就是关的。
+ * 面板上只给开关不给滑块：强度还在调，定下来之前不让每个人各调各的
  */
 const reliefParam = Number(new URLSearchParams(location.search).get('relief') ?? NaN);
+const RELIEF_ON = Number.isFinite(reliefParam) && reliefParam > 0 ? Math.min(reliefParam, 5) : DEFAULT_RELIEF;
+if (reliefParam === 0) ctlRelief.checked = false;
+
+/** 当前该用的浮雕强度：开关关着就是 0 */
+function relief(): number {
+  return ctlRelief.checked ? RELIEF_ON : 0;
+}
+
 const card = new HoloCard(need<HTMLDivElement>('.deck__card'), {
   amplitude: amplitude(),
-  ...(Number.isFinite(reliefParam) && reliefParam >= 0 ? { relief: Math.min(reliefParam, 5) } : {}),
+  relief: relief(),
 });
+
+/**
+ * 浮雕开关能不能用、下面那行小字写什么。开不了的原因写出来：
+ * 老卡没深度图、浏览器没 WebGL、视差关着（浮雕跟着视差振幅走，振幅 0 就没有位移）
+ */
+function updateReliefControl(): void {
+  const state = card.reliefState;
+  const reason =
+    state === 'no-depth'
+      ? 'panel.reliefNoDepth'
+      : state === 'unsupported'
+        ? 'panel.reliefUnsupported'
+        : !ctlParallax.checked
+          ? 'panel.reliefNeedsParallax'
+          : null;
+  ctlRelief.disabled = reason !== null;
+  setText(reliefHint, reason ?? 'panel.reliefHint');
+}
 const panel = need<HTMLElement>('.panel');
 
 /*
@@ -303,6 +331,11 @@ function show(set: LayerSet, id: string | null = null): void {
 
   card.setLayerSet(set);
   buildFoilControls(set);
+  // 浮雕要等深度图、层图解码完才知道开不开得起来；ready 之前先按「马上就好」显示
+  updateReliefControl();
+  void card.ready.then(() => {
+    if (current === set) updateReliefControl();
+  });
 }
 
 /** 卡带停在卡包上：还没有卡可调、可分享，面板上跟卡有关的先收起来 */
@@ -599,11 +632,19 @@ ctlAmp.addEventListener('input', () => {
   card.preview();
 });
 
+// 浮雕开关：拨一下卡片就转过去，开和关的差别要倾斜着才看得出
+ctlRelief.addEventListener('change', () => {
+  card.setOptions({ relief: relief() });
+  card.preview();
+  track('relief', { on: ctlRelief.checked ? 1 : 0 });
+});
+
 // 关掉视差：振幅归零，放大补偿也跟着变成 1，照片完整显示、不再被裁掉一圈
 ctlParallax.addEventListener('change', () => {
   ctlAmp.disabled = !ctlParallax.checked;
   card.setOptions({ amplitude: amplitude() });
   card.preview();
+  updateReliefControl();
   try {
     localStorage.setItem(PARALLAX_KEY, ctlParallax.checked ? 'on' : 'off');
   } catch {

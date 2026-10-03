@@ -143,6 +143,18 @@
               <input type="checkbox" id="ctl-parallax" role="switch" checked />
             </label>
 
+            <!--
+              浮雕开关：层内按深度图逐像素视差（src/renderer/relief.ts）。开不了时（老卡没深度图、浏览器不支持、
+              视差关着）开关变灰，下面那行小字写原因——不然看不出效果的人不知道是没开起来还是本来就弱
+            -->
+            <label class="toggle">
+              <span class="toggle__text">
+                <span data-i18n="panel.relief">浮雕</span>
+                <small id="relief-hint">主体像真的凸出来，转动卡片时看得出</small>
+              </span>
+              <input type="checkbox" id="ctl-relief" role="switch" checked />
+            </label>
+
             <details class="more">
               <summary class="more__head" data-i18n="panel.more">景深与炫光</summary>
 

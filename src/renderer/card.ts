@@ -20,7 +20,7 @@ import './card.css';
 import './foils.css';
 import type { HaloEffect, HaloLight, LayerFoil, LayerSet } from '../format/types';
 import { DEADZONE_DEGREES, TiltTracker } from './gyro';
-import { Relief, sampleDepth } from './relief';
+import { Relief, reliefLayers, sampleDepth, type ReliefLayer } from './relief';
 import { groupMask, layerMask } from './highlight';
 import { Spring } from './spring';
 import { ensureTextures } from './textures';
@@ -37,16 +37,28 @@ export interface HoloCardOptions {
   /**
    * 浮雕强度：层内按深度图逐像素视差（见 relief.ts）。1 表示深度差 1 的两个像素
    * 错开的距离和「视差差 1 的两层」一样；0 关掉。卡片没带深度图、浏览器没有 WebGL 时不起作用。
-   * ponytail: 建卡时是 0 就不建画布，之后再调大不会生效，要用得重新 setLayerSet
+   * 有深度图就建画布，0 时画布照样在、只是不挪，和平的一样；所以运行时随时能开关
    */
   relief: number;
 }
+
+/**
+ * 这张卡的浮雕现在怎样：
+ *   active       开起来了
+ *   pending      深度图、层图还在解码，马上就知道
+ *   no-depth     卡片没带深度图（老卡）
+ *   unsupported  浏览器建不起 WebGL，或者上下文丢了
+ */
+export type ReliefState = 'active' | 'pending' | 'no-depth' | 'unsupported';
+
+/** 浮雕开着时的默认强度，见 HoloCardOptions.relief */
+export const DEFAULT_RELIEF = 1;
 
 const DEFAULT_OPTIONS: HoloCardOptions = {
   // 以前是 0.06、而且只有主体在动，用户反馈分层感太弱（issue #3 第 3 条）
   amplitude: 0.1,
   tiltScale: 1,
-  relief: 1,
+  relief: DEFAULT_RELIEF,
 };
 
 /** 跟手时的弹簧参数（上游 springInteractSettings） */
@@ -164,8 +176,9 @@ export class HoloCard {
   #haloEls: HTMLDivElement[] = [];
   #halo: HaloEffect | null = null;
 
-  /** 开了浮雕的层：画布 + 这一层的参考深度。没有深度图或者建不起来就是空的 */
-  #reliefs: { relief: Relief; ref: number }[] = [];
+  /** 开了浮雕的层：画布 + 这一层在深度上的位置。没有深度图或者建不起来就是空的 */
+  #reliefs: { relief: Relief; layer: ReliefLayer }[] = [];
+  #reliefState: ReliefState = 'no-depth';
 
   /** 当前持有的 object URL，切换卡片和销毁时必须全部 revoke，否则内存泄漏 */
   #objectUrls: string[] = [];
@@ -205,6 +218,11 @@ export class HoloCard {
    */
   get ready(): Promise<void> {
     return this.#ready;
+  }
+
+  /** 浮雕的状态，见 ReliefState。setLayerSet 之后等 ready 再读才是定下来的 */
+  get reliefState(): ReliefState {
+    return this.#reliefState;
   }
 
   /** 当前卡片的根节点，供演示页读调试数值。未挂载时为 null */
@@ -253,7 +271,7 @@ export class HoloCard {
 
     // 景深层：由远及近，每层 = 画面 + 这一层自己的箔面
     const masks: Promise<void>[] = [];
-    const arts: { art: HTMLImageElement; ref: number }[] = [];
+    const arts: HTMLImageElement[] = [];
     // 拷一份，不持有调用方的对象。共用引用的话，外面对 manifest 的原地修改
     // 会不经 setHalo 就影响下一帧的炫光计算，而 --hc-halo-intensity 还停在旧值，
     // 强度和角度两条线对不上。
@@ -276,7 +294,7 @@ export class HoloCard {
       art.alt = '';
       art.decoding = 'async';
       art.draggable = false;
-      arts.push({ art, ref: layer.depth });
+      arts.push(art);
 
       // 箔面用这一层自己的图当遮罩，于是箔只出现在该层的 alpha 形状里。
       // 先直接用层图，高光保护遮罩（亮部箔面减弱，见 highlight.ts）异步算好再换上。
@@ -331,7 +349,11 @@ export class HoloCard {
     root.append(translater);
     this.#host.append(root);
     this.#root = root;
-    if (set.depth && this.#options.relief > 0) masks.push(this.#setupRelief(root, set.depth, arts));
+    this.#reliefState = set.depth ? 'pending' : 'no-depth';
+    if (set.depth) {
+      const layers = reliefLayers(manifest.layers.map((layer) => layer.depth));
+      masks.push(this.#setupRelief(root, set.depth, arts.map((art, i) => ({ art, layer: layers[i] ?? { ref: 0, lo: 0, hi: 1 } }))));
+    }
     this.#ready = Promise.all(masks).then(() => undefined);
 
     this.#writeVars();
@@ -474,7 +496,7 @@ export class HoloCard {
   async #setupRelief(
     root: HTMLDivElement,
     depthBlob: Blob,
-    arts: { art: HTMLImageElement; ref: number }[],
+    arts: { art: HTMLImageElement; layer: ReliefLayer }[],
   ): Promise<void> {
     const url = URL.createObjectURL(depthBlob);
     this.#objectUrls.push(url);
@@ -483,23 +505,25 @@ export class HoloCard {
     try {
       await Promise.all([depth.decode(), ...arts.map(({ art }) => art.decode())]);
     } catch {
+      if (this.#root === root) this.#reliefState = 'unsupported';
       return;
     }
     if (this.#root !== root) return; // 等解码的功夫卡片已经换掉了
 
-    const created: { relief: Relief; ref: number; art: HTMLImageElement }[] = [];
+    const created: { relief: Relief; layer: ReliefLayer; art: HTMLImageElement }[] = [];
     try {
       const grid = sampleDepth(depth);
       // 画布跟着 plane 放大了 --hc-scale 倍，按放大后的宽度建。
       // 隐藏中的卡（卡带切换时）宽度是 0，按一个常见的卡片宽度建
       const width = (root.clientWidth || 480) * this.#scale();
-      for (const { art, ref } of arts) {
+      for (const { art, layer } of arts) {
         const relief = new Relief(art, grid, width, () => this.#dropRelief());
-        created.push({ relief, ref, art });
+        created.push({ relief, layer, art });
       }
     } catch (error) {
       for (const { relief } of created) relief.destroy();
       console.info('[holocard] 浮雕不可用，用平的层：', error instanceof Error ? error.message : error);
+      this.#reliefState = 'unsupported';
       return;
     }
     for (const { relief, art } of created) {
@@ -507,7 +531,8 @@ export class HoloCard {
       art.after(relief.canvas);
       art.style.visibility = 'hidden';
     }
-    this.#reliefs = created.map(({ relief, ref }) => ({ relief, ref }));
+    this.#reliefs = created.map(({ relief, layer }) => ({ relief, layer }));
+    this.#reliefState = 'active';
     this.#writeVars();
   }
 
@@ -518,6 +543,7 @@ export class HoloCard {
       relief.destroy();
     }
     this.#reliefs = [];
+    this.#reliefState = 'unsupported';
   }
 
   /**
@@ -719,7 +745,7 @@ export class HoloCard {
       const k = (this.#options.amplitude * this.#options.relief) / this.#scale();
       const sx = -clamp((glare.x - 50) / 50, -1, 1) * k;
       const sy = -clamp((glare.y - 50) / 50, -1, 1) * k;
-      for (const { relief, ref } of this.#reliefs) relief.draw(sx, sy, ref);
+      for (const { relief, layer } of this.#reliefs) relief.draw(sx, sy, layer);
     }
 
     const halo = this.#halo;

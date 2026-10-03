@@ -642,6 +642,7 @@ select {
 .toggle input:checked { background: linear-gradient(120deg, #a88be0, #7b8fe0 50%, #59b6a8); }
 .toggle input:checked::after { transform: translateX(16px); }
 .toggle input:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.toggle input:disabled { opacity: 0.4; cursor: not-allowed; }
 .field input[type='range']:disabled { opacity: 0.35; }
 /* 关了视差时振幅滑块是灰的，旁边的读数也跟着灰：数值留着（再打开时恢复），但看得出现在不生效 */
 .field:has(input[type='range']:disabled) output { opacity: 0.35; }
