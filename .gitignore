@@ -30,3 +30,6 @@ dist-lab/
 
 # 分享图预览工具的缓存（分层结果、打包出的脚本）
 .og-cache/
+
+# 临时的 git worktree（子代理隔离用），不进仓库
+.claude/worktrees/
