@@ -98,6 +98,13 @@ export async function sweepCards(
     db.update(card.id, { status: 'expired', stage: null });
     removed++;
   }
+  // 被下架的对外接口卡：文件挪进了 .removed/，网页卡在那里留着等复核，但接口卡承诺了 24 小时清掉
+  for (const card of db.removedApi()) {
+    if (now < expiresAt(card, baseMs, doublingsCap)) continue;
+    await rm(join(outDir, '.removed', card.id), { recursive: true, force: true }).catch(() => undefined);
+    db.update(card.id, { status: 'expired', stage: null });
+    removed++;
+  }
   return removed;
 }
 

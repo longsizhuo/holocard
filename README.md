@@ -251,8 +251,8 @@ curl -O https://holocard.longsizhuo.com/v1/cards/<id>/files/layer-0.webp -H "Aut
 curl -X DELETE https://holocard.longsizhuo.com/v1/cards/<id> -H "Authorization: Bearer hc_..."
 ```
 
-额度：每个 key 每 24 小时默认 50 张（发 key 时可以改），同时最多 3 张在排队或处理中；所有 key 加起来每天 500 张。
-超了回 429（`quota_exceeded`、`too_many_in_flight`）或 503（`api_daily_limit`、`queue_full`）。
+额度：每个 key 每 24 小时默认 50 张（发 key 时可以改），同时最多 3 张在上传、排队或处理中，每 10 分钟最多尝试提交 30 次；所有 key 加起来每天 500 张。
+超了回 429（`quota_exceeded`、`too_many_in_flight`、`rate_limited`）或 503（`api_daily_limit`、`queue_full`、`busy`）。key 被吊销后立即失效，还在排队的卡也不再处理。
 失败时 `error.code` 是 `nsfw_rejected`（裸露识别拒绝）、`moderation_unavailable`（识别不可用，宁可不做）或 `processing_failed`。
 
 ## `.layers` 格式

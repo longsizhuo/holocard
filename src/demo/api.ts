@@ -152,7 +152,10 @@ async function submitJob(
     }
 
     const wait = SUBMIT_RETRY_MS[attempt];
-    if (wait === undefined || (failure instanceof ApiError && failure.code === 'queue_full')) throw failure;
+    // 排队满、盘满都不重试：每次重试都要把整张照片重传一遍，等几秒也好不了
+    if (wait === undefined || (failure instanceof ApiError && (failure.code === 'queue_full' || failure.code === 'disk_full'))) {
+      throw failure;
+    }
     onProgress?.({ key: 'progress.reconnecting' });
     await sleep(wait, signal);
   }
@@ -261,7 +264,15 @@ function readOwned(): OwnedMap {
   }
 }
 
+/**
+ * 口令在内存里也存一份。浏览器存不了站点数据（隐私模式、屏蔽了 Cookie、有的 App 内置浏览器）时
+ * localStorage 写不进去，以前只是「这台设备上没有删除入口」；现在分享也认口令，
+ * 没有这一份的话，做完卡连自动分享都会被拒
+ */
+const ownedInMemory = new Map<string, string>();
+
 export function rememberOwned(id: string, token: string): void {
+  ownedInMemory.set(id, token);
   try {
     const owned = readOwned();
     owned[id] = token;
@@ -277,7 +288,7 @@ export function ownedCards(): string[] {
 }
 
 export function ownedToken(id: string): string | null {
-  return readOwned()[id] ?? null;
+  return ownedInMemory.get(id) ?? readOwned()[id] ?? null;
 }
 
 export function forgetOwned(id: string): void {

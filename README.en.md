@@ -251,8 +251,8 @@ curl -O https://holocard.longsizhuo.com/v1/cards/<id>/files/layer-0.webp -H "Aut
 curl -X DELETE https://holocard.longsizhuo.com/v1/cards/<id> -H "Authorization: Bearer hc_..."
 ```
 
-Limits: 50 cards per key per 24 hours by default (set when the key is issued), at most 3 queued or processing at once, and 500 a day across all keys.
-Over the limit you get 429 (`quota_exceeded`, `too_many_in_flight`) or 503 (`api_daily_limit`, `queue_full`).
+Limits: 50 cards per key per 24 hours by default (set when the key is issued), at most 3 uploading, queued or processing at once, at most 30 submission attempts per 10 minutes, and 500 a day across all keys.
+Over the limit you get 429 (`quota_exceeded`, `too_many_in_flight`, `rate_limited`) or 503 (`api_daily_limit`, `queue_full`, `busy`). A revoked key stops working at once, and its queued cards are not processed.
 A failed card has `error.code` set to `nsfw_rejected`, `moderation_unavailable` (detection unavailable, so the card is refused) or `processing_failed`.
 
 ## The `.layers` format

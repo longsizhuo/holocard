@@ -20,7 +20,8 @@ export function hashApiKey(key: string): string {
 
 /** 从 Authorization 头里取 key。格式不对就是 null，不去查库 */
 export function bearerKey(header: string | undefined): string | null {
-  const match = /^Bearer\s+(\S+)$/.exec(header ?? '');
+  // 认证方案名不区分大小写（RFC 7235）
+  const match = /^Bearer\s+(\S+)$/i.exec(header ?? '');
   const key = match?.[1] ?? '';
   return KEY_PATTERN.test(key) ? key : null;
 }

@@ -214,15 +214,20 @@ export class CardDb {
     return this.#db.prepare('SELECT 1 FROM cards WHERE id = ?').get(id) !== undefined;
   }
 
-  /** 只改给出的字段，顺带刷新 updated_at */
-  update(id: string, patch: CardPatch): void {
+  /**
+   * 只改给出的字段，顺带刷新 updated_at。返回有没有改到。
+   * 给了 onlyIf 就只在当前状态是它时才改：处理完写回 done/error 用它，
+   * 处理途中卡被删了（状态已经是 deleted），写回就不生效，不会把删掉的卡又写活
+   */
+  update(id: string, patch: CardPatch, onlyIf?: CardStatus): boolean {
     const keys = (Object.keys(patch) as Updatable[]).filter((k) => UPDATABLE.includes(k));
-    if (keys.length === 0) return;
+    if (keys.length === 0) return false;
     const sets = keys.map((k) => `${k} = ?`).join(', ');
     const values = keys.map((k) => patch[k] ?? null);
-    this.#db
-      .prepare(`UPDATE cards SET ${sets}, updated_at = ? WHERE id = ?`)
-      .run(...values, Date.now(), id);
+    const result = onlyIf
+      ? this.#db.prepare(`UPDATE cards SET ${sets}, updated_at = ? WHERE id = ? AND status = ?`).run(...values, Date.now(), id, onlyIf)
+      : this.#db.prepare(`UPDATE cards SET ${sets}, updated_at = ? WHERE id = ?`).run(...values, Date.now(), id);
+    return Number(result.changes) > 0;
   }
 
   /** 合并一批访问计数。同一张卡的多次访问在内存里已经攒成一条了 */
@@ -247,6 +252,16 @@ export class CardDb {
     return this.#db
       .prepare('SELECT * FROM cards WHERE status = ? ORDER BY created_at')
       .all(status) as unknown as CardRow[];
+  }
+
+  /** 这个 key 还能用吗（存在、没吊销）。吊销要立即生效：入队前、开始处理前都再查一次 */
+  apiKeyActive(id: string): boolean {
+    return this.#db.prepare('SELECT 1 FROM api_keys WHERE id = ? AND revoked_at IS NULL').get(id) !== undefined;
+  }
+
+  /** 被站长下架的对外接口卡。它们的文件在 .removed/ 下，也要按 24 小时清掉（见 cards.ts 的 sweepCards） */
+  removedApi(): CardRow[] {
+    return this.#db.prepare("SELECT * FROM cards WHERE status = 'removed' AND source = 'api'").all() as unknown as CardRow[];
   }
 
   /** 按哈希找一个没吊销的 key */
