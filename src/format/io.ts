@@ -4,6 +4,7 @@ import {
   DEFAULT_HALO_LIGHT,
   FOIL_TYPES,
   LAYERS_FORMAT_VERSION,
+  PARALLAX_MAX,
   defaultFoilFor,
   defaultHalo,
   type BBox,
@@ -143,6 +144,17 @@ export function parseManifest(raw: unknown): LayerManifest {
       glare: effects['glare'] !== false,
     },
   };
+  // 视差设置只认完整合法的一份，残缺的当没存过，免得半套参数把卡渲染歪
+  const parallax = effects['parallax'] as Record<string, unknown> | undefined;
+  if (
+    parallax &&
+    typeof parallax['enabled'] === 'boolean' &&
+    isFiniteNumber(parallax['amplitude']) &&
+    parallax['amplitude'] >= 0 &&
+    parallax['amplitude'] <= PARALLAX_MAX
+  ) {
+    manifest.effects.parallax = { enabled: parallax['enabled'], amplitude: parallax['amplitude'] };
+  }
   if (typeof o['generator'] === 'string') {
     manifest.generator = o['generator'];
   }

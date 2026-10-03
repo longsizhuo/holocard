@@ -602,13 +602,24 @@ export async function runExport(
   const timer = setTimeout(() => controller.abort(new Error('导出超时')), EXPORT_TIMEOUT_MS);
   const { signal } = controller;
 
+  // 截帧的这几十秒里主人可能存了新配置（PUT /api/cards/:id/config）。那样截出来的是旧样子，
+  // 落盘之后修改时间又比 manifest 新，exportReady 会把它当成新的一直发出去。所以写盘前比一下，变了就重截
+  const manifestTime = async (): Promise<number> =>
+    (await stat(join(dir, 'manifest.json')).catch(() => null))?.mtimeMs ?? 0;
+
   try {
-    const outputs =
-      format === 'gif'
-        ? await exportGif(baseUrl, id, dir, tmp, signal)
-        : format === 'motion'
-          ? await exportMotion(baseUrl, id, tmp, signal)
-          : await exportApng(baseUrl, id, dir, signal);
+    let outputs: Buffer[];
+    for (let attempt = 0; ; attempt++) {
+      const before = await manifestTime();
+      outputs =
+        format === 'gif'
+          ? await exportGif(baseUrl, id, dir, tmp, signal)
+          : format === 'motion'
+            ? await exportMotion(baseUrl, id, tmp, signal)
+            : await exportApng(baseUrl, id, dir, signal);
+      // ponytail: 最多重截一次；主人一直在调的话第二份也可能旧，下次导出时 exportReady 会判旧重做
+      if ((await manifestTime()) === before || attempt >= 1) break;
+    }
     await Promise.all(outputs.map((data, i) => writeFile(`${tmp}-${i}`, data)));
     // 一种格式要是有几个文件，依次改名；缺了任何一个 exportReady 都判成没好
     for (const [i, f] of exportFiles(format, id).entries()) {

@@ -6,7 +6,7 @@ import './pearl-drift.css';
 import { HoloCard } from '../renderer/card';
 import { ensureTextures } from '../renderer/textures';
 import { LayerFormatError, loadLayerSet } from '../format/io';
-import { FOIL_TYPES, type FoilType, type LayerSet } from '../format/types';
+import { FOIL_TYPES, type FoilType, type LayerSet, type ParallaxEffect } from '../format/types';
 import {
   ApiError,
   apiError,
@@ -15,8 +15,10 @@ import {
   NoBackendError,
   ownedToken,
   rememberOwned,
+  saveConfig,
   segmentOnServer,
 } from './api';
+import { configOf, type CardConfig } from '../format/config';
 import { initAlbums, openAlbums } from './albums-ui';
 import { Deck, forgetSession } from './deck';
 import { reducedMotion } from './pack';
@@ -256,6 +258,7 @@ function buildFoilControls(set: LayerSet): void {
       card.setLayerFoil(index, layer.foil);
       // 静止的卡片上箔面是透明的，转过去才看得见调了什么
       card.preview();
+      scheduleSave();
     };
     select.addEventListener('change', apply);
     strength.addEventListener('input', apply);
@@ -292,9 +295,13 @@ function show(set: LayerSet, id: string | null = null): void {
   const halo = set.manifest.effects.halo;
   ctlIntensity.value = String(halo.intensity);
   ctlSharp.value = String(halo.light.sharpness);
+  // 视差同理：作者存过就按作者的；没存过（旧卡、刚做出来的卡）按看的人本机的偏好
+  applyParallax(set.manifest.effects.parallax ?? localParallax());
 
   card.setLayerSet(set);
   buildFoilControls(set);
+  // 刚做出来的卡还没存过视差：把主人此刻的设置记下来，分享出去别人看到的才和主人一样
+  if (!set.manifest.effects.parallax) scheduleSave();
 }
 
 /** 卡带停在卡包上：还没有卡可调、可分享，面板上跟卡有关的先收起来 */
@@ -315,7 +322,85 @@ function applyHalo(): void {
   halo.intensity = Number(ctlIntensity.value);
   halo.light = { ...halo.light, sharpness: Number(ctlSharp.value) };
   card.setHalo(halo);
+  scheduleSave();
 }
+
+// ---------- 作者配置存回服务端 ----------
+
+/** 面板上视差开关和滑块此刻的状态 */
+function panelParallax(): ParallaxEffect {
+  return { enabled: ctlParallax.checked, amplitude: Number(ctlAmp.value) / 100 };
+}
+
+/** 没存过视差的卡用这个：开关按本机记的偏好，幅度用滑块的默认值 */
+function localParallax(): ParallaxEffect {
+  let enabled = true;
+  try {
+    enabled = localStorage.getItem(PARALLAX_KEY) !== 'off';
+  } catch {
+    // 同上
+  }
+  return { enabled, amplitude: Number(ctlAmp.defaultValue) / 100 };
+}
+
+function applyParallax(parallax: ParallaxEffect): void {
+  ctlParallax.checked = parallax.enabled;
+  ctlAmp.value = String(Math.round(parallax.amplitude * 1000) / 10);
+  ctlAmp.disabled = !parallax.enabled;
+  outAmp.value = `${ctlAmp.value}%`;
+  card.setOptions({ amplitude: amplitude() });
+}
+
+/** 拖滑块时别每一下都发：停手这么久再存 */
+const SAVE_DELAY_MS = 800;
+let pendingSave: { id: string; config: CardConfig } | null = null;
+let saveTimer = 0;
+
+/** 主人调了东西：记下这张卡此刻的配置，停手一会儿再存。别人的卡在本机随便调，不存 */
+function scheduleSave(): void {
+  if (!current || !currentId || route.mode === 'render' || ownedToken(currentId) === null) return;
+  const parallax = panelParallax();
+  current.manifest.effects.parallax = parallax;
+  // 等着存的是另一张卡（停手不到一秒就换了卡），那张先发出去
+  if (pendingSave && pendingSave.id !== currentId) void flushSave();
+  pendingSave = { id: currentId, config: configOf(current.manifest, parallax) };
+  window.clearTimeout(saveTimer);
+  saveTimer = window.setTimeout(() => void flushSave(), SAVE_DELAY_MS);
+}
+
+/**
+ * 存的请求排成一条链：一次一次按顺序发，后调的不会被先调的覆盖；
+ * 分享、导出等的也是这条链，这样已经发出去还没回来的那次也算在内
+ */
+let saving: Promise<void> = Promise.resolve();
+
+/** 立刻把等着的那次存掉。分享、导出之前要先等它，否则拿到的是服务端上旧的配置 */
+function flushSave(): Promise<void> {
+  window.clearTimeout(saveTimer);
+  const job = pendingSave;
+  pendingSave = null;
+  if (job) {
+    saving = saving.then(async () => {
+      try {
+        await saveConfig(job.id, job.config);
+      } catch (error) {
+        // 本机的效果不受影响，只是分享出去的还是旧的，告诉主人一声
+        if (job.id === currentId) setText(status, 'status.saveFailed', { message: describeError(error) });
+      }
+    });
+  }
+  return saving;
+}
+
+// 调完马上关页面：还没到点的那次也发出去（saveConfig 带 keepalive）。
+// 不排进 saving 链：链上要是还有一发在路上，排在它后面的这一发得等它回来才发，那时页面已经没了。
+// 服务端是整份覆盖，和在路上那发乱序到达的话，后到的赢——两发只差几百毫秒，接受这点概率
+window.addEventListener('pagehide', () => {
+  window.clearTimeout(saveTimer);
+  const job = pendingSave;
+  pendingSave = null;
+  if (job) void saveConfig(job.id, job.config).catch(() => undefined);
+});
 
 /**
  * 把此刻炫光实际有多亮显示出来，纯读数：角度决定的那部分（渲染器算的 --hc-halo）× 炫光强度。
@@ -589,6 +674,7 @@ ctlAmp.addEventListener('input', () => {
   outAmp.value = `${ctlAmp.value}%`;
   card.setOptions({ amplitude: amplitude() });
   card.preview();
+  scheduleSave();
 });
 
 // 关掉视差：振幅归零，放大补偿也跟着变成 1，照片完整显示、不再被裁掉一圈
@@ -596,6 +682,7 @@ ctlParallax.addEventListener('change', () => {
   ctlAmp.disabled = !ctlParallax.checked;
   card.setOptions({ amplitude: amplitude() });
   card.preview();
+  scheduleSave();
   try {
     localStorage.setItem(PARALLAX_KEY, ctlParallax.checked ? 'on' : 'off');
   } catch {
@@ -659,6 +746,8 @@ async function doShare(auto = false, id: string | null = currentId): Promise<voi
   }
 
   try {
+    // 预览图按服务端上的配置渲染，刚调的那一下得先存上
+    await flushSave();
     const res = await fetch(`${import.meta.env.BASE_URL}api/cards/${id}/share`, {
       method: 'POST',
       headers: apiHeaders(),
@@ -757,6 +846,8 @@ async function doExport(): Promise<void> {
   track('export', { format });
 
   try {
+    // 动图按服务端上的配置渲染，刚调的那一下得先存上
+    await flushSave();
     const files = await requestExport(id, format, (state) => {
       setText(exportBtn, state === 'queued' ? 'export.queued' : 'export.working');
     });

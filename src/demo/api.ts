@@ -13,6 +13,7 @@
  */
 
 import { lang, type MessageKey } from '../i18n';
+import type { CardConfig } from '../format/config';
 
 /** 这个部署没有分层服务。只有这种情况调用方才回退到浏览器端 */
 export class NoBackendError extends Error {
@@ -303,4 +304,20 @@ export async function deleteCard(id: string): Promise<void> {
   }
   // 404 说明已经被清理过了，对用户来说结果一样
   forgetOwned(id);
+}
+
+/**
+ * 存作者配置（箔面、炫光、视差）。分享页、预览图、导出的动图都按存进去的来。
+ * keepalive：页面关掉时还在路上的那次也要送到，不然最后一下调整就丢了
+ */
+export async function saveConfig(id: string, config: CardConfig): Promise<void> {
+  const token = ownedToken(id);
+  if (!token) return;
+  const res = await fetch(`${import.meta.env.BASE_URL}api/cards/${id}/config`, {
+    method: 'PUT',
+    headers: { ...apiHeaders(), 'content-type': 'application/json', 'x-holocard-token': token },
+    body: JSON.stringify(config),
+    keepalive: true,
+  });
+  if (!res.ok) throw await apiError(res, `保存失败（HTTP ${res.status}）`);
 }

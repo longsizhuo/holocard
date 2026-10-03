@@ -261,10 +261,13 @@ mycard.layers/
   ],
   "effects": {
     "halo": { "intensity": 0.35, "light": { "peakAt": [0.7, -0.7], "sharpness": 120 } },
-    "glare": true
+    "glare": true,
+    "parallax": { "enabled": true, "amplitude": 0.1 }
   }
 }
 ```
+
+`effects.parallax` is the parallax setting the author saved (`enabled`, `amplitude` 0–0.16). It is optional; without it the viewer's own local preference applies. Foil, halo and parallax changes the card's owner makes in the panel are saved back to the server automatically (`PUT /api/cards/<id>/config`, validated in `src/format/config.ts`), and the share page, preview image and exported animations all follow the saved version.
 
 Layer images can be any format the browser can decode; the server stores them as WebP (lossy image, lossless alpha), about a tenth of the PNG size.
 

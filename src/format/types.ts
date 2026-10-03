@@ -108,10 +108,27 @@ export interface HaloEffect {
   light: HaloLight;
 }
 
+/** 视差振幅的上限（占卡宽的比例），和面板滑块的 16% 一致 */
+export const PARALLAX_MAX = 0.16;
+
+/**
+ * 立体视差，作者在面板上的选择。开关关着时振幅保留，再打开还是原来的幅度。
+ * 振幅含义见 renderer 的 HoloCardOptions.amplitude
+ */
+export interface ParallaxEffect {
+  enabled: boolean;
+  amplitude: number;
+}
+
 export interface LayerEffects {
   halo: HaloEffect;
   /** 跟随指针的整卡镜面高光 */
   glare: boolean;
+  /**
+   * 作者存过的视差设置。没有就是作者还没存过，看的人按自己本机的偏好
+   * （旧卡、刚做出来还没调过的卡都是这样）
+   */
+  parallax?: ParallaxEffect;
 }
 
 export const DEFAULT_HALO_LIGHT: HaloLight = {
