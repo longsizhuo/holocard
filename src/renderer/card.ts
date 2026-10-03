@@ -20,7 +20,7 @@ import './card.css';
 import './foils.css';
 import type { HaloEffect, HaloLight, LayerFoil, LayerSet } from '../format/types';
 import { DEADZONE_DEGREES, TiltTracker } from './gyro';
-import { Relief, reliefLayers, sampleDepth, type ReliefLayer } from './relief';
+import { Relief, layerGrid, readDepth, reliefLayers, type ReliefLayer } from './relief';
 import { groupMask, layerMask } from './highlight';
 import { Spring } from './spring';
 import { ensureTextures } from './textures';
@@ -35,8 +35,8 @@ export interface HoloCardOptions {
   /** 倾斜幅度倍率。1 与上游一致，最大转角约 14° */
   tiltScale: number;
   /**
-   * 浮雕强度：层内按深度图逐像素视差（见 relief.ts）。1 表示深度差 1 的两个像素
-   * 错开的距离和「视差差 1 的两层」一样；0 关掉。卡片没带深度图、浏览器没有 WebGL 时不起作用。
+   * 浮雕强度：层内按深度图逐像素视差（见 relief.ts）。1 表示层内和层间是同一个深度场：
+   * 一个像素挪多少，和「代表深度等于它的那一层」挪的一样，层内起伏和层间跳变接得上；0 关掉。卡片没带深度图、浏览器没有 WebGL 时不起作用。
    * 有深度图就建画布，0 时画布照样在、只是不挪，和平的一样；所以运行时随时能开关
    */
   relief: number;
@@ -57,11 +57,15 @@ const MAX_RELIEF_REBUILDS = 3;
 export type ReliefState = 'active' | 'pending' | 'no-depth' | 'unsupported';
 
 /** 浮雕开着时的默认强度，见 HoloCardOptions.relief */
-export const DEFAULT_RELIEF = 0.6;
+export const DEFAULT_RELIEF = 1;
 
 const DEFAULT_OPTIONS: HoloCardOptions = {
-  // 以前是 0.06、而且只有主体在动，用户反馈分层感太弱（issue #3 第 3 条）
-  amplitude: 0.1,
+  /*
+   * 最早是 0.06、而且只有主体在动，用户反馈分层感太弱（issue #3 第 3 条），提到了 0.1。
+   * 有了浮雕之后层内也在动、和整层视差是同一个深度场，0.1 一下子太猛（远景整片在滑），回到 0.06，
+   * 和 iOS 主屏视差的量级差不多。几种做法在用户的卡上并排比过（issue #29）
+   */
+  amplitude: 0.06,
   tiltScale: 1,
   relief: DEFAULT_RELIEF,
   capture: false,
@@ -182,15 +186,14 @@ export class HoloCard {
   #haloEls: HTMLDivElement[] = [];
   #halo: HaloEffect | null = null;
 
-  /** 开了浮雕的层：画布 + 这一层在深度上的位置。没有深度图或者建不起来就是空的 */
-  /** 主体层的浮雕画布。没有深度图、建不起来、上下文被收走时是 null */
-  #relief: { relief: Relief; layer: ReliefLayer } | null = null;
+  /** 各层的浮雕画布 + 参考深度。没有深度图、建不起来、上下文被收走时是空的 */
+  #relief: { relief: Relief; ref: number }[] = [];
+  /** 每单位深度多少视差（见 reliefLayers），浮雕的位移按它换算成和整层视差同一个单位 */
+  #reliefPerDepth = 0;
   /** 重建浮雕要用的东西，解码一次存着：上下文被收走后回到前台要重建 */
   #reliefSource: {
     root: HTMLDivElement;
-    grid: Float32Array;
-    art: HTMLImageElement;
-    layer: ReliefLayer;
+    layers: { art: HTMLImageElement; grid: Float32Array; ref: number }[];
     rebuilds: number;
   } | null = null;
   #reliefState: ReliefState = 'no-depth';
@@ -367,9 +370,9 @@ export class HoloCard {
     this.#host.append(root);
     this.#root = root;
     this.#setReliefState(set.depth ? 'pending' : 'no-depth');
-    const front = arts[arts.length - 1];
-    const frontLayer = reliefLayers(manifest.layers.map((layer) => layer.depth))[arts.length - 1];
-    if (set.depth && front && frontLayer) masks.push(this.#setupRelief(root, set.depth, front, frontLayer));
+    const relief = reliefLayers(manifest.layers);
+    this.#reliefPerDepth = relief.perDepth;
+    if (set.depth) masks.push(this.#setupRelief(root, set.depth, arts, relief.layers));
     this.#ready = Promise.all(masks).then(() => undefined);
 
     this.#writeVars();
@@ -505,24 +508,37 @@ export class HoloCard {
   }
 
   /**
-   * 给最前面那层（主体）建浮雕画布，顶替原来的 <img>。<img> 留在原处只是藏起来：
+   * 给每一层建浮雕画布，顶替原来的 <img>。<img> 留在原处只是藏起来：
    * 演示页、截图脚本还要读它的 src；画布的上下文被系统收走时也要靠它顶回去。
-   * 为什么只做主体层，见 relief.ts 开头
+   * 每层的顶点深度在这里算一次（见 layerGrid），重建时直接用
    */
-  async #setupRelief(root: HTMLDivElement, depthBlob: Blob, art: HTMLImageElement, layer: ReliefLayer): Promise<void> {
+  async #setupRelief(
+    root: HTMLDivElement,
+    depthBlob: Blob,
+    arts: HTMLImageElement[],
+    layers: ReliefLayer[],
+  ): Promise<void> {
     const url = URL.createObjectURL(depthBlob);
     this.#objectUrls.push(url);
     const depth = new Image();
     depth.src = url;
     try {
-      await Promise.all([depth.decode(), art.decode()]);
+      await Promise.all([depth.decode(), ...arts.map((art) => art.decode())]);
     } catch {
       if (this.#root === root) this.#setReliefState('unsupported');
       return;
     }
     if (this.#root !== root) return; // 等解码的功夫卡片已经换掉了
     try {
-      this.#reliefSource = { root, grid: sampleDepth(depth), art, layer, rebuilds: 0 };
+      const map = readDepth(depth);
+      this.#reliefSource = {
+        root,
+        layers: arts.map((art, i) => {
+          const layer = layers[i] ?? { ref: 0, lo: 0, hi: 1 };
+          return { art, grid: layerGrid(map, layer.lo, layer.hi, layer.ref), ref: layer.ref };
+        }),
+        rebuilds: 0,
+      };
     } catch {
       this.#setReliefState('unsupported');
       return;
@@ -533,35 +549,45 @@ export class HoloCard {
   /** 按 #reliefSource 建画布。第一次建、上下文被收走后回到前台重建，都走这里 */
   #buildRelief(): void {
     const source = this.#reliefSource;
-    if (!source || this.#root !== source.root || this.#relief) return;
-    let relief: Relief;
+    if (!source || this.#root !== source.root || this.#relief.length > 0) return;
+    // 画布跟着 plane 放大了 --hc-scale 倍，按放大后的宽度建。
+    // 隐藏中的卡（卡带切换时）宽度是 0，按一个常见的卡片宽度建
+    const width = (source.root.clientWidth || 480) * this.#scale();
+    const built: { relief: Relief; ref: number }[] = [];
     try {
-      // 画布跟着 plane 放大了 --hc-scale 倍，按放大后的宽度建。
-      // 隐藏中的卡（卡带切换时）宽度是 0，按一个常见的卡片宽度建
-      const width = (source.root.clientWidth || 480) * this.#scale();
-      relief = new Relief(source.art, source.grid, width, this.#options.capture, () => {
-        // 只认当前这一块：换卡、重建之后，旧画布晚到的事件不该动新的
-        if (this.#relief?.relief === relief) this.#loseRelief();
-      });
+      for (const layer of source.layers) {
+        const relief: Relief = new Relief(layer.art, layer.grid, width, this.#options.capture, () => {
+          // 只认当前这一组：换卡、重建之后，旧画布晚到的事件不该动新的
+          if (this.#relief.some((item) => item.relief === relief)) this.#loseRelief();
+        });
+        built.push({ relief, ref: layer.ref });
+      }
     } catch (error) {
+      // 一层建不起来就都不要：有的层浮着、有的层平着，层间就接不上了
+      for (const item of built) item.relief.destroy();
       console.info('[holocard] 浮雕不可用，用平的层：', error instanceof Error ? error.message : error);
       this.#setReliefState('unsupported');
       return;
     }
-    relief.canvas.className = 'hc__relief';
-    source.art.after(relief.canvas);
-    source.art.style.visibility = 'hidden';
-    this.#relief = { relief, layer: source.layer };
+    source.layers.forEach((layer, i) => {
+      const canvas = built[i]?.relief.canvas;
+      if (!canvas) return;
+      canvas.className = 'hc__relief';
+      layer.art.after(canvas);
+      layer.art.style.visibility = 'hidden';
+    });
+    this.#relief = built;
     this.#setReliefState('active');
     this.#writeVars();
   }
 
   /** 拆掉浮雕画布，<img> 重新露出来 */
   #removeRelief(): void {
-    if (!this.#relief) return;
-    this.#relief.relief.canvas.previousElementSibling?.removeAttribute('style');
-    this.#relief.relief.destroy();
-    this.#relief = null;
+    for (const { relief } of this.#relief) {
+      relief.canvas.previousElementSibling?.removeAttribute('style');
+      relief.destroy();
+    }
+    this.#relief = [];
   }
 
   /**
@@ -789,12 +815,13 @@ export class HoloCard {
     style.setProperty('--hc-ny', String(round(clamp((glare.y - 50) / 50, -1, 1), 4)));
 
     // 浮雕：层内每单位深度差比整层多挪多少。和 CSS 的整层平移同方向（近处朝指针反方向），
+    // 乘 perDepth 把深度差换成视差差，和整层平移同一个单位；
     // 除以放大倍数是因为画布跟着 plane 放大了，同样的屏幕位移在纹理坐标里要小一些
-    if (this.#relief) {
-      const k = (this.#options.amplitude * this.#options.relief) / this.#scale();
+    if (this.#relief.length > 0) {
+      const k = (this.#options.amplitude * this.#options.relief * this.#reliefPerDepth) / this.#scale();
       const sx = -clamp((glare.x - 50) / 50, -1, 1) * k;
       const sy = -clamp((glare.y - 50) / 50, -1, 1) * k;
-      this.#relief.relief.draw(sx, sy, this.#relief.layer);
+      for (const { relief, ref } of this.#relief) relief.draw(sx, sy, ref);
     }
 
     const halo = this.#halo;

@@ -177,7 +177,9 @@ proportional to that layer's parallax factor. Near layers move opposite to the p
 so nearby things shift left relative to far ones.
 
 **The focal plane sits in the middle, and every layer shares one scale factor.** The midpoint between the farthest and nearest layer stays still: near layers drift out, far layers recede,
-so each layer only moves half as much for the same sense of depth. By default the subject and background separate by up to 10% of the card width.
+so each layer only moves half as much for the same sense of depth. By default the subject and background separate by up to 6% of the card width.
+
+**Depth inside each layer too (relief).** When a card carries a depth map, each layer's image is drawn on a WebGL mesh that moves every pixel a little more by its depth. Together with the layer translation this forms one continuous depth field: how far a pixel moves depends only on its own depth, not on which layer it was put in. With layer translation alone the subject slides in front of the background like a paper cutout, and the ground right in front of the camera moves together with the distant sky, which gets the depth wrong. The approach follows depthy (MIT) and Facebook 3D Photos, rebuilt for the layered structure; several approaches were compared side by side on a real card, see issue #29.
 Shifting reveals a gap on the other side, so layers are scaled up to compensate, but **all layers must use the same factor** (taken from the layer that moves most).
 Previously each layer was scaled by its own amount around the card centre, so at rest the subject was bigger than the hole it left in the background and a dog's head no longer met its body.
 With one shared factor the card at rest matches the original photo pixel for pixel.

@@ -8,32 +8,40 @@
  * 试过逐像素反查（片元着色器里迭代求「这个像素原来在哪」），深度陡变处（头发和脸的交界）会折叠，
  * 画面被横着撕开。网格在陡变处只是拉伸，重叠的地方开深度测试，近的盖住远的，遮挡关系也对。
  *
- * 只给最前面的主体层做，背景层还是平的：背景层内部也起伏的话，地面、墙、照片上压的字都会跟着扭，
- * 一看就假；背景和主体之间的前后，CSS 的整层视差已经有了。
- * 主体的轮廓钉在整层的位置上（参考深度取这一层深度区间的远端），只有中间往前鼓：
- * 试过参考深度取中位数，鼻子往一边、轮廓往另一边，像鱼眼镜头那样绕着中间扭，轮廓边上还露出一道缝。
+ * 每一层都做，和整层视差是同一个深度场：一个深度为 d 的像素在屏幕上挪 c·(d − 焦平面深度)，
+ * c 是 manifest 里「每单位深度多少视差」（见 reliefLayers）。整层平移（CSS）已经挪了这一层代表深度的那一份，
+ * 这里只补「这个像素的深度 − 这一层的代表深度」那一份，所以层内起伏和层间跳变接得上，不再是两套各调各的位移。
+ * 以前只做主体层、轮廓钉在区间远端：层内和层间单位不一样，调大假、调小看不出。
+ *
+ * 每层的顶点深度只认这一层自己那段深度（见 layerGrid）：深度图是整张图的，背景层被主体挡住的那块
+ * 在深度图里是主体的深度，主体层轮廓外是背景的深度。区间外的顶点用邻居扩散补，
+ * 而不是在着色器里钳到区间边上——钳出来是一圈平台，轮廓边上一道硬折。
  *
  * 只负责「层内比整层多挪多少」这一项，整层的平移还是 CSS 做，两者方向一致、叠加。
  * 箔面也还是 CSS：画布替换的只是 .hc__art 那张图。
  * 不支持 WebGL、上下文丢了，调用方退回原来的 <img>。
  */
 
+/**
+ * 靠边多宽的一圈里位移逐渐收到 0（占卡片宽高的比例），见顶点着色器。
+ * 6 格（64 格网格的 6/64）：远景的层内位移在倾斜到头时约 4% 卡宽，摊到这么宽里，拉伸不到一倍，看不出来
+ */
+const EDGE = 6 / 64;
+
 const VERTEX = `
+#define EDGE ${EDGE.toFixed(6)}
 attribute vec2 a_uv;
 attribute float a_depth;
 uniform vec2 u_shift;
 uniform float u_ref;
-// 这一层自己的深度区间。深度图是整张图的：背景层被主体挡住的那块（补全出来的）在深度图里是主体的深度，
-// 主体层轮廓外透明的那片是背景的深度。不钳的话，背景藏在主体身后的部分被当成近处推开，
-// 主体的网格从轮廓一路拉到外面那片远处，头发边上就被扯出一圈
-uniform vec2 u_band;
 varying vec2 v_uv;
 void main() {
   v_uv = a_uv;
-  float depth = clamp(a_depth, u_band.x, u_band.y);
-  // 最外圈的顶点在垂直于边的方向上钉住：不然一挪，卡片边缘就露出一条透明缝
-  //（CSS 的放大补偿只算了整层平移，管不到这里多出来的位移）
-  vec2 free = step(0.001, a_uv) * step(a_uv, vec2(0.999));
+  float depth = a_depth;
+  // 靠边的顶点在垂直于边的方向上逐渐收住，到边上为 0：不然一挪，卡片边缘就露出一条透明缝
+  //（CSS 的放大补偿只算了整层平移，管不到这里多出来的位移）。
+  // 以前只钉最外一圈，多出来的位移全挤在最后一格里，卡边拉出一道明显的拖影；摊到靠边几格里就看不出
+  vec2 free = smoothstep(0.0, EDGE, a_uv) * smoothstep(0.0, EDGE, 1.0 - a_uv);
   // 纹理坐标 → 裁剪空间（y 朝上），再按深度差平移。z 取近为小，配合默认的 LESS 深度测试
   vec2 pos = a_uv + u_shift * (depth - u_ref) * free;
   gl_Position = vec4(pos.x * 2.0 - 1.0, 1.0 - pos.y * 2.0, 0.5 - depth * 0.5, 1.0);
@@ -64,7 +72,7 @@ const MAX_SIDE = 2048;
 const MAX_DPR = 2;
 type GL = WebGLRenderingContext | WebGL2RenderingContext;
 
-/** 一层在深度上的位置：ref 是参考深度（不额外挪的深度），[lo, hi] 是这一层自己的深度区间（见顶点着色器的 u_band） */
+/** 一层在深度上的位置：ref 是参考深度（不额外挪的深度，即整层平移对应的深度），[lo, hi] 是这一层自己的深度区间（见 layerGrid） */
 export interface ReliefLayer {
   ref: number;
   lo: number;
@@ -72,19 +80,49 @@ export interface ReliefLayer {
 }
 
 /**
- * 由各层的代表深度（由远及近）推出每层的深度区间：相邻两层之间取中点当分界。
- * 真正的切点在 manifest 里没有存（只在 generator 标签里），中点离它不远；
- * 主体层是抠出来的、深度被往前提过（见 segmenter），中点也还是落在两层之间
+ * 由 manifest 的各层（由远及近）推出每层的深度区间、参考深度，以及 perDepth：每单位深度多少视差。
+ *
+ * 视差是 segmenter 的 toParallax 由深度推出来的：视差相同的相邻层是一组（刚性边界连着），
+ * 组的代表深度取组内各层深度的均值，再线性归一到 0..1。这里按同样的分组反推回去：
+ * perDepth = 视差跨度 / 组深度跨度，每层的参考深度 = 它那一组的代表深度——
+ * 整层平移挪的正好是「代表深度」那一份，浮雕补上像素深度和它的差，合起来每个像素挪 perDepth·(d − 焦平面深度)。
+ * 整张图是一个刚体（视差全相同）时 perDepth 是 0：不做视差就也不做浮雕。
+ *
+ * 区间：相邻两层之间取中点当分界。真正的切点在 manifest 里没有存（只在 generator 标签里），中点离它不远
  */
-export function reliefLayers(depths: readonly number[]): ReliefLayer[] {
-  return depths.map((ref, i) => {
-    const prev = depths[i - 1];
-    const next = depths[i + 1];
-    const lo = prev === undefined ? 0 : (prev + ref) / 2;
-    const hi = next === undefined ? 1 : (ref + next) / 2;
-    // 参考深度取区间的远端：轮廓（深度最接近远端的地方）跟着整层走不动，越近的地方往前鼓得越多
-    return { ref: lo, lo, hi };
+export function reliefLayers(layers: readonly { depth: number; parallax: number }[]): {
+  layers: ReliefLayer[];
+  perDepth: number;
+} {
+  const groups: { parallax: number; depth: number; count: number }[] = [];
+  const groupOf = layers.map((layer) => {
+    const last = groups[groups.length - 1];
+    if (last && last.parallax === layer.parallax) {
+      last.depth += layer.depth;
+      last.count++;
+    } else {
+      groups.push({ parallax: layer.parallax, depth: layer.depth, count: 1 });
+    }
+    return groups.length - 1;
   });
+  const mean = groups.map((g) => g.depth / g.count);
+  const first = groups[0];
+  const last = groups[groups.length - 1];
+  const span = (mean[mean.length - 1] ?? 0) - (mean[0] ?? 0);
+  const perDepth = first && last && Math.abs(span) > 1e-6 ? (last.parallax - first.parallax) / span : 0;
+  const depths = layers.map((layer) => layer.depth);
+  return {
+    perDepth,
+    layers: depths.map((depth, i) => {
+      const prev = depths[i - 1];
+      const next = depths[i + 1];
+      return {
+        ref: mean[groupOf[i] ?? 0] ?? depth,
+        lo: prev === undefined ? 0 : (prev + depth) / 2,
+        hi: next === undefined ? 1 : (depth + next) / 2,
+      };
+    }),
+  };
 }
 
 export class Relief {
@@ -92,7 +130,6 @@ export class Relief {
   readonly #gl: GL;
   readonly #shift: WebGLUniformLocation | null;
   readonly #ref: WebGLUniformLocation | null;
-  readonly #band: WebGLUniformLocation | null;
   readonly #count: number;
   #lost = false;
   #destroyed = false;
@@ -102,7 +139,7 @@ export class Relief {
    * capture：要被截图（分享图、导出动图）时传 true，见 preserveDrawingBuffer。
    * displayWidth 是画布在屏幕上的 CSS 宽度（含 plane 的放大），按它乘设备像素比定画布尺寸，
    * 正对着时画布像素和屏幕像素一比一——大了小了都要被浏览器再缩放一次，画面发软；
-   * depth 是整张图的深度网格（见 sampleDepth），几层共用一份
+   * depth 是这一层自己的顶点深度（见 layerGrid）
    */
   constructor(
     art: HTMLImageElement,
@@ -188,7 +225,6 @@ export class Relief {
     gl.uniform1i(gl.getUniformLocation(program, 'u_art'), 0);
     this.#shift = gl.getUniformLocation(program, 'u_shift');
     this.#ref = gl.getUniformLocation(program, 'u_ref');
-    this.#band = gl.getUniformLocation(program, 'u_band');
 
     gl.viewport(0, 0, canvas.width, canvas.height);
     gl.enable(gl.DEPTH_TEST);
@@ -207,14 +243,13 @@ export class Relief {
 
   /**
    * shift：每单位深度差位移多少（纹理坐标，x、y 各自按宽、高）；
-   * layer：这一层的参考深度（不额外挪的那个深度）和它自己的深度区间
+   * ref：这一层的参考深度（不额外挪的那个深度）
    */
-  draw(shiftX: number, shiftY: number, layer: ReliefLayer): void {
+  draw(shiftX: number, shiftY: number, ref: number): void {
     if (this.#lost) return;
     const gl = this.#gl;
     gl.uniform2f(this.#shift, shiftX, shiftY);
-    gl.uniform1f(this.#ref, layer.ref);
-    gl.uniform2f(this.#band, layer.lo, layer.hi);
+    gl.uniform1f(this.#ref, ref);
     gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
     gl.drawElements(gl.TRIANGLES, this.#count, gl.UNSIGNED_SHORT, 0);
   }
@@ -227,22 +262,110 @@ export class Relief {
   }
 }
 
-/**
- * 把深度图采样成网格顶点上的深度（0..1，越大越近）。
- * 用 2D 画布缩到 (GRID+1)² 再读像素：浏览器缩小时会做平均，正好把深度图里的锯齿和噪点抹掉
- */
-export function sampleDepth(depth: HTMLImageElement): Float32Array {
-  const side = GRID + 1;
+/** 整张图的深度（0..1，越大越近），按深度图原尺寸 */
+export interface DepthMap {
+  data: Float32Array;
+  width: number;
+  height: number;
+}
+
+export function readDepth(image: HTMLImageElement): DepthMap {
+  const width = image.naturalWidth;
+  const height = image.naturalHeight;
   const canvas = document.createElement('canvas');
-  canvas.width = side;
-  canvas.height = side;
+  canvas.width = width;
+  canvas.height = height;
   const ctx = canvas.getContext('2d', { willReadFrequently: true });
   if (!ctx) throw new Error('读不了深度图');
-  ctx.imageSmoothingQuality = 'high';
-  ctx.drawImage(depth, 0, 0, side, side);
-  const pixels = ctx.getImageData(0, 0, side, side).data;
+  ctx.drawImage(image, 0, 0);
+  const pixels = ctx.getImageData(0, 0, width, height).data;
+  const data = new Float32Array(width * height);
+  for (let i = 0; i < data.length; i++) data[i] = (pixels[i * 4] ?? 0) / 255;
+  return { data, width, height };
+}
+
+/** 区间外的顶点补完之后再磨几轮，补出来的那片和区间内的接成一张平滑的面 */
+const SMOOTH_ROUNDS = 40;
+
+/**
+ * 一层网格顶点上的深度：每个顶点取它那一格里落在 [lo, hi] 内的像素的平均；
+ * 一个都不落在区间里的顶点先由已知的邻居一圈圈往外长，再只在这些补出来的顶点上反复取邻居平均（拉普拉斯平滑），
+ * 已知的顶点不动。整层都没有区间内的像素（不该发生）就全填 fallback
+ */
+export function layerGrid(depth: DepthMap, lo: number, hi: number, fallback: number): Float32Array {
+  const side = GRID + 1;
   const out = new Float32Array(side * side);
-  for (let i = 0; i < out.length; i++) out[i] = (pixels[i * 4] ?? 0) / 255;
+  const known = new Uint8Array(side * side);
+  const { data, width, height } = depth;
+  let any = false;
+  for (let gy = 0; gy < side; gy++) {
+    const y0 = Math.max(0, Math.floor(((gy - 0.5) / GRID) * height));
+    const y1 = Math.min(height, Math.max(y0 + 1, Math.ceil(((gy + 0.5) / GRID) * height)));
+    for (let gx = 0; gx < side; gx++) {
+      const x0 = Math.max(0, Math.floor(((gx - 0.5) / GRID) * width));
+      const x1 = Math.min(width, Math.max(x0 + 1, Math.ceil(((gx + 0.5) / GRID) * width)));
+      let sum = 0;
+      let n = 0;
+      for (let y = y0; y < y1; y++) {
+        for (let x = x0; x < x1; x++) {
+          const d = data[y * width + x] ?? 0;
+          if (d >= lo && d <= hi) {
+            sum += d;
+            n++;
+          }
+        }
+      }
+      if (n > 0) {
+        out[gy * side + gx] = sum / n;
+        known[gy * side + gx] = 1;
+        any = true;
+      }
+    }
+  }
+  if (!any) return out.fill(fallback);
+
+  const neighbors = (i: number): number[] => {
+    const x = i % side;
+    const list: number[] = [];
+    if (x > 0) list.push(i - 1);
+    if (x < side - 1) list.push(i + 1);
+    if (i >= side) list.push(i - side);
+    if (i < side * (side - 1)) list.push(i + side);
+    return list;
+  };
+  // 往外长：每轮只用上一轮已经有值的邻居，不会一轮里顺着扫描方向一路拖过去
+  const filled = known.slice();
+  for (let grew = true; grew; ) {
+    grew = false;
+    const next = filled.slice();
+    for (let i = 0; i < out.length; i++) {
+      if (filled[i]) continue;
+      let sum = 0;
+      let n = 0;
+      for (const j of neighbors(i)) {
+        if (filled[j]) {
+          sum += out[j] ?? 0;
+          n++;
+        }
+      }
+      if (n > 0) {
+        out[i] = sum / n;
+        next[i] = 1;
+        grew = true;
+      }
+    }
+    filled.set(next);
+  }
+  for (let round = 0; round < SMOOTH_ROUNDS; round++) {
+    const prev = out.slice();
+    for (let i = 0; i < out.length; i++) {
+      if (known[i]) continue;
+      const list = neighbors(i);
+      let sum = 0;
+      for (const j of list) sum += prev[j] ?? 0;
+      out[i] = sum / list.length;
+    }
+  }
   return out;
 }
 
