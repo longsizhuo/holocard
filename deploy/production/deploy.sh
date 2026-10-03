@@ -138,9 +138,9 @@ switch "$RELEASE"
 log "重启服务"
 if healthy; then
   report success "$SHORT"
-  # 查库、下架脚本：服务器上没装 sqlite3 命令行，用它们查、用它们下架。
+  # 查库、下架、发对外接口 key 的脚本：服务器上没装 sqlite3 命令行，用它们查、下架、发 key。
   # 不进版本目录，平铺在 /opt/holocard 下，运维文档里的 cd /opt/holocard && node db.mjs 照旧能用
-  cp "$TREE/scripts/db.mjs" "$TREE/scripts/takedown.mjs" "$APP_ROOT/"
+  cp "$TREE/scripts/db.mjs" "$TREE/scripts/takedown.mjs" "$TREE/scripts/apikey.mjs" "$APP_ROOT/"
   echo "$SHA" >"$STATE_DIR/deployed"
   # 各留最近几个版本，回滚够用
   for root in "$WEB_ROOT" "$APP_ROOT"; do

@@ -230,6 +230,31 @@ It is read from the delete-token record (each finished card stores its id and to
 The cards themselves live on the server and show as "Expired" once they are gone. Hand-made albums used to exist too; with few people using them, only this automatic one is kept for now.
 Grid thumbnails (`/api/layers/<id>/thumb.jpg`, longest side 480) are made when layering finishes; early cards that never stored an original get one on first request, stacked from their layers, made once per card and queued one at a time. Code: `src/demo/albums-ui.ts`.
 
+## Public API (allowlisted)
+
+For a few known callers. Keys are issued by the site owner (see "API keys" in deploy/README.md); there is no self-service sign-up.
+Cards made through the API are private: only the key that submitted one can read, download or delete it; they cannot be shared or exported, and they are **deleted automatically 24 hours after submission**, so store the results yourself.
+Nudity detection runs before a card is delivered, and high scores are rejected outright (web uploads are only logged). Web users go first in the queue.
+
+```bash
+# Submit an image (JPEG / PNG / WebP / AVIF / HEIC, up to 16MB); returns 202 and the card id
+curl -X POST https://holocard.longsizhuo.com/v1/cards \
+  -H "Authorization: Bearer hc_..." -H "Content-Type: image/jpeg" --data-binary @photo.jpg
+
+# Poll: queued → running → done / failed. When done, the response carries the manifest (format below) and a URL for every file
+curl https://holocard.longsizhuo.com/v1/cards/<id> -H "Authorization: Bearer hc_..."
+
+# Download files (manifest.json, layer-N.webp, original.*), with the key as well
+curl -O https://holocard.longsizhuo.com/v1/cards/<id>/files/layer-0.webp -H "Authorization: Bearer hc_..."
+
+# Delete early if you no longer need it
+curl -X DELETE https://holocard.longsizhuo.com/v1/cards/<id> -H "Authorization: Bearer hc_..."
+```
+
+Limits: 50 cards per key per 24 hours by default (set when the key is issued), at most 3 queued or processing at once, and 500 a day across all keys.
+Over the limit you get 429 (`quota_exceeded`, `too_many_in_flight`) or 503 (`api_daily_limit`, `queue_full`).
+A failed card has `error.code` set to `nsfw_rejected`, `moderation_unavailable` (detection unavailable, so the card is refused) or `processing_failed`.
+
 ## The `.layers` format
 
 This format decouples the algorithm from the renderer. Anything that produces it can feed the renderer, and the renderer can be used on its own:

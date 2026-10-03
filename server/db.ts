@@ -59,6 +59,26 @@ export interface CardRow {
   nsfw: number | null;
   /** 分数来自哪个部位（NudeNet 的类名，比如 FEMALE_BREAST_EXPOSED）。翻记录时不用打开图片也知道是什么 */
   nsfw_part: string | null;
+  /** 从哪来：web 是网页上传，api 是对外接口（/v1，见 api.ts） */
+  source: CardSource;
+  /** api 卡是哪个 key 提交的（api_keys.id）。只有这个 key 能看、能下、能删 */
+  api_key: string | null;
+}
+
+export type CardSource = 'web' | 'api';
+
+/**
+ * 对外接口的 key。只由站长用 scripts/apikey.mjs 发，不自助申请。
+ * 库里只存哈希：库文件泄露了，拿到的也不是能用的 key
+ */
+export interface ApiKeyRow {
+  id: string;
+  name: string;
+  hash: string;
+  created_at: number;
+  revoked_at: number | null;
+  /** 这个 key 每 24 小时最多提交几张 */
+  daily_limit: number;
 }
 
 const SCHEMA = `
@@ -89,6 +109,15 @@ CREATE TABLE IF NOT EXISTS cards (
 );
 CREATE INDEX IF NOT EXISTS cards_status  ON cards(status);
 CREATE INDEX IF NOT EXISTS cards_created ON cards(created_at);
+
+CREATE TABLE IF NOT EXISTS api_keys (
+  id          TEXT PRIMARY KEY,
+  name        TEXT NOT NULL,
+  hash        TEXT NOT NULL UNIQUE,
+  created_at  INTEGER NOT NULL,
+  revoked_at  INTEGER,
+  daily_limit INTEGER NOT NULL
+);
 `;
 
 /** 可以被更新的列。白名单，避免把任意键名拼进 SQL */
@@ -133,6 +162,10 @@ export class CardDb {
     const columns = new Set((this.#db.prepare('PRAGMA table_info(cards)').all() as { name: string }[]).map((c) => c.name));
     if (!columns.has('nsfw')) this.#db.exec('ALTER TABLE cards ADD COLUMN nsfw REAL');
     if (!columns.has('nsfw_part')) this.#db.exec('ALTER TABLE cards ADD COLUMN nsfw_part TEXT');
+    // 对外接口之前建的库：存量卡都是网页传的
+    if (!columns.has('source')) this.#db.exec("ALTER TABLE cards ADD COLUMN source TEXT NOT NULL DEFAULT 'web'");
+    if (!columns.has('api_key')) this.#db.exec('ALTER TABLE cards ADD COLUMN api_key TEXT');
+    this.#db.exec('CREATE INDEX IF NOT EXISTS cards_api_key ON cards(api_key, created_at)');
     // 性能埋点（见 perf.ts）也放这个库里：同一个进程写，同一个脚本（scripts/db.mjs）查
     this.#db.exec(PERF_SCHEMA);
   }
@@ -142,8 +175,9 @@ export class CardDb {
       .prepare(
         `INSERT INTO cards (id, status, stage, error, created_at, updated_at,
            original_url, original_type, original_bytes, source_width, source_height,
-           result_url, layer_count, shared, shared_at, hits, last_hit_at, delete_token, nsfw, nsfw_part)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+           result_url, layer_count, shared, shared_at, hits, last_hit_at, delete_token, nsfw, nsfw_part,
+           source, api_key)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       )
       .run(
         row.id,
@@ -166,6 +200,8 @@ export class CardDb {
         row.delete_token,
         row.nsfw,
         row.nsfw_part,
+        row.source,
+        row.api_key,
       );
   }
 
@@ -211,6 +247,31 @@ export class CardDb {
     return this.#db
       .prepare('SELECT * FROM cards WHERE status = ? ORDER BY created_at')
       .all(status) as unknown as CardRow[];
+  }
+
+  /** 按哈希找一个没吊销的 key */
+  apiKeyByHash(hash: string): ApiKeyRow | null {
+    const row = this.#db.prepare('SELECT * FROM api_keys WHERE hash = ? AND revoked_at IS NULL').get(hash);
+    return (row as ApiKeyRow | undefined) ?? null;
+  }
+
+  /**
+   * 某个 key（不给就是所有 key）从 since 起提交了几张，删掉、过期的也算：额度按提交算，不按留存算。
+   * 额度直接数库，不另建计数表：服务每次发版都重启，内存里的计数会清零
+   */
+  apiSubmittedSince(since: number, key?: string): number {
+    const row = key
+      ? this.#db.prepare("SELECT COUNT(*) AS n FROM cards WHERE source = 'api' AND api_key = ? AND created_at >= ?").get(key, since)
+      : this.#db.prepare("SELECT COUNT(*) AS n FROM cards WHERE source = 'api' AND created_at >= ?").get(since);
+    return Number((row as { n: number }).n);
+  }
+
+  /** 某个 key 现在排着队、正在处理的有几张 */
+  apiInFlight(key: string): number {
+    const row = this.#db
+      .prepare("SELECT COUNT(*) AS n FROM cards WHERE api_key = ? AND status IN ('queued', 'running')")
+      .get(key);
+    return Number((row as { n: number }).n);
   }
 
   /** 记一条性能埋点，字段已经在 perf.ts 里校验过 */

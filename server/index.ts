@@ -22,7 +22,7 @@
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
 import { createReadStream, existsSync, readFileSync } from 'node:fs';
 import { availableParallelism } from 'node:os';
-import { mkdir, rename, rm, writeFile, readFile, readdir, stat } from 'node:fs/promises';
+import { mkdir, rename, rm, writeFile, readFile, readdir, stat, statfs } from 'node:fs/promises';
 import { randomUUID, timingSafeEqual } from 'node:crypto';
 import { basename, dirname, extname, join, resolve, sep } from 'node:path';
 import { env } from '@huggingface/transformers';
@@ -45,7 +45,8 @@ import {
 } from '../src/i18n/core';
 import { renderPreview, PREVIEW_HEIGHT, PREVIEW_WIDTH } from './preview';
 import { recordHit, flushHits, sweepCards, expiresAt, importLegacy } from './cards';
-import { CardDb, type CardRow } from './db';
+import { CardDb, type ApiKeyRow, type CardRow, type CardSource } from './db';
+import { bearerKey, hashApiKey } from './apikeys';
 import { parsePerf } from './perf';
 import { detectNudity } from './moderation';
 import {
@@ -67,8 +68,25 @@ const DB_PATH =
 const MAX_UPLOAD = Number(process.env.HOLOCARD_MAX_UPLOAD ?? 16 * 1024 * 1024);
 /** 同时处理几张。这台机器 4 核且已有其他负载，多了只会互相拖慢并吃满内存 */
 const CONCURRENCY = Number(process.env.HOLOCARD_CONCURRENCY ?? 1);
-/** 队列排到这么长就直接拒绝，让用户立刻知道，而不是排十分钟 */
+/** 队列排到这么长就直接拒绝，让用户立刻知道，而不是排十分钟。只数网页的，对外接口另算（MAX_API_QUEUE） */
 const MAX_QUEUE = Number(process.env.HOLOCARD_MAX_QUEUE ?? 12);
+/**
+ * 对外接口（/v1）在队列里最多同时有几张。网页任务总是插在接口任务前面（见 enqueue），
+ * 再加这个上限，接口怎么刷都挤不掉网页用户
+ */
+const MAX_API_QUEUE = Number(process.env.HOLOCARD_MAX_API_QUEUE ?? 6);
+/** 一个 key 同时最多几张在排队或处理中 */
+const API_KEY_IN_FLIGHT = 3;
+/**
+ * 所有 key 加起来每 24 小时最多几张。单机一张半分钟到一分钟，一天安全能做一千出头，
+ * 网页实际只用掉百分之一左右；这个上限保证接口最多占两成
+ */
+const API_DAILY_LIMIT = Number(process.env.HOLOCARD_API_DAILY_LIMIT ?? 500);
+/**
+ * 产物目录所在的盘剩下不到这么多就不收上传。和 Postgres 等别的服务共用根分区，
+ * 有人持续上传把盘写满，挂的不只是这个服务
+ */
+const MIN_FREE_BYTES = Number(process.env.HOLOCARD_MIN_FREE_GB ?? 5) * 1024 ** 3;
 /**
  * 保留策略。
  *
@@ -392,7 +410,31 @@ function pumpPreviews(): void {
  * 以前最多 12 张 × 16MB 堆在内存里，而且服务一重启（每次发版都会）排队的任务就全丢了。
  */
 const queue: string[] = [];
+/** 队列里哪些是对外接口的任务。网页任务插到它们前面，满不满也分开数 */
+const apiJobs = new Set<string>();
 let running = 0;
+
+/**
+ * 入队。网页任务插在第一个接口任务前面：接口排在后面，网页用户最多多等正在跑的那一张。
+ * 不抢占正在跑的，那张做到一半扔掉太浪费
+ */
+function enqueue(id: string, source: CardSource): void {
+  if (source === 'api') {
+    apiJobs.add(id);
+    queue.push(id);
+    return;
+  }
+  const at = queue.findIndex((queued) => apiJobs.has(queued));
+  if (at < 0) queue.push(id);
+  else queue.splice(at, 0, id);
+}
+
+/** 从队列里拿掉（删卡时） */
+function dequeue(id: string): void {
+  const at = queue.indexOf(id);
+  if (at >= 0) queue.splice(at, 1);
+  apiJobs.delete(id);
+}
 
 /*
  * 卡册缩略图（图怎么做见 images.ts 的 makeThumb）。
@@ -472,6 +514,8 @@ function fail(
   error: string,
   params?: Record<string, string | number>,
 ): void {
+  // 限流、排满、盘满这几种拒绝记一行：不记的话，被刷的时候日志里什么都看不出来
+  if (status === 429 || status === 503 || status === 507) console.warn(`[reject] ${status} ${code}`);
   json(res, status, { error, code, ...(params ? { params } : {}) });
 }
 
@@ -623,6 +667,24 @@ async function runJob(id: string): Promise<void> {
     );
     await writeFile(join(dir, 'manifest.json'), JSON.stringify(set.manifest));
 
+    // 处理的这几十秒里被删了：刚写下的产物不能留，状态也不能改回 done
+    if (db.get(id)?.status === 'deleted') {
+      finishJob(id, false);
+      await rm(dir, { recursive: true, force: true }).catch(() => undefined);
+      return;
+    }
+
+    // 对外接口处理的是别人的照片：裸露识别做完才交付，分数高的直接拒绝、文件全删（网页只记录不拦）
+    if (card.source === 'api') {
+      const rejection = await screenApiCard(id, file);
+      if (rejection) {
+        finishJob(id, false);
+        await rm(dir, { recursive: true, force: true }).catch(() => undefined);
+        db.update(id, { status: 'error', stage: null, error: rejection });
+        return;
+      }
+    }
+
     db.update(id, {
       status: 'done',
       stage: 'done',
@@ -631,6 +693,8 @@ async function runJob(id: string): Promise<void> {
       result_url: `${PUBLIC_ORIGIN}/c/${id}`,
     });
     finishJob(id, true);
+    // 接口的卡不进卡册、识别也已经做过了
+    if (card.source === 'api') return;
     // 缩略图顺手做掉，卡册里第一次打开时就不用现做了。不等它，也不让它的失败影响这张卡
     void ensureThumb(id);
     // 裸露识别（只记录不拦，见 moderation.ts）。卡已经是 done 了，用户不用等它；
@@ -638,6 +702,11 @@ async function runJob(id: string): Promise<void> {
     await recordNsfw(id, file);
   } catch (error) {
     finishJob(id, false);
+    // 处理途中被删了（删卡会把目录删掉，写文件当然失败）：保持 deleted，不改成 error
+    if (db.get(id)?.status === 'deleted') {
+      await rm(dir, { recursive: true, force: true }).catch(() => undefined);
+      return;
+    }
     db.update(id, {
       status: 'error',
       error: error instanceof Error ? error.message : String(error),
@@ -674,7 +743,20 @@ async function recordNsfw(id: string, file: string): Promise<void> {
 }
 
 /**
- * 分数到这个值就在日志里提一句，只是提示，不做任何拦截。
+ * 对外接口的卡交付前的裸露识别。返回拒绝的原因（错误码），放行就是 null。
+ * 识别不了（模型缺失、读图失败）也拒绝：替第三方处理照片，宁可不做也不盲放
+ */
+async function screenApiCard(id: string, file: string): Promise<string | null> {
+  const result = await detectNudity(file, MODEL_DIR);
+  if (!result) return 'moderation_unavailable';
+  db.update(id, { nsfw: Math.round(result.score * 1000) / 1000, nsfw_part: result.part });
+  if (result.score < NSFW_LOG_THRESHOLD) return null;
+  console.log(`[nsfw] ${id} 对外接口的卡疑似裸露，已拒绝：${result.part}（${result.score.toFixed(3)}）`);
+  return 'nsfw_rejected';
+}
+
+/**
+ * 分数到这个值就在日志里提一句，只是提示，不做任何拦截。对外接口的卡到这个值直接拒绝（screenApiCard）。
  * 依据：上线前线上 93 张正常原图离线跑过，这几个部位的最高分是 0.21；明确露出时一般在 0.5 以上
  */
 const NSFW_LOG_THRESHOLD = 0.4;
@@ -699,12 +781,114 @@ function pump(): void {
   while (running < CONCURRENCY && queue.length > 0) {
     const id = queue.shift();
     if (!id) break;
+    apiJobs.delete(id);
     running++;
     void runJob(id).finally(() => {
       running--;
       pump();
     });
   }
+}
+
+/** 产物目录所在的盘还剩多少字节。查不了就是 null，不因为这个拒收 */
+async function freeBytes(dir: string): Promise<number | null> {
+  const info = await statfs(dir).catch(() => null);
+  return info ? info.bavail * info.bsize : null;
+}
+
+/**
+ * 收一张上传：读请求体、认格式、规范化原图、查磁盘、落盘，最后插库入队。网页（/api/jobs）和对外接口（/v1/cards）共用。
+ * 失败时已经回过错误，返回 null。
+ *
+ * admit 是这次提交的额度和排队检查，不过就自己回错误、返回 false。调用方先查一遍好快速拒绝；
+ * 这里在插库入队之前再**同步**查一遍：读体、规范化、写盘都要 await，并发提交时 N 个请求能一起过了第一遍。
+ * 第二遍和插库、入队之间没有 await，node:sqlite 又是同步的，这一段是原子的
+ */
+async function acceptUpload(
+  req: IncomingMessage,
+  res: ServerResponse,
+  source: CardSource,
+  apiKey: ApiKeyRow | null,
+  admit: () => boolean,
+): Promise<CardRow | null> {
+  const limitMb = Math.round(MAX_UPLOAD / 1024 / 1024);
+  let bytes: Buffer;
+  try {
+    bytes = await readBody(req, MAX_UPLOAD);
+  } catch {
+    fail(res, 413, 'too_large', `图片超过 ${limitMb}MB 上限`, { limitMb });
+    return null;
+  }
+
+  const kind = sniffImage(bytes);
+  if (!kind) {
+    fail(res, 415, 'unsupported_image', '不是可识别的图片（支持 JPEG / PNG / WebP / AVIF / HEIC）');
+    return null;
+  }
+
+  // 先把原图规范化（摆正方向、去掉 EXIF）存下来，再入队。
+  // 解不开的图在这里就挡掉，不用排到队里才失败
+  let original;
+  try {
+    original = await normalizeOriginal(bytes);
+  } catch (error) {
+    if (error instanceof ImageError) fail(res, 415, error.code, error.message, error.params);
+    else fail(res, 415, 'unsupported_image', error instanceof Error ? error.message : '无法识别的图片');
+    return null;
+  }
+
+  const free = await freeBytes(OUT_DIR);
+  if (free !== null && free < MIN_FREE_BYTES) {
+    fail(res, 507, 'disk_full', '服务器空间不足，稍后再试');
+    return null;
+  }
+
+  // 写盘出错（权限、盘满）要在这里接住：这个处理函数外面没有兜底的 catch，抛出去整个服务就挂了
+  const id = randomUUID();
+  const dir = join(OUT_DIR, id);
+  try {
+    await mkdir(dir, { recursive: true });
+    await writeFile(join(dir, `original.${original.ext}`), original.data);
+  } catch (error) {
+    console.error(`[upload] ${id} 写原图失败`, error);
+    await rm(dir, { recursive: true, force: true }).catch(() => undefined);
+    fail(res, 500, 'store_failed', '保存图片失败，稍后再试');
+    return null;
+  }
+
+  if (!admit()) {
+    void rm(dir, { recursive: true, force: true }).catch(() => undefined);
+    return null;
+  }
+  const now = Date.now();
+  const card: CardRow = {
+    id,
+    status: 'queued',
+    stage: null,
+    error: null,
+    created_at: now,
+    updated_at: now,
+    original_url: `${PUBLIC_ORIGIN}/api/layers/${id}/original.${original.ext}`,
+    original_type: original.type,
+    original_bytes: original.data.byteLength,
+    source_width: original.width,
+    source_height: original.height,
+    result_url: null,
+    layer_count: null,
+    shared: 0,
+    shared_at: null,
+    hits: 0,
+    last_hit_at: null,
+    delete_token: randomUUID(),
+    nsfw: null,
+    nsfw_part: null,
+    source,
+    api_key: apiKey?.id ?? null,
+  };
+  db.insert(card);
+  enqueue(id, source);
+  pump();
+  return card;
 }
 
 /*
@@ -1034,6 +1218,8 @@ async function serveStatic(
     candidate = join(root, 'index.html');
     if (!SPA_ROUTES.some((route) => route.test(pathname))) status = 404;
   }
+  // 对外接口做的卡是私有的：卡片页对外当作不存在，不注入分享标签、不计访问（见下面 status === 200 的分支）
+  if (cardPath?.[1] && db.get(cardPath[1])?.source === 'api') status = 404;
 
   let body: Buffer;
   try {
@@ -1123,9 +1309,164 @@ async function sweep(): Promise<void> {
   }
 }
 
+/*
+ * 对外接口 /v1：给白名单里的少数调用方（key 由站长用 scripts/apikey.mjs 发）。用法见 README 的「对外接口」。
+ *
+ * 和网页的区别：
+ *   - 鉴权：Authorization: Bearer <key>，每张卡只有提交它的 key 能看、能下、能删
+ *   - 私有：不能分享、不能导出，公开路由（/c、/api/layers、/api/jobs）上当作不存在
+ *   - 保留：提交后 24 小时清掉（cards.ts 的 API_TTL_MS），调用方自己把结果存走
+ *   - 审核：裸露识别做完才交付，分数高的直接拒绝（screenApiCard）
+ *   - 排队：插在网页任务后面，额度按 key 和全站各算（见上面的 API_* 常量）
+ */
+
+/** 这些文件可以经 /v1 下载：清单、层图、去掉 EXIF 的原图 */
+const V1_FILE = /^(?:manifest\.json|layer-\d{1,2}\.(?:png|webp)|original\.(?:jpg|png|webp))$/;
+
+const DAY_MS = 24 * 60 * 60 * 1000;
+
+/** 对外不暴露内部的错误信息，只给错误码 */
+const V1_ERRORS = new Set(['nsfw_rejected', 'moderation_unavailable']);
+
+function apiKeyOf(req: IncomingMessage): ApiKeyRow | null {
+  const key = bearerKey(req.headers['authorization']);
+  return key ? db.apiKeyByHash(hashApiKey(key)) : null;
+}
+
+async function handleV1(req: IncomingMessage, res: ServerResponse, url: URL): Promise<void> {
+  const key = apiKeyOf(req);
+  if (!key) {
+    fail(res, 401, 'unauthorized', '缺少 API key，或者 key 无效、已吊销');
+    return;
+  }
+
+  if (req.method === 'POST' && url.pathname === '/v1/cards') {
+    const admit = (): boolean => {
+      const since = Date.now() - DAY_MS;
+      if (db.apiSubmittedSince(since, key.id) >= key.daily_limit) {
+        fail(res, 429, 'quota_exceeded', `这个 key 24 小时内最多提交 ${key.daily_limit} 张`, { limit: key.daily_limit });
+        return false;
+      }
+      if (db.apiInFlight(key.id) >= API_KEY_IN_FLIGHT) {
+        fail(res, 429, 'too_many_in_flight', `同一个 key 同时最多 ${API_KEY_IN_FLIGHT} 张在处理`, { limit: API_KEY_IN_FLIGHT });
+        return false;
+      }
+      if (db.apiSubmittedSince(since) >= API_DAILY_LIMIT) {
+        fail(res, 503, 'api_daily_limit', '对外接口今天的总量用完了，明天再试');
+        return false;
+      }
+      if (apiJobs.size >= MAX_API_QUEUE) {
+        fail(res, 503, 'queue_full', `排队的太多（${apiJobs.size} 个在等），稍后再试`, { queued: apiJobs.size });
+        return false;
+      }
+      return true;
+    };
+    if (!admit()) return;
+    const card = await acceptUpload(req, res, 'api', key, admit);
+    if (!card) return;
+    json(res, 202, {
+      id: card.id,
+      status: 'queued',
+      position: queue.indexOf(card.id) + 1,
+      url: `${PUBLIC_ORIGIN}/v1/cards/${card.id}`,
+    });
+    return;
+  }
+
+  const match = /^\/v1\/cards\/([0-9a-f-]{36})(?:\/files\/([\w.-]+))?$/.exec(url.pathname);
+  const card = match ? db.get(match[1] ?? '') : null;
+  // 别的 key 的卡、删掉的、过期的，一律当作不存在
+  if (!match || !card || card.api_key !== key.id || ['deleted', 'expired', 'removed'].includes(card.status)) {
+    fail(res, 404, 'card_not_found', '这张卡不存在或已过期');
+    return;
+  }
+  const dir = join(OUT_DIR, card.id);
+  const fileName = match[2];
+
+  if (req.method === 'GET' && fileName === undefined) {
+    const base = `${PUBLIC_ORIGIN}/v1/cards/${card.id}`;
+    const position = card.status === 'queued' ? queue.indexOf(card.id) + 1 : 0;
+    const eta =
+      card.status === 'running' ? runningEta(card.id) : card.status === 'queued' ? queuedEta(position, MATTE_READY) : null;
+    const body: Record<string, unknown> = {
+      id: card.id,
+      status: card.status === 'error' ? 'failed' : card.status,
+      stage: card.stage,
+      position,
+      ...(eta === null ? {} : { eta: Math.round(eta) }),
+      expiresAt: new Date(expiresAt(card, TTL_MS, KEEP_DOUBLINGS_CAP)).toISOString(),
+    };
+    if (card.status === 'error') {
+      body['error'] = { code: card.error && V1_ERRORS.has(card.error) ? card.error : 'processing_failed' };
+    }
+    if (card.status === 'done') {
+      try {
+        const manifest = JSON.parse(await readFile(join(dir, 'manifest.json'), 'utf8')) as LayerManifest;
+        const original = originalFile(card);
+        const names = ['manifest.json', ...manifest.layers.map((layer) => layer.file), ...(original ? [basename(original)] : [])];
+        body['manifest'] = manifest;
+        body['files'] = Object.fromEntries(names.map((name) => [name, `${base}/files/${name}`]));
+      } catch {
+        fail(res, 404, 'card_not_found', '这张卡不存在或已过期');
+        return;
+      }
+    }
+    json(res, 200, body);
+    return;
+  }
+
+  if (req.method === 'GET' && fileName !== undefined) {
+    if (!V1_FILE.test(fileName) || card.status !== 'done') {
+      fail(res, 404, 'file_not_found', '文件不存在');
+      return;
+    }
+    let data: Buffer;
+    try {
+      data = await readFile(join(dir, fileName));
+    } catch {
+      fail(res, 404, 'file_not_found', '文件不存在');
+      return;
+    }
+    const ext = extname(fileName);
+    res.writeHead(200, {
+      'content-type':
+        ext === '.json'
+          ? 'application/json; charset=utf-8'
+          : ext === '.webp'
+            ? 'image/webp'
+            : ext === '.png'
+              ? 'image/png'
+              : 'image/jpeg',
+      'content-length': data.byteLength,
+      // 私有的东西，CDN 和浏览器都不要缓存
+      'cache-control': 'private, no-store',
+      'x-robots-tag': 'noindex',
+    });
+    res.end(data);
+    return;
+  }
+
+  if (req.method === 'DELETE' && fileName === undefined) {
+    dequeue(card.id);
+    await rm(dir, { recursive: true, force: true }).catch(() => undefined);
+    db.update(card.id, { status: 'deleted', stage: null });
+    console.log(`[v1] ${card.id} 已被 key ${key.id} 删除`);
+    json(res, 200, { deleted: true });
+    return;
+  }
+
+  fail(res, 405, 'method_not_allowed', '不支持的请求方法');
+}
+
 const server = createServer((req, res) => {
   void (async () => {
     const url = new URL(req.url ?? '/', 'http://localhost');
+
+    // 对外接口。要在下面「GET 非 /api 路径一律当静态文件」之前接住
+    if (url.pathname === '/v1' || url.pathname.startsWith('/v1/')) {
+      await handleV1(req, res, url);
+      return;
+    }
 
     if ((req.method === 'GET' || req.method === 'HEAD') && url.pathname === '/api/health') {
       json(res, segmenterBroken ? 503 : 200, {
@@ -1192,69 +1533,16 @@ const server = createServer((req, res) => {
         });
         return;
       }
-      if (queue.length >= MAX_QUEUE) {
-        fail(res, 503, 'queue_full', `排队的人太多（${queue.length} 个在等），稍后再试`, {
-          queued: queue.length,
-        });
-        return;
-      }
-
-      const limitMb = Math.round(MAX_UPLOAD / 1024 / 1024);
-      let bytes: Buffer;
-      try {
-        bytes = await readBody(req, MAX_UPLOAD);
-      } catch {
-        fail(res, 413, 'too_large', `图片超过 ${limitMb}MB 上限`, { limitMb });
-        return;
-      }
-
-      const kind = sniffImage(bytes);
-      if (!kind) {
-        fail(res, 415, 'unsupported_image', '不是可识别的图片（支持 JPEG / PNG / WebP / AVIF / HEIC）');
-        return;
-      }
-
-      // 先把原图规范化（摆正方向、去掉 EXIF）存下来，再入队。
-      // 解不开的图在这里就挡掉，不用排到队里才失败
-      let original;
-      try {
-        original = await normalizeOriginal(bytes);
-      } catch (error) {
-        if (error instanceof ImageError) fail(res, 415, error.code, error.message, error.params);
-        else fail(res, 415, 'unsupported_image', error instanceof Error ? error.message : '无法识别的图片');
-        return;
-      }
-
-      const id = randomUUID();
-      const now = Date.now();
-      await mkdir(join(OUT_DIR, id), { recursive: true });
-      await writeFile(join(OUT_DIR, id, `original.${original.ext}`), original.data);
-
-      const card: CardRow = {
-        id,
-        status: 'queued',
-        stage: null,
-        error: null,
-        created_at: now,
-        updated_at: now,
-        original_url: `${PUBLIC_ORIGIN}/api/layers/${id}/original.${original.ext}`,
-        original_type: original.type,
-        original_bytes: original.data.byteLength,
-        source_width: original.width,
-        source_height: original.height,
-        result_url: null,
-        layer_count: null,
-        shared: 0,
-        shared_at: null,
-        hits: 0,
-        last_hit_at: null,
-        delete_token: randomUUID(),
-        nsfw: null,
-        nsfw_part: null,
+      // 只数网页任务：对外接口的任务排在后面，另有自己的上限
+      const admit = (): boolean => {
+        const waiting = queue.length - apiJobs.size;
+        if (waiting < MAX_QUEUE) return true;
+        fail(res, 503, 'queue_full', `排队的人太多（${waiting} 个在等），稍后再试`, { queued: waiting });
+        return false;
       };
-      db.insert(card);
-      queue.push(id);
-      pump();
+      if (!admit()) return;
+      const card = await acceptUpload(req, res, 'web', null, admit);
+      if (!card) return;
 
       /*
        * 删除口令只在这里给一次。
@@ -1263,7 +1551,7 @@ const server = createServer((req, res) => {
        * 而卡一旦分享出去，id 就是公开的——口令跟着泄漏，删除入口就等于没有。
        * 提交请求的响应只有上传者自己看得到。
        */
-      json(res, 202, { id, position: queue.length, deleteToken: card.delete_token });
+      json(res, 202, { id: card.id, position: queue.indexOf(card.id) + 1, deleteToken: card.delete_token });
       return;
     }
 
@@ -1273,8 +1561,15 @@ const server = createServer((req, res) => {
       const id = shareMatch[1] ?? '';
       const dir = join(OUT_DIR, id);
       const card = db.get(id);
-      if (!card || card.status !== 'done') {
+      if (!card || card.status !== 'done' || card.source === 'api') {
         fail(res, 404, 'card_not_found', '这张卡不存在或已过期');
+        return;
+      }
+      // 只有卡的主人能分享：分享会把卡转成长期保留、公开卡片页、起浏览器渲染预览图。
+      // 以前不鉴权，任何拿到 id 的人都能替别人的卡续命
+      const shareToken = req.headers['x-holocard-token'];
+      if (!timingSafeEqualStr(typeof shareToken === 'string' ? shareToken : '', card.delete_token)) {
+        fail(res, 403, 'wrong_token', '口令不对，只有生成这张卡的人能分享它');
         return;
       }
       const now = Date.now();
@@ -1307,7 +1602,8 @@ const server = createServer((req, res) => {
     if ((req.method === 'POST' || req.method === 'GET') && exportMatch) {
       const job: ExportJob = { id: exportMatch[1] ?? '', format: (exportMatch[2] ?? 'apng') as ExportFormat };
       const card = db.get(job.id);
-      if (!card || card.status !== 'done') {
+      // 对外接口的卡是私有的，不给导出（导出是最重的操作，接口也不提供）
+      if (!card || card.status !== 'done' || card.source === 'api') {
         fail(res, 404, 'card_not_found', '这张卡不存在或已过期');
         return;
       }
@@ -1429,8 +1725,7 @@ const server = createServer((req, res) => {
       }
 
       // 还在排队的也能删：从队列里拿掉，免得删完又被处理出来。排着的导出同理
-      const queued = queue.indexOf(id);
-      if (queued >= 0) queue.splice(queued, 1);
+      dequeue(id);
       for (let i = exportQueue.length - 1; i >= 0; i--) {
         if (exportQueue[i]?.id === id) exportQueue.splice(i, 1);
       }
@@ -1458,6 +1753,11 @@ const server = createServer((req, res) => {
       (LAYER_FILE.test(fileName) || EXPORT_FILE.test(fileName))
     ) {
       const [, id, name] = fileMatch;
+      // 对外接口的卡走 /v1/cards/<id>/files（要 key），公开路由上当作不存在
+      if (db.get(id ?? '')?.source === 'api') {
+        json(res, 404, { error: '层文件不存在或已过期' });
+        return;
+      }
       // 卡册缩略图还没有就先做（见 ensureThumb）。卡已经过期、被删的做不出来，照常落到下面的 404
       if (name === 'thumb.jpg') await ensureThumb(id ?? '');
       // 导出的动图按下载处理，文件名用给用户看的那个（HoloCard_xxxx.jpg 之类）
@@ -1543,8 +1843,8 @@ const server = createServer((req, res) => {
 
     if (req.method === 'GET' && jobMatch) {
       const card = db.get(jobMatch[1] ?? '');
-      // 删掉的、过期的对前端来说都是「没有了」，不暴露内部状态
-      if (!card || card.status === 'deleted' || card.status === 'expired' || card.status === 'removed') {
+      // 删掉的、过期的对前端来说都是「没有了」，不暴露内部状态。对外接口的卡查 /v1/cards/<id>
+      if (!card || card.status === 'deleted' || card.status === 'expired' || card.status === 'removed' || card.source === 'api') {
         fail(res, 404, 'job_not_found', '任务不存在或已过期');
         return;
       }
@@ -1594,7 +1894,7 @@ if (imported > 0) console.log(`[db] 从旧格式导入了 ${imported} 张卡`);
     const file = originalFile(card);
     if (file && (await stat(file).catch(() => null))) {
       db.update(card.id, { status: 'queued', stage: null });
-      queue.push(card.id);
+      enqueue(card.id, card.source);
       resumed++;
     } else {
       db.update(card.id, { status: 'error', error: '服务重启，原图丢失' });

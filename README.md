@@ -230,6 +230,31 @@ CSS 变量名（`--pointer-x`、`--background-x`、`--card-opacity` 等）刻意
 卡片本身在服务端，过期或删掉了显示「已过期」。以前还能自己建卡册、把卡加进去，用的人还不多，先只留这一本自动记的。
 网格里的缩略图（`/api/layers/<id>/thumb.jpg`，最长边 480）在分层完成时顺手做好；早期没存原图的卡，第一次有人要时用各层叠出来的画面现做，同一张卡只做一次、所有卡排队一次一张。代码在 `src/demo/albums-ui.ts`。
 
+## 对外接口（白名单）
+
+给认识的少数调用方用，key 由站长发（见 deploy/README.md「对外接口的 key」），不开放自助申请。
+接口做的卡是私有的：只有提交它的 key 能看、能下载、能删，不能分享、不能导出，**提交后 24 小时自动清掉**，结果请自己存走。
+裸露识别做完才交付，分数高的直接拒绝（网页上传只记录不拦）。排队时网页用户优先。
+
+```bash
+# 提交一张图（JPEG / PNG / WebP / AVIF / HEIC，16MB 以内），返回 202 和卡片 id
+curl -X POST https://holocard.longsizhuo.com/v1/cards \
+  -H "Authorization: Bearer hc_..." -H "Content-Type: image/jpeg" --data-binary @photo.jpg
+
+# 轮询状态：queued → running → done / failed。done 时带 manifest（格式见下文 .layers）和每个文件的下载地址
+curl https://holocard.longsizhuo.com/v1/cards/<id> -H "Authorization: Bearer hc_..."
+
+# 下载文件（manifest.json、layer-N.webp、original.*），同样要带 key
+curl -O https://holocard.longsizhuo.com/v1/cards/<id>/files/layer-0.webp -H "Authorization: Bearer hc_..."
+
+# 不要了可以提前删
+curl -X DELETE https://holocard.longsizhuo.com/v1/cards/<id> -H "Authorization: Bearer hc_..."
+```
+
+额度：每个 key 每 24 小时默认 50 张（发 key 时可以改），同时最多 3 张在排队或处理中；所有 key 加起来每天 500 张。
+超了回 429（`quota_exceeded`、`too_many_in_flight`）或 503（`api_daily_limit`、`queue_full`）。
+失败时 `error.code` 是 `nsfw_rejected`（裸露识别拒绝）、`moderation_unavailable`（识别不可用，宁可不做）或 `processing_failed`。
+
 ## `.layers` 格式
 
 这个格式把算法和渲染解耦。任何能产出它的东西都能喂给渲染器，渲染器也可以被单独拿去用——

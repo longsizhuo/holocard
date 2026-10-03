@@ -25,8 +25,15 @@ export function keepMs(card: CardRow, baseMs: number, doublingsCap: number): num
   return baseMs * Math.pow(2, doublings - 1);
 }
 
-/** 到期时间。没分享过的从产出算起，分享过的从最后一次访问算起 */
+/**
+ * 对外接口（/v1）做的卡留多久，从提交算起。
+ * 处理的是别人的照片，调用方拿到结果就该自己存走，我们不替他长期保管
+ */
+export const API_TTL_MS = 24 * 60 * 60 * 1000;
+
+/** 到期时间。没分享过的从产出算起，分享过的从最后一次访问算起；对外接口的卡一律提交后 24 小时 */
 export function expiresAt(card: CardRow, baseMs: number, doublingsCap: number): number {
+  if (card.source === 'api') return card.created_at + API_TTL_MS;
   const from = card.shared ? (card.last_hit_at ?? card.created_at) : card.created_at;
   return from + keepMs(card, baseMs, doublingsCap);
 }
@@ -154,6 +161,8 @@ export async function importLegacy(
       delete_token: typeof token === 'string' ? token : randomUUID(),
       nsfw: null,
       nsfw_part: null,
+      source: 'web',
+      api_key: null,
     });
     imported++;
   }
