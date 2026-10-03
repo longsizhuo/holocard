@@ -40,7 +40,12 @@ export interface HoloCardOptions {
    * 有深度图就建画布，0 时画布照样在、只是不挪，和平的一样；所以运行时随时能开关
    */
   relief: number;
+  /** 这张卡要被截图（服务端截分享图、导出动图）。浮雕画布要保留绘图缓冲，截图时才读得到 */
+  capture: boolean;
 }
+
+/** 浮雕的上下文被系统收走后最多重建几次。反复被收走说明这台设备扛不住，就退回平的 */
+const MAX_RELIEF_REBUILDS = 3;
 
 /**
  * 这张卡的浮雕现在怎样：
@@ -52,13 +57,14 @@ export interface HoloCardOptions {
 export type ReliefState = 'active' | 'pending' | 'no-depth' | 'unsupported';
 
 /** 浮雕开着时的默认强度，见 HoloCardOptions.relief */
-export const DEFAULT_RELIEF = 1;
+export const DEFAULT_RELIEF = 0.6;
 
 const DEFAULT_OPTIONS: HoloCardOptions = {
   // 以前是 0.06、而且只有主体在动，用户反馈分层感太弱（issue #3 第 3 条）
   amplitude: 0.1,
   tiltScale: 1,
   relief: DEFAULT_RELIEF,
+  capture: false,
 };
 
 /** 跟手时的弹簧参数（上游 springInteractSettings） */
@@ -177,8 +183,19 @@ export class HoloCard {
   #halo: HaloEffect | null = null;
 
   /** 开了浮雕的层：画布 + 这一层在深度上的位置。没有深度图或者建不起来就是空的 */
-  #reliefs: { relief: Relief; layer: ReliefLayer }[] = [];
+  /** 主体层的浮雕画布。没有深度图、建不起来、上下文被收走时是 null */
+  #relief: { relief: Relief; layer: ReliefLayer } | null = null;
+  /** 重建浮雕要用的东西，解码一次存着：上下文被收走后回到前台要重建 */
+  #reliefSource: {
+    root: HTMLDivElement;
+    grid: Float32Array;
+    art: HTMLImageElement;
+    layer: ReliefLayer;
+    rebuilds: number;
+  } | null = null;
   #reliefState: ReliefState = 'no-depth';
+  /** 浮雕状态变了（建好了、建不起来、上下文被收走）时通知宿主页面，演示页拿它刷新面板上的开关 */
+  onReliefState: ((state: ReliefState) => void) | null = null;
 
   /** 当前持有的 object URL，切换卡片和销毁时必须全部 revoke，否则内存泄漏 */
   #objectUrls: string[] = [];
@@ -349,11 +366,10 @@ export class HoloCard {
     root.append(translater);
     this.#host.append(root);
     this.#root = root;
-    this.#reliefState = set.depth ? 'pending' : 'no-depth';
-    if (set.depth) {
-      const layers = reliefLayers(manifest.layers.map((layer) => layer.depth));
-      masks.push(this.#setupRelief(root, set.depth, arts.map((art, i) => ({ art, layer: layers[i] ?? { ref: 0, lo: 0, hi: 1 } }))));
-    }
+    this.#setReliefState(set.depth ? 'pending' : 'no-depth');
+    const front = arts[arts.length - 1];
+    const frontLayer = reliefLayers(manifest.layers.map((layer) => layer.depth))[arts.length - 1];
+    if (set.depth && front && frontLayer) masks.push(this.#setupRelief(root, set.depth, front, frontLayer));
     this.#ready = Promise.all(masks).then(() => undefined);
 
     this.#writeVars();
@@ -489,61 +505,85 @@ export class HoloCard {
   }
 
   /**
-   * 给每层建浮雕画布，顶替原来的 <img>。<img> 留在原处只是藏起来：
-   * 演示页、截图脚本还要读它的 src；画布的上下文丢了也要靠它顶回去。
-   * 任何一层建不起来就全部不要——一半层有浮雕一半没有，层与层的接缝会错开
+   * 给最前面那层（主体）建浮雕画布，顶替原来的 <img>。<img> 留在原处只是藏起来：
+   * 演示页、截图脚本还要读它的 src；画布的上下文被系统收走时也要靠它顶回去。
+   * 为什么只做主体层，见 relief.ts 开头
    */
-  async #setupRelief(
-    root: HTMLDivElement,
-    depthBlob: Blob,
-    arts: { art: HTMLImageElement; layer: ReliefLayer }[],
-  ): Promise<void> {
+  async #setupRelief(root: HTMLDivElement, depthBlob: Blob, art: HTMLImageElement, layer: ReliefLayer): Promise<void> {
     const url = URL.createObjectURL(depthBlob);
     this.#objectUrls.push(url);
     const depth = new Image();
     depth.src = url;
     try {
-      await Promise.all([depth.decode(), ...arts.map(({ art }) => art.decode())]);
+      await Promise.all([depth.decode(), art.decode()]);
     } catch {
-      if (this.#root === root) this.#reliefState = 'unsupported';
+      if (this.#root === root) this.#setReliefState('unsupported');
       return;
     }
     if (this.#root !== root) return; // 等解码的功夫卡片已经换掉了
-
-    const created: { relief: Relief; layer: ReliefLayer; art: HTMLImageElement }[] = [];
     try {
-      const grid = sampleDepth(depth);
-      // 画布跟着 plane 放大了 --hc-scale 倍，按放大后的宽度建。
-      // 隐藏中的卡（卡带切换时）宽度是 0，按一个常见的卡片宽度建
-      const width = (root.clientWidth || 480) * this.#scale();
-      for (const { art, layer } of arts) {
-        const relief = new Relief(art, grid, width, () => this.#dropRelief());
-        created.push({ relief, layer, art });
-      }
-    } catch (error) {
-      for (const { relief } of created) relief.destroy();
-      console.info('[holocard] 浮雕不可用，用平的层：', error instanceof Error ? error.message : error);
-      this.#reliefState = 'unsupported';
+      this.#reliefSource = { root, grid: sampleDepth(depth), art, layer, rebuilds: 0 };
+    } catch {
+      this.#setReliefState('unsupported');
       return;
     }
-    for (const { relief, art } of created) {
-      relief.canvas.className = 'hc__relief';
-      art.after(relief.canvas);
-      art.style.visibility = 'hidden';
+    this.#buildRelief();
+  }
+
+  /** 按 #reliefSource 建画布。第一次建、上下文被收走后回到前台重建，都走这里 */
+  #buildRelief(): void {
+    const source = this.#reliefSource;
+    if (!source || this.#root !== source.root || this.#relief) return;
+    let relief: Relief;
+    try {
+      // 画布跟着 plane 放大了 --hc-scale 倍，按放大后的宽度建。
+      // 隐藏中的卡（卡带切换时）宽度是 0，按一个常见的卡片宽度建
+      const width = (source.root.clientWidth || 480) * this.#scale();
+      relief = new Relief(source.art, source.grid, width, this.#options.capture, () => {
+        // 只认当前这一块：换卡、重建之后，旧画布晚到的事件不该动新的
+        if (this.#relief?.relief === relief) this.#loseRelief();
+      });
+    } catch (error) {
+      console.info('[holocard] 浮雕不可用，用平的层：', error instanceof Error ? error.message : error);
+      this.#setReliefState('unsupported');
+      return;
     }
-    this.#reliefs = created.map(({ relief, layer }) => ({ relief, layer }));
-    this.#reliefState = 'active';
+    relief.canvas.className = 'hc__relief';
+    source.art.after(relief.canvas);
+    source.art.style.visibility = 'hidden';
+    this.#relief = { relief, layer: source.layer };
+    this.#setReliefState('active');
     this.#writeVars();
   }
 
-  /** 有一块画布的 WebGL 上下文丢了（系统回收显存）：全部退回 <img>，理由同上 */
-  #dropRelief(): void {
-    for (const { relief } of this.#reliefs) {
-      relief.canvas.previousElementSibling?.removeAttribute('style');
-      relief.destroy();
+  /** 拆掉浮雕画布，<img> 重新露出来 */
+  #removeRelief(): void {
+    if (!this.#relief) return;
+    this.#relief.relief.canvas.previousElementSibling?.removeAttribute('style');
+    this.#relief.relief.destroy();
+    this.#relief = null;
+  }
+
+  /**
+   * 系统收走了 WebGL 上下文（iOS 切后台、内存紧张时常见）：先退回平的 <img>，回到前台再重建。
+   * 页面一直在前台时也会丢（GPU 重置），那就马上重建。反复丢就不再试，免得来回闪
+   */
+  #loseRelief(): void {
+    this.#removeRelief();
+    const source = this.#reliefSource;
+    if (!source || source.rebuilds >= MAX_RELIEF_REBUILDS) {
+      this.#setReliefState('unsupported');
+      return;
     }
-    this.#reliefs = [];
-    this.#reliefState = 'unsupported';
+    source.rebuilds++;
+    this.#setReliefState('pending');
+    if (document.visibilityState === 'visible') queueMicrotask(() => this.#buildRelief());
+  }
+
+  #setReliefState(state: ReliefState): void {
+    if (this.#reliefState === state) return;
+    this.#reliefState = state;
+    this.onReliefState?.(state);
   }
 
   /**
@@ -585,6 +625,15 @@ export class HoloCard {
     }
 
     if (this.#gyro) this.#bindGyro(signal);
+
+    // 浮雕的上下文切后台时被收走了：回到前台重建（见 #loseRelief）
+    document.addEventListener(
+      'visibilitychange',
+      () => {
+        if (document.visibilityState === 'visible' && this.#reliefState === 'pending') this.#buildRelief();
+      },
+      { signal },
+    );
 
     // 上游在 visibilitychange 时会把卡片整个复位，因为 svelte 的弹簧没有 dt 封顶，
     // 切回前台时攒下的时间差会把卡片甩飞。我们的循环已经把 dt 封顶（见 #ensureLoop），
@@ -741,11 +790,11 @@ export class HoloCard {
 
     // 浮雕：层内每单位深度差比整层多挪多少。和 CSS 的整层平移同方向（近处朝指针反方向），
     // 除以放大倍数是因为画布跟着 plane 放大了，同样的屏幕位移在纹理坐标里要小一些
-    if (this.#reliefs.length > 0) {
+    if (this.#relief) {
       const k = (this.#options.amplitude * this.#options.relief) / this.#scale();
       const sx = -clamp((glare.x - 50) / 50, -1, 1) * k;
       const sy = -clamp((glare.y - 50) / 50, -1, 1) * k;
-      for (const { relief, layer } of this.#reliefs) relief.draw(sx, sy, layer);
+      this.#relief.relief.draw(sx, sy, this.#relief.layer);
     }
 
     const halo = this.#halo;
@@ -769,8 +818,8 @@ export class HoloCard {
       URL.revokeObjectURL(url);
     }
     this.#objectUrls = [];
-    for (const { relief } of this.#reliefs) relief.destroy();
-    this.#reliefs = [];
+    this.#removeRelief();
+    this.#reliefSource = null;
     this.#shines = [];
     this.#haloEls = [];
     this.#halo = null;

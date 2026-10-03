@@ -127,7 +127,11 @@ function relief(): number {
 const card = new HoloCard(need<HTMLDivElement>('.deck__card'), {
   amplitude: amplitude(),
   relief: relief(),
+  // render 模式是给服务端截分享图、导出动图的
+  capture: route.mode === 'render',
 });
+// 浮雕建好、建不起来、切后台被系统收走又重建时，面板上的开关跟着变
+card.onReliefState = () => updateReliefControl();
 
 /**
  * 浮雕开关能不能用、下面那行小字写什么。开不了的原因写出来：

@@ -8,6 +8,11 @@
  * 试过逐像素反查（片元着色器里迭代求「这个像素原来在哪」），深度陡变处（头发和脸的交界）会折叠，
  * 画面被横着撕开。网格在陡变处只是拉伸，重叠的地方开深度测试，近的盖住远的，遮挡关系也对。
  *
+ * 只给最前面的主体层做，背景层还是平的：背景层内部也起伏的话，地面、墙、照片上压的字都会跟着扭，
+ * 一看就假；背景和主体之间的前后，CSS 的整层视差已经有了。
+ * 主体的轮廓钉在整层的位置上（参考深度取这一层深度区间的远端），只有中间往前鼓：
+ * 试过参考深度取中位数，鼻子往一边、轮廓往另一边，像鱼眼镜头那样绕着中间扭，轮廓边上还露出一道缝。
+ *
  * 只负责「层内比整层多挪多少」这一项，整层的平移还是 CSS 做，两者方向一致、叠加。
  * 箔面也还是 CSS：画布替换的只是 .hc__art 那张图。
  * 不支持 WebGL、上下文丢了，调用方退回原来的 <img>。
@@ -52,9 +57,14 @@ void main() {
 const GRID = 64;
 /** 画布最长边的上限。层图可能有三四千像素，按屏幕尺寸画就够，再大只是费显存 */
 const MAX_SIDE = 2048;
+/**
+ * 画布按设备像素比建，但封顶 2。三倍屏的 iPhone 上画布面积是两倍屏的 2.25 倍，
+ * 肉眼几乎看不出差别，显存却大一倍多；显存吃得越多，切后台时 WebGL 越容易被系统收走
+ */
+const MAX_DPR = 2;
 type GL = WebGLRenderingContext | WebGL2RenderingContext;
 
-/** 一层在深度上的位置：ref 是参考深度，[lo, hi] 是这一层自己的深度区间（见顶点着色器的 u_band） */
+/** 一层在深度上的位置：ref 是参考深度（不额外挪的深度），[lo, hi] 是这一层自己的深度区间（见顶点着色器的 u_band） */
 export interface ReliefLayer {
   ref: number;
   lo: number;
@@ -72,7 +82,8 @@ export function reliefLayers(depths: readonly number[]): ReliefLayer[] {
     const next = depths[i + 1];
     const lo = prev === undefined ? 0 : (prev + ref) / 2;
     const hi = next === undefined ? 1 : (ref + next) / 2;
-    return { ref: Math.min(Math.max(ref, lo), hi), lo, hi };
+    // 参考深度取区间的远端：轮廓（深度最接近远端的地方）跟着整层走不动，越近的地方往前鼓得越多
+    return { ref: lo, lo, hi };
   });
 }
 
@@ -84,14 +95,22 @@ export class Relief {
   readonly #band: WebGLUniformLocation | null;
   readonly #count: number;
   #lost = false;
+  #destroyed = false;
 
   /**
    * 建不起来（没有 WebGL、着色器编译失败）就抛错，调用方保持原来的 <img>。
+   * capture：要被截图（分享图、导出动图）时传 true，见 preserveDrawingBuffer。
    * displayWidth 是画布在屏幕上的 CSS 宽度（含 plane 的放大），按它乘设备像素比定画布尺寸，
    * 正对着时画布像素和屏幕像素一比一——大了小了都要被浏览器再缩放一次，画面发软；
    * depth 是整张图的深度网格（见 sampleDepth），几层共用一份
    */
-  constructor(art: HTMLImageElement, depth: Float32Array, displayWidth: number, onLost: () => void) {
+  constructor(
+    art: HTMLImageElement,
+    depth: Float32Array,
+    displayWidth: number,
+    capture: boolean,
+    onLost: () => void,
+  ) {
     const canvas = document.createElement('canvas');
     /*
      * 画布尺寸按屏幕上实际显示的像素来，而不是层图原尺寸：WebGL1 里非 2 的幂的纹理没有 mipmap，
@@ -99,18 +118,21 @@ export class Relief {
      * ponytail: 尺寸只在建的时候定一次，之后窗口变大会略糊，要严格的话监听尺寸变化重建
      */
     const ratio = art.naturalHeight / art.naturalWidth;
-    const want = Math.max(1, Math.round(displayWidth * (window.devicePixelRatio || 1)));
+    const want = Math.max(1, Math.round(displayWidth * Math.min(window.devicePixelRatio || 1, MAX_DPR)));
     const width = Math.min(art.naturalWidth, want, Math.round(MAX_SIDE / Math.max(1, ratio)), MAX_SIDE);
     canvas.width = Math.max(1, width);
     canvas.height = Math.max(1, Math.round(width * ratio));
 
-    // preserveDrawingBuffer：服务端截分享图、导出动图时要读得到上一次画的内容
+    /*
+     * 不开多重采样：轮廓是靠纹理 alpha 加 discard 出来的，多重采样本来就抹不平这种边，白占三四倍显存。
+     * preserveDrawingBuffer 只在要截图时开（服务端截分享图、导出动图要读得到上一次画的内容），平时每帧多一次拷贝
+     */
     const attributes: WebGLContextAttributes = {
       alpha: true,
       premultipliedAlpha: true,
-      antialias: true,
+      antialias: false,
       depth: true,
-      preserveDrawingBuffer: true,
+      preserveDrawingBuffer: capture,
     };
     // 优先 WebGL2：非 2 的幂的纹理也能做 mipmap，网格压缩处缩小采样不闪。着色器两边通用
     const gl: GL | null = canvas.getContext('webgl2', attributes) ?? canvas.getContext('webgl', attributes);
@@ -172,9 +194,11 @@ export class Relief {
     gl.enable(gl.DEPTH_TEST);
     gl.clearColor(0, 0, 0, 0);
 
+    // 切后台、内存紧张时系统会收走 WebGL 上下文。收走了就整块不要了，由调用方退回 <img>、回到前台再重建。
+    // destroy() 自己调 loseContext 也会触发这个事件，而且是排进任务里晚到的，那时这块画布已经不归调用方管了
     canvas.addEventListener('webglcontextlost', () => {
       this.#lost = true;
-      onLost();
+      if (!this.#destroyed) onLost();
     });
 
     this.canvas = canvas;
@@ -197,6 +221,7 @@ export class Relief {
 
   /** 立刻还掉 GPU 资源。浏览器同时能开的 WebGL 上下文有限（十几个），换卡时不还很快就会顶到上限 */
   destroy(): void {
+    this.#destroyed = true;
     this.#gl.getExtension('WEBGL_lose_context')?.loseContext();
     this.canvas.remove();
   }
