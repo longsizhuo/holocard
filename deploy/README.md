@@ -26,27 +26,34 @@ PR 有新推送时自动部署到 https://holocard.staging.longsizhuo.com ，给
 
 ## 日常发版
 
+合进 main 就自动上线：服务器上的 `holocard-deploy.timer` 每分钟看一次 main，有新提交就发（`deploy/production/deploy.sh`）。
+构建 → 放进 `releases/<时间>-<commit>` → 等服务手上的分层、导出都做完（最多等 10 分钟）→ 前后端一起原子切软链 →
+重启服务、30 秒内健康检查不过就切回上一版。只改了文档、部署脚本的提交不重启服务。
+同一个提交失败一次就不再重试，推新提交才会再试。进度在 GitHub 的 Deployments（production 环境）里看，
+细节看服务器上的 `journalctl -u holocard-deploy`。
+
+改了 `deploy/production/` 里的文件、合进 main 之后，在服务器上重新装一遍：
+
 ```bash
-bash scripts/deploy.sh
+sudo bash deploy/production/install.sh <.env.production 的路径>
 ```
 
-构建前端与服务 → 从 HEAD 打源码包 → 上传到 `releases/<时间>-<commit>` → 原子切软链 → 重启服务并等健康检查通过。
-工作区有未提交改动时会拒绝发版：源码包是从 HEAD 打的，不干净的话线上代码和提供下载的源码就对不上。
+手动发本地 HEAD（不用等定时器、或者发不在 main 上的提交）：`bash scripts/deploy.sh`。
 
-前端保留最近 5 个版本，回滚就是把软链指回去：
+前端、服务端各保留最近 5 个版本。回滚到旧版本：
 
 ```bash
-ssh oracle 'ls /srv/holocard-web/releases'
-ssh oracle 'cd /srv/holocard-web && ln -sfn releases/<版本> current.new && mv -T current.new current'
+ssh oracle 'touch /var/lib/holocard/paused'          # 先让定时器停手，不然一分钟后又发回 main
+ssh oracle '/usr/local/lib/holocard/deploy.sh <旧 sha>'
+ssh oracle 'rm /var/lib/holocard/paused'             # 修好之后恢复自动发版
 ```
-
-服务端回滚需要重新发一次对应的 commit（`dist-server` 是覆盖式上传，不留历史）。
 
 ## 服务器上的布局
 
 | 路径 | 内容 |
 |---|---|
-| `/opt/holocard/holocard-server.mjs` | 服务入口（ESM）；同目录的 `segment-worker.mjs` 是分层工作线程，`chunks/` 是两者共用的代码 |
+| `/opt/holocard/releases/<版本>/` + `current` 软链 | 服务端，按版本放。`holocard-server.mjs` 是入口（ESM），同目录的 `segment-worker.mjs` 是分层工作线程，`chunks/` 是两者共用的代码。systemd 的覆盖配置 `holocard.service.d/release.conf` 让服务从 `current` 启动 |
+| `/var/lib/holocard/` | 自动发版的状态：构建用的检出 `repo/`、已发的提交 `deployed`、上次试过的 `attempted`、`env.production`（埋点站点 id）、暂停开关 `paused` |
 | `/opt/holocard/node22/` | Node 22 运行时（系统自带的是 18，sharp 要求 ≥20.9） |
 | `/opt/holocard/node_modules/` | transformers.js + onnxruntime-node + sharp，约 483MB |
 | `/srv/holocard-models/` | Depth Anything V2-Small 权重（q8，27MB）；BiRefNet_lite 权重（fp32，214MB，抠主体用；不放就只按深度切层）；`nudenet/320n.onnx` 裸露识别（12MB） |

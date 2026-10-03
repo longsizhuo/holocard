@@ -1,0 +1,12 @@
+[Unit]
+Description=HoloCard 线上：main 有新提交就发版
+After=network-online.target
+
+[Service]
+Type=oneshot
+# ubuntu 用户：要用它的 gh 登录态，以及免密 sudo 重启 holocard
+User=ubuntu
+Environment=HOME=/home/ubuntu
+ExecStart=/usr/local/lib/holocard/deploy.sh --if-new
+# 构建一两分钟，等服务空闲最多十分钟，给足时间；卡死了也别永远占着
+TimeoutStartSec=20min
