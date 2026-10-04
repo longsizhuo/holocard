@@ -58,7 +58,10 @@ if (restore) {
    */
   const status = existsSync(join(live, 'manifest.json')) ? 'done' : 'error';
   const now = Date.now();
-  db.prepare('UPDATE cards SET status = ?, updated_at = ?, created_at = ?, last_hit_at = ? WHERE id = ?').run(status, now, now, now, id);
+  // 对外接口的卡不重新计时：它承诺的是提交后 24 小时清掉，额度也按 created_at 数，改了会多算一张
+  db.prepare(
+    "UPDATE cards SET status = ?, updated_at = ?, created_at = CASE WHEN source = 'api' THEN created_at ELSE ? END, last_hit_at = ? WHERE id = ?",
+  ).run(status, now, now, now, id);
   console.log(`已恢复 ${id}（${status}），保留期从现在重新算`);
 } else {
   if (card.status !== 'done' && card.status !== 'error') {

@@ -748,9 +748,10 @@ async function doShare(auto = false, id: string | null = currentId): Promise<voi
   try {
     // 预览图按服务端上的配置渲染，刚调的那一下得先存上
     await flushSave();
+    // 分享只有卡的主人能做（服务端认删除口令）：分享会让卡长期保留、公开卡片页
     const res = await fetch(`${import.meta.env.BASE_URL}api/cards/${id}/share`, {
       method: 'POST',
-      headers: apiHeaders(),
+      headers: { ...apiHeaders(), 'x-holocard-token': ownedToken(id) ?? '' },
     });
     if (!res.ok) throw await apiError(res, `HTTP ${res.status}`);
     // 等待期间换了卡，这个结果就不是当前这张的了
