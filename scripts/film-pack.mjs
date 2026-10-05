@@ -5,7 +5,7 @@
  * 用 Playwright 的虚拟时钟（page.clock）推时间、开包前停住：无头浏览器的真实帧率只有几帧，
  * 靠真实时间截图抓不到中间过程。卡带淡出这类 CSS / Web Animations 动画不归它管，照真实时间走。服务端和 verify-pack.mjs 一样在浏览器里拦下来，第一次轮询就做好。
  * 用法：先起站点（HOLOCARD_API=http://127.0.0.1:9 pnpm dev）
- *   node scripts/film-pack.mjs [--url http://127.0.0.1:5273/] [--out /tmp/film-pack]
+ *   node scripts/film-pack.mjs [--url http://localhost:5273/] [--out /tmp/film-pack]
  * 拼胶片要 ImageMagick 的 montage，没有就只留单帧。
  */
 
@@ -20,7 +20,7 @@ const arg = (name, fallback) => {
   const i = argv.indexOf(`--${name}`);
   return i >= 0 && argv[i + 1] ? argv[i + 1] : fallback;
 };
-const url = arg('url', 'http://127.0.0.1:5273/');
+const url = arg('url', 'http://localhost:5273/');
 const out = arg('out', '/tmp/film-pack');
 mkdirSync(out, { recursive: true });
 const image = fileURLToPath(new URL('../public/apple-touch-icon.png', import.meta.url));

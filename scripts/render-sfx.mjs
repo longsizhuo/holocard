@@ -4,7 +4,7 @@
  *
  * 配方就是页面里用的那份：从开发服务器上把 sfx.ts 动态 import 进来，用 OfflineAudioContext 渲染。
  * 用法：先起站点（pnpm dev），然后
- *   node scripts/render-sfx.mjs [--url http://127.0.0.1:5273/] [--out /tmp/sfx]
+ *   node scripts/render-sfx.mjs [--url http://localhost:5273/] [--out /tmp/sfx]
  */
 
 import { chromium } from 'playwright-core';
@@ -16,7 +16,7 @@ const arg = (name, fallback) => {
   const i = argv.indexOf(`--${name}`);
   return i >= 0 && argv[i + 1] ? argv[i + 1] : fallback;
 };
-const url = arg('url', 'http://127.0.0.1:5273/');
+const url = arg('url', 'http://localhost:5273/');
 const out = arg('out', '/tmp/sfx');
 mkdirSync(out, { recursive: true });
 

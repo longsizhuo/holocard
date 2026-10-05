@@ -2,7 +2,7 @@
  * 性能埋点冒烟测试：打开页面，等它自己把那一条埋点发出去，看服务端收没收；再拿几条坏数据打接口，看挡没挡住。
  *
  * 用法：先把服务跑起来（pnpm dev + pnpm dev:server，或者任何能打开首页的地址）
- *   node scripts/verify-perf.mjs [--url http://127.0.0.1:5273/] [--browser chromium|webkit|firefox]
+ *   node scripts/verify-perf.mjs [--url http://localhost:5273/] [--browser chromium|webkit|firefox]
  * 会往那个服务的库里写一条真实的埋点，别对着线上跑。
  */
 
@@ -13,7 +13,7 @@ const arg = (name, fallback) => {
   const i = argv.indexOf(`--${name}`);
   return i >= 0 && argv[i + 1] ? argv[i + 1] : fallback;
 };
-const url = arg('url', 'http://127.0.0.1:5273/');
+const url = arg('url', 'http://localhost:5273/');
 const engine = arg('browser', 'chromium');
 const endpoint = new URL('api/perf', url).href;
 

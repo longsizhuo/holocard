@@ -12,5 +12,6 @@
 - `images.ts`：sharp 实现的图片编解码，原图规范化（摆正、去 EXIF），层图转 WebP，卡册缩略图
 - `preview.ts`：无头浏览器截分享图
 - `export.ts` / `motionphoto.ts`：导出动图（GIF、APNG、安卓动态照片）
+- `dev.env`：`pnpm dev:server` 的本地默认目录（模型读 `.models/`，产物和数据库写在 `out/`）
 
 部署和服务器布局见 `deploy/README.md`。
