@@ -21,13 +21,12 @@
     <main class="page">
       <header class="page__head">
         <h1>HoloCard</h1>
-        <p class="page__sub" data-i18n="head.sub">上传一张照片，自动切成前中后景，每层各上各的箔面，渲染成闪卡。</p>
 
         <!--
           仓库直链，给人点 Star 用。页脚那个是许可证声明里的同一个地址。
           render 模式（截 OG 图）整个页头都是隐藏的，不会进分享图。
         -->
-        <!-- GitHub 按钮和语言切换放一组，一起靠右；分开放的话副标题一长，切换就被挤到下一行最左边 -->
+        <!-- 卡册、GitHub 按钮和语言切换放一组，一起靠右；窄屏放不下时整组换行，不会被拆散 -->
         <div class="page__actions">
         <!-- 我的卡册：这台设备上做过的卡，只存在本机浏览器里，见 src/demo/albums-ui.ts -->
         <button type="button" class="albums-open" id="albums-open" data-i18n="albums.open">我的卡册</button>
@@ -89,10 +88,16 @@
             上传放在最前面：它是这一页唯一的主动作。
             之前排在所有参数后面，要滚到第二屏才看得见。
           -->
-          <div class="drop" id="drop">
+          <!--
+            只放图标不放字，拖进来、点一下、键盘回车或空格都行。
+            title 既是悬停提示，也是读屏读到的按钮名（按钮没有文字时取 title），只这一处，图标不再单独读
+          -->
+          <div class="drop" id="drop" role="button" tabindex="0" title="上传照片" data-i18n-title="drop.label">
             <input type="file" id="file" accept="image/*" hidden />
-            <strong data-i18n="drop.title">拖一张照片进来</strong>
-            <span data-i18n="drop.hint">或点击选择</span>
+            <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+              <path d="M12 15V4M7.5 8.5 12 4l4.5 4.5" />
+              <path d="M4 14.5V18a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-3.5" />
+            </svg>
           </div>
 
           <div class="progress" id="progress" hidden>
@@ -126,8 +131,6 @@
           </div>
 
           <div class="panel__scroll">
-            <h2 class="panel__title" data-i18n="panel.foils">各层箔面</h2>
-            <p class="panel__lead" data-i18n="panel.lead">真实闪卡的底材是箔：主体用不透明油墨盖住所以哑光，背景不盖所以闪。</p>
             <div id="foil-list"></div>
 
             <!-- 调参是次要动作，默认折起来，省下的高度留给卡片 -->
@@ -136,10 +139,7 @@
               所以做成开关放在明面上，不藏进下面的折叠面板；选择记在本机
             -->
             <label class="toggle">
-              <span class="toggle__text">
-                <span data-i18n="panel.parallax">立体视差</span>
-                <small data-i18n="panel.parallaxHint">关掉就是一张平的实体卡</small>
-              </span>
+              <span class="toggle__text" data-i18n="panel.parallax">立体视差</span>
               <input type="checkbox" id="ctl-parallax" role="switch" checked />
             </label>
 
@@ -149,7 +149,6 @@
               <label class="field">
                 <span class="field__label"><span data-i18n="panel.amp">视差振幅</span> <output id="out-amp">10%</output></span>
                 <input id="ctl-amp" type="range" min="0" max="16" step="0.5" value="10" />
-                <small class="field__hint" data-i18n="panel.ampHint">拉到 0 卡面就是完全平的</small>
               </label>
 
               <label class="field">
@@ -160,7 +159,6 @@
               <label class="field">
                 <span class="field__label"><span data-i18n="panel.sharp">角度锐度</span> <output id="out-sharp">120</output></span>
                 <input id="ctl-sharp" type="range" min="10" max="400" step="10" value="120" />
-                <small class="field__hint" data-i18n="panel.sharpHint">越大，出五彩的倾角窗口越窄</small>
               </label>
 
               <div class="readout">

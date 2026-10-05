@@ -146,7 +146,6 @@ body {
   from { background-position: 0% 0; }
   to   { background-position: 300% 0; }
 }
-.page__sub { margin: 0; color: var(--muted); font-size: 13px; }
 
 /*
  * GitHub 入口。放页头右上角而不是只留在页脚——页脚那个要找两遍才看得见。
@@ -539,7 +538,7 @@ body {
   height: auto;
 }
 
-/* 卡带停在卡包上：面板里跟卡有关的调不了，先压暗；状态栏那句说明照常看得清 */
+/* 卡带停在卡包上：面板里跟卡有关的调不了，先压暗；状态栏（处理进度、出错）照常看得清 */
 .panel.is-pack .panel__scroll > :not(.panel__note) {
   opacity: 0.45;
   pointer-events: none;
@@ -575,14 +574,6 @@ body {
   scrollbar-width: thin;
 }
 
-.panel__title {
-  margin: 0 0 8px;
-  font-size: 11px;
-  /* 这些标题是中文，字距给到 0.14em 会散成一个个孤字 */
-  letter-spacing: 0.06em;
-  color: var(--muted);
-}
-.panel__lead { margin: 0 0 12px; font-size: 12px; line-height: 1.55; color: var(--muted); }
 .panel__note { margin: 12px 0 0; font-size: 12px; color: var(--muted); }
 
 .field { display: block; margin-bottom: 14px; }
@@ -613,8 +604,7 @@ select {
   border-top: 1px solid var(--line);
   cursor: pointer;
 }
-.toggle__text { display: grid; gap: 2px; font-size: 12px; }
-.toggle__text small { font-size: 11px; color: var(--muted); }
+.toggle__text { font-size: 12px; }
 .toggle input {
   appearance: none;
   flex: none;
@@ -667,12 +657,10 @@ select {
   position: relative;
   overflow: hidden;
   display: flex;
-  flex-direction: column;
-  gap: 2px;
+  justify-content: center;
   padding: 18px 14px;
   border: 1px solid rgba(255, 255, 255, 0.9);
   border-radius: 12px;
-  text-align: center;
   cursor: pointer;
   background: linear-gradient(135deg, var(--p2), var(--p1) 45%, var(--p4));
   box-shadow: 0 1px 0 rgba(255, 255, 255, 0.9) inset, 0 8px 22px -14px rgba(60, 50, 90, 0.5);
@@ -699,8 +687,19 @@ select {
   box-shadow: 0 1px 0 rgba(255, 255, 255, 0.9) inset, 0 14px 30px -14px rgba(60, 50, 90, 0.55);
 }
 .drop.is-over::after { animation-duration: 1.2s; }
-.drop strong { position: relative; z-index: 1; font-size: 14px; font-weight: 650; }
-.drop span { position: relative; z-index: 1; font-size: 12px; color: rgba(35, 32, 43, 0.62); }
+.drop:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+/* 上传图标：线条和卡带按钮同一套画法，压在扫光上面 */
+.drop svg {
+  position: relative;
+  z-index: 1;
+  width: 26px;
+  height: 26px;
+  fill: none;
+  stroke: rgba(35, 32, 43, 0.72);
+  stroke-width: 1.8;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
 
 .progress { font-size: 12px; color: var(--muted); }
 .progress__bar {
@@ -974,8 +973,6 @@ select {
   .deck { grid-template-columns: 36px minmax(0, 1fr) 36px; gap: 4px; }
   .deck__nav { width: 36px; height: 36px; }
   .page__head h1 { font-size: 22px; }
-  .page__sub { font-size: 12px; order: 3; }
-  /* 手机上标题和按钮一行，副标题整行放下面 */
   .gh { font-size: 12px; padding: 6px 12px; }
   .lang button { min-width: 26px; padding: 3px 6px; font-size: 11px; }
   .panel { max-height: none; }

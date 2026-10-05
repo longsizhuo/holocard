@@ -313,7 +313,8 @@ function showPackPanel(): void {
   exportBox.hidden = true;
   ownerBox.hidden = true;
   foilList.replaceChildren();
-  setText(status, 'pack.panelNote');
+  // 状态栏上可能还是上一张卡的层数，或者首屏的「正在加载素材」，跟卡包对不上，清掉
+  clearText(status);
 }
 
 function applyHalo(): void {
@@ -704,6 +705,14 @@ ctlSharp.addEventListener('input', () => {
 });
 
 drop.addEventListener('click', () => filePicker.click());
+// 上传区是 role="button" 的 div，回车、空格要自己接，和原生按钮一样能点；
+// 里面那个 input 是隐藏的，键盘选不到，不接的话只用键盘的人传不了图
+drop.addEventListener('keydown', (event) => {
+  if (event.key !== 'Enter' && event.key !== ' ') return;
+  // 空格默认会滚动页面
+  event.preventDefault();
+  filePicker.click();
+});
 filePicker.addEventListener('change', () => {
   const file = filePicker.files?.[0];
   if (file) void processImage(file);
@@ -1146,7 +1155,7 @@ async function boot(): Promise<void> {
     try {
       const set = await loadLayerSet(`${import.meta.env.BASE_URL}api/layers/${route.id}`);
       if (sharedPackDue(route.id)) {
-        // 卡包格：面板那句「开包之后就能……」由卡带写，这里不覆盖
+        // 卡包格：状态栏由卡带清空，这里不写层数
         deck.addPack(set, route.id);
         return;
       }
