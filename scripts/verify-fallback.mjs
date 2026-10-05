@@ -9,7 +9,8 @@
  *   - 503 排队满                          → 直接报错，不重传照片
  *
  * 用法：pnpm build && node scripts/verify-fallback.mjs
- * 浏览器默认用 Playwright 自带的 Chromium；用本机 Edge 的话加 HOLOCARD_BROWSER_CHANNEL=msedge
+ * 浏览器：macOS 默认借用本机 Chrome、Windows 借用 Edge（和 pnpm og 一样），其他系统用 Playwright 自带的 Chromium；
+ * 要换就设 HOLOCARD_BROWSER_CHANNEL（chrome / msedge，设成空的用自带的）
  */
 
 import { createServer } from 'node:http';
@@ -71,7 +72,10 @@ const server = createServer(async (req, res) => {
 await new Promise((ok) => server.listen(0, '127.0.0.1', ok));
 const url = `http://127.0.0.1:${server.address().port}/`;
 
-const channel = process.env.HOLOCARD_BROWSER_CHANNEL;
+// 本地一般没装 Playwright 自带的那份 Chromium，默认借用系统浏览器（和 pnpm og 一样）
+const channel =
+  process.env.HOLOCARD_BROWSER_CHANNEL ??
+  (process.platform === 'darwin' ? 'chrome' : process.platform === 'win32' ? 'msedge' : '');
 const browser = await chromium.launch({ headless: true, ...(channel ? { channel } : {}) });
 let failures = 0;
 

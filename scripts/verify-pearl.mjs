@@ -4,8 +4,9 @@
  * 改了珠光（style.css 里的渐变、pearl-keyframes.mjs 的配置）之后跑一遍；超过阈值就以失败退出。
  *
  * 用法：先把站点跑起来（pnpm dev，或者任何能打开首页的地址）
- *   node scripts/verify-pearl.mjs [--url http://127.0.0.1:5273/] [--browser chromium|webkit]
- * 浏览器：chromium 默认用 Playwright 自带的，用本机 Edge 加 HOLOCARD_BROWSER_CHANNEL=msedge；
+ *   node scripts/verify-pearl.mjs [--url http://localhost:5273/] [--browser chromium|webkit]
+ * 浏览器：chromium 在 macOS 默认借用本机 Chrome、Windows 借用 Edge（和 pnpm og 一样），其他系统用 Playwright 自带的，
+ * 要换就设 HOLOCARD_BROWSER_CHANNEL（设成空的用自带的）；
  * webkit 就是 Safari 的内核，iPhone 用户最多，混合模式、合成层这些它和 Chromium 的实现不一样，要单独比。
  */
 
@@ -18,7 +19,7 @@ const arg = (name, fallback) => {
   const i = argv.indexOf(`--${name}`);
   return i >= 0 && argv[i + 1] ? argv[i + 1] : fallback;
 };
-const url = arg('url', 'http://127.0.0.1:5273/');
+const url = arg('url', 'http://localhost:5273/');
 const engine = arg('browser', 'chromium');
 
 /** 冻结的时刻（毫秒）。覆盖起点、加速段、最快的中段、减速段，以及往回走的那一程（> 34 秒） */
@@ -40,7 +41,10 @@ const ORIGINAL = ANIMATIONS.map(
 /** 卡片的渲染和珠光无关，而且无头浏览器里时有时无，藏起来只比背景 */
 const HIDE_CARD = '.stage{visibility:hidden!important}';
 
-const channel = process.env.HOLOCARD_BROWSER_CHANNEL;
+// 本地一般没装 Playwright 自带的那份 Chromium，默认借用系统浏览器（和 pnpm og 一样）
+const channel =
+  process.env.HOLOCARD_BROWSER_CHANNEL ??
+  (process.platform === 'darwin' ? 'chrome' : process.platform === 'win32' ? 'msedge' : '');
 const browser =
   engine === 'webkit'
     ? await webkit.launch({ headless: true })

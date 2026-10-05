@@ -309,7 +309,7 @@ pnpm dev:server    # 另开一个终端：分层服务，监听 8791
 演示页默认加载一张切好的示例卡（`public/samples/demo`，就是分享图上那张），拖一张照片进去会走完整流水线。
 `pnpm dev` 会把 `/api` 代理到 8791；不起服务端也能用，会自动回退到浏览器端流水线。
 
-服务端首次运行需要本地有权重：
+服务端首次运行需要本地有权重，放在 `.models/`（`pnpm dev:server` 默认就读这里）：
 
 ```bash
 D=.models/onnx-community/depth-anything-v2-small
@@ -318,8 +318,9 @@ B=https://huggingface.co/onnx-community/depth-anything-v2-small/resolve/main
 curl -sL $B/config.json -o $D/config.json
 curl -sL $B/preprocessor_config.json -o $D/preprocessor_config.json
 curl -sL $B/onnx/model_quantized.onnx -o $D/onnx/model_quantized.onnx
-HOLOCARD_MODEL_DIR=$PWD/.models pnpm dev:server
 ```
+
+环境要求、改完代码跑哪个验证脚本、常见问题见 [DEVELOPMENT.md](DEVELOPMENT.md)。
 
 录演示 GIF（需要本机有 Edge 和 ffmpeg，开发服务要先跑着）：
 

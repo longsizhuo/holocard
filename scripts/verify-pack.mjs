@@ -10,8 +10,9 @@
  * 不需要分层服务：/api 的请求全部在浏览器里拦下来，假装服务端做好了，结果是 public/samples/demo 那张卡。
  * 用法：先把站点跑起来（后端指到一个不存在的地址，拦漏了也不会碰到线上）
  *   HOLOCARD_API=http://127.0.0.1:9 pnpm dev
- *   node scripts/verify-pack.mjs [--url http://127.0.0.1:5273/] [--out /tmp/verify-pack]
- * 浏览器默认用 Playwright 自带的 Chromium；用本机 Chrome / Edge 加 HOLOCARD_BROWSER_CHANNEL=chrome / msedge
+ *   node scripts/verify-pack.mjs [--url http://localhost:5273/] [--out /tmp/verify-pack]
+ * 浏览器：macOS 默认借用本机 Chrome、Windows 借用 Edge（和 pnpm og 一样），其他系统用 Playwright 自带的 Chromium；
+ * 要换就设 HOLOCARD_BROWSER_CHANNEL（chrome / msedge，设成空的用自带的）
  */
 
 import { chromium } from 'playwright-core';
@@ -24,7 +25,7 @@ const arg = (name, fallback) => {
   const i = argv.indexOf(`--${name}`);
   return i >= 0 && argv[i + 1] ? argv[i + 1] : fallback;
 };
-const url = arg('url', 'http://127.0.0.1:5273/');
+const url = arg('url', 'http://localhost:5273/');
 const out = arg('out', '/tmp/verify-pack');
 mkdirSync(out, { recursive: true });
 const image = fileURLToPath(new URL('../public/apple-touch-icon.png', import.meta.url));
@@ -93,7 +94,10 @@ const visible = (page, selector) => page.locator(selector).isVisible();
 const waitReady = (page) => page.waitForSelector('.pack.is-ready', { timeout: 15_000 });
 const statusText = (page) => page.locator('#status').textContent();
 
-const channel = process.env.HOLOCARD_BROWSER_CHANNEL;
+// 本地一般没装 Playwright 自带的那份 Chromium，默认借用系统浏览器（和 pnpm og 一样）
+const channel =
+  process.env.HOLOCARD_BROWSER_CHANNEL ??
+  (process.platform === 'darwin' ? 'chrome' : process.platform === 'win32' ? 'msedge' : '');
 const browser = await chromium.launch({
   ...(channel ? { channel } : {}),
   args: [

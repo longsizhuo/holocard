@@ -309,7 +309,7 @@ pnpm dev:server    # in another terminal: the layering service, listens on 8791
 The demo page loads a pre-layered sample card by default (`public/samples/demo`, the same card as in the social preview); dropping a photo runs the whole pipeline.
 `pnpm dev` proxies `/api` to 8791; without the server it still works and falls back to the in-browser pipeline.
 
-The server needs the weights locally on first run:
+The server needs the weights locally on first run, in `.models/` (where `pnpm dev:server` looks by default):
 
 ```bash
 D=.models/onnx-community/depth-anything-v2-small
@@ -318,8 +318,9 @@ B=https://huggingface.co/onnx-community/depth-anything-v2-small/resolve/main
 curl -sL $B/config.json -o $D/config.json
 curl -sL $B/preprocessor_config.json -o $D/preprocessor_config.json
 curl -sL $B/onnx/model_quantized.onnx -o $D/onnx/model_quantized.onnx
-HOLOCARD_MODEL_DIR=$PWD/.models pnpm dev:server
 ```
+
+Setup requirements, which verification script to run after a change, and common problems are in [DEVELOPMENT.md](DEVELOPMENT.md) (in Chinese).
 
 Recording a demo GIF (needs Edge and ffmpeg on the machine, and the dev servers running):
 
