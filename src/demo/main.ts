@@ -705,6 +705,14 @@ ctlSharp.addEventListener('input', () => {
 });
 
 drop.addEventListener('click', () => filePicker.click());
+// 上传区是 role="button" 的 div，回车、空格要自己接，和原生按钮一样能点；
+// 里面那个 input 是隐藏的，键盘选不到，不接的话只用键盘的人传不了图
+drop.addEventListener('keydown', (event) => {
+  if (event.key !== 'Enter' && event.key !== ' ') return;
+  // 空格默认会滚动页面
+  event.preventDefault();
+  filePicker.click();
+});
 filePicker.addEventListener('change', () => {
   const file = filePicker.files?.[0];
   if (file) void processImage(file);

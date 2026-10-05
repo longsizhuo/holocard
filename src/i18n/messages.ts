@@ -15,7 +15,7 @@ export const zh = {
   'head.star': '开源 · 给个 Star',
   'head.starTitle': '在 GitHub 上查看并 Star',
   'head.lang': '语言',
-  // 上传区只有图标，这句只给读屏和悬停提示
+  // 上传区只有图标：这句是它的悬停提示，也是读屏读到的按钮名
   'drop.label': '上传照片',
   'panel.parallax': '立体视差',
   'panel.more': '景深与炫光',

@@ -88,10 +88,13 @@
             上传放在最前面：它是这一页唯一的主动作。
             之前排在所有参数后面，要滚到第二屏才看得见。
           -->
-          <!-- 只放图标不放字，拖进来、点一下都行；名字留给读屏和悬停提示 -->
-          <div class="drop" id="drop" title="上传照片" data-i18n-title="drop.label">
+          <!--
+            只放图标不放字，拖进来、点一下、键盘回车或空格都行。
+            title 既是悬停提示，也是读屏读到的按钮名（按钮没有文字时取 title），只这一处，图标不再单独读
+          -->
+          <div class="drop" id="drop" role="button" tabindex="0" title="上传照片" data-i18n-title="drop.label">
             <input type="file" id="file" accept="image/*" hidden />
-            <svg viewBox="0 0 24 24" role="img" aria-label="上传照片" data-i18n-aria="drop.label">
+            <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
               <path d="M12 15V4M7.5 8.5 12 4l4.5 4.5" />
               <path d="M4 14.5V18a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-3.5" />
             </svg>
