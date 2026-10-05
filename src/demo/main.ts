@@ -313,7 +313,8 @@ function showPackPanel(): void {
   exportBox.hidden = true;
   ownerBox.hidden = true;
   foilList.replaceChildren();
-  setText(status, 'pack.panelNote');
+  // 状态栏上可能还是上一张卡的层数，或者首屏的「正在加载素材」，跟卡包对不上，清掉
+  clearText(status);
 }
 
 function applyHalo(): void {
@@ -1146,7 +1147,7 @@ async function boot(): Promise<void> {
     try {
       const set = await loadLayerSet(`${import.meta.env.BASE_URL}api/layers/${route.id}`);
       if (sharedPackDue(route.id)) {
-        // 卡包格：面板那句「开包之后就能……」由卡带写，这里不覆盖
+        // 卡包格：状态栏由卡带清空，这里不写层数
         deck.addPack(set, route.id);
         return;
       }

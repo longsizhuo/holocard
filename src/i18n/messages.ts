@@ -12,22 +12,16 @@ export const zh = {
   // ---------- 页面 ----------
   'meta.title': 'HoloCard — 把任意照片变成分层闪卡',
   'meta.description': '上传一张照片，自动切分前中后景，每层各上各的箔面，渲染成可交互的闪卡。',
-  'head.sub': '上传一张照片，自动切成前中后景，每层各上各的箔面，渲染成闪卡。',
   'head.star': '开源 · 给个 Star',
   'head.starTitle': '在 GitHub 上查看并 Star',
   'head.lang': '语言',
-  'drop.title': '拖一张照片进来',
-  'drop.hint': '或点击选择',
-  'panel.foils': '各层箔面',
-  'panel.lead': '真实闪卡的底材是箔：主体用不透明油墨盖住所以哑光，背景不盖所以闪。',
+  // 上传区只有图标，这句只给读屏和悬停提示
+  'drop.label': '上传照片',
   'panel.parallax': '立体视差',
-  'panel.parallaxHint': '关掉就是一张平的实体卡',
   'panel.more': '景深与炫光',
   'panel.amp': '视差振幅',
-  'panel.ampHint': '拉到 0 卡面就是完全平的',
   'panel.halo': '炫光强度',
   'panel.sharp': '角度锐度',
-  'panel.sharpHint': '越大，出五彩的倾角窗口越窄',
   'panel.readout': '当前炫光',
   'panel.foilStrength': '这一层的箔面强度',
   'foot.creditHtml':
@@ -136,7 +130,6 @@ export const zh = {
   'pack.hint': '划开，或点一下',
   'pack.failed': '这张没做成：{message}',
   'pack.dismiss': '关掉',
-  'pack.panelNote': '开包之后就能调箔面、分享和导出',
   'albums.cardGone': '已过期',
   'albums.cardN': '第 {n} 张',
 
@@ -160,24 +153,15 @@ export const en: Messages = {
   'meta.title': 'HoloCard — Turn any photo into a layered holo card',
   'meta.description':
     'Upload a photo and it is split into foreground, midground and background, each with its own holographic foil, and rendered as an interactive holo card.',
-  'head.sub':
-    'Upload a photo: it is split into foreground, midground and background, each gets its own foil, and it becomes a holo card.',
   'head.star': 'Open source · Star it',
   'head.starTitle': 'View and star on GitHub',
   'head.lang': 'Language',
-  'drop.title': 'Drop a photo here',
-  'drop.hint': 'or click to choose',
-  'panel.foils': 'Foil per layer',
-  'panel.lead':
-    'Real holo cards are printed on foil: the subject is covered with opaque ink so it stays matte, the background is not, so it shines.',
+  'drop.label': 'Upload a photo',
   'panel.parallax': 'Parallax',
-  'panel.parallaxHint': 'Off gives a flat card, like a real one',
   'panel.more': 'Depth and halo',
   'panel.amp': 'Parallax',
-  'panel.ampHint': 'At 0 the card is completely flat',
   'panel.halo': 'Halo intensity',
   'panel.sharp': 'Angle sharpness',
-  'panel.sharpHint': 'Higher means a narrower tilt window for the rainbow',
   'panel.readout': 'Current halo',
   'panel.foilStrength': 'Foil strength for this layer',
   'foot.creditHtml':
@@ -283,7 +267,6 @@ export const en: Messages = {
   'pack.hint': 'Swipe across to tear, or tap',
   'pack.failed': 'This one didn’t work out: {message}',
   'pack.dismiss': 'Close',
-  'pack.panelNote': 'Open the pack to adjust foils, share or export',
   'albums.cardGone': 'Expired',
   'albums.cardN': 'Card {n}',
 
@@ -305,24 +288,15 @@ export const ja: Messages = {
   'meta.title': 'HoloCard — どんな写真もレイヤー分けしたキラカードに',
   'meta.description':
     '写真をアップロードすると、前景・中景・背景に自動で分け、レイヤーごとにホイルを重ねて、動かせるキラカードにします。',
-  'head.sub':
-    '写真をアップロードすると、前景・中景・背景に自動で分け、レイヤーごとにホイルを重ねてキラカードにします。',
   'head.star': 'オープンソース · Star する',
   'head.starTitle': 'GitHub で見る・Star する',
   'head.lang': '言語',
-  'drop.title': '写真をここにドロップ',
-  'drop.hint': 'またはクリックして選択',
-  'panel.foils': 'レイヤーごとのホイル',
-  'panel.lead':
-    '本物のキラカードはホイルに印刷されています。主役は不透明インクで覆うのでマットに、背景は覆わないので光ります。',
+  'drop.label': '写真をアップロード',
   'panel.parallax': '立体視差',
-  'panel.parallaxHint': 'オフにすると実物のような平らなカードに',
   'panel.more': '奥行きとハロー',
   'panel.amp': '視差の強さ',
-  'panel.ampHint': '0 にするとカードは完全に平らになります',
   'panel.halo': 'ハローの強さ',
   'panel.sharp': '角度の鋭さ',
-  'panel.sharpHint': '大きいほど、虹色が出る傾きの範囲が狭くなります',
   'panel.readout': '現在のハロー',
   'panel.foilStrength': 'このレイヤーのホイルの強さ',
   'foot.creditHtml':
@@ -427,7 +401,6 @@ export const ja: Messages = {
   'pack.hint': 'なぞって開ける、またはタップ',
   'pack.failed': 'うまく作れませんでした：{message}',
   'pack.dismiss': '閉じる',
-  'pack.panelNote': 'パックを開けるとホイルの調整・共有・書き出しができます',
   'albums.cardGone': '期限切れ',
   'albums.cardN': '{n} 枚目',
 
