@@ -28,7 +28,9 @@
         -->
         <!-- 卡册、GitHub 按钮和语言切换放一组，一起靠右；窄屏放不下时整组换行，不会被拆散 -->
         <div class="page__actions">
-        <!-- 我的卡册：这台设备上做过的卡，只存在本机浏览器里，见 src/demo/albums-ui.ts -->
+        <!-- 登录（可选）：没登录是「登录」，登录了是头像和名字、点开个人中心。只在开了登录的部署上出现，见 src/demo/account-ui.ts -->
+        <button type="button" class="albums-open account-open" id="account-open" hidden></button>
+        <!-- 我的卡册：这台设备上做过的卡（登录了加上账号名下的），见 src/demo/albums-ui.ts -->
         <button type="button" class="albums-open" id="albums-open" data-i18n="albums.open">我的卡册</button>
         <a
           class="gh"
@@ -172,6 +174,12 @@
           </div>
         </aside>
       </section>
+
+      <!-- 个人中心窗口，内容由 src/demo/account-ui.ts 画；样式和卡册共用 -->
+      <dialog class="albums" id="account" aria-labelledby="account-title">
+        <button type="button" class="albums__close" aria-label="关闭" data-i18n-aria="albums.close">×</button>
+        <div class="albums__body"></div>
+      </dialog>
 
       <!-- 我的卡册窗口，内容由 src/demo/albums-ui.ts 画 -->
       <dialog class="albums" id="albums" aria-labelledby="albums-title">

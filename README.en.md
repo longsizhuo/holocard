@@ -240,9 +240,10 @@ You can sign in with an [involutionhell](https://involutionhell.com) account (th
 
 It is an authorization-code flow with PKCE: HoloCard sends you to involutionhell's consent page, you come back with a one-time code, and the server exchanges it directly with the involutionhell backend before issuing its own session. Code: `server/auth.ts`; self-check: `scripts/verify-auth.mjs`.
 
-## Public API (allowlisted)
+## Public API
 
-For a few known callers. Keys are issued by the site owner (see "API keys" in deploy/README.md); there is no self-service sign-up.
+Sign in with an involutionhell account and request a key yourself from your account panel in the header (20 cards per account per 24 hours, one key at a time, revoke and re-request whenever you like).
+For higher limits, ask the site owner, who can issue keys too (see "API keys" in deploy/README.md).
 Cards made through the API are private: only the key that submitted one can read, download or delete it; they cannot be shared or exported, and they are **deleted automatically 24 hours after submission**, so store the results yourself.
 Nudity detection runs before a card is delivered, and high scores are rejected outright (web uploads are only logged). Web users go first in the queue.
 

@@ -50,7 +50,8 @@ ssh oracle 'rm /var/lib/holocard/paused'             # 修好之后恢复自动�
 
 ## 对外接口的 key
 
-接口用法见仓库 README「对外接口」。key 只由站长发，库里只存哈希，key 本身只在发的时候显示一次：
+接口用法见仓库 README「对外接口」。登录用户可以在个人中心自己申请（每个账号 24 小时 20 张，`HOLOCARD_SELF_SERVE_DAILY_LIMIT`），
+额度要更高的由站长发。库里只存哈希，key 本身只在申请、发的时候显示一次；`list` 里自己申请的会标出 IH 账号：
 
 ```bash
 ssh oracle 'cd /opt/holocard && node22/bin/node apikey.mjs create <调用方名字> [每天上限，默认 50]'
@@ -346,7 +347,19 @@ id 通过 `.env.production` 里的 `VITE_UMAMI_ID` 在构建时注入。
 `segment-fail`（错误信息前 120 字，外加走到哪一步 `stage`：upload / server / download / browser）、
 `share`（手动点分享按钮；做完卡的自动分享不计）、`share-copy`（点「复制」）、
 `card-view`（打开卡片页，卡的主人自己刷新不计）、`delete`、`export` / `export-fail` / `export-share`（带格式）、
-`lang`（手动切换语言）。不带文件名。
+`lang`（手动切换语言）、`login`（登录完回到站里，带从哪登录的 `from`：albums / account）、
+`claim`（认领了几张 `n`）、`api-key` / `api-key-revoke`（个人中心申请、吊销 key）。不带文件名。
+
+对外接口（`/v1`）不经过浏览器，事件由服务端发进**同一个站点**（`server/umami.ts`），在「事件」里和网页的放在一起看：
+`api-submit`（`via`：self-serve 自己申请的 key / issued 站长发的）、`api-done`（`layers`、处理用时 `seconds`）、
+`api-fail`（`reason`：nsfw 之类裸露拒绝 / key_revoked / error）、`api-fetch`（调用方下载了结果，按第一层算）、
+`api-reject`（被拒的 `code`：quota_exceeded、rate_limited、queue_full…）。都带 `key`（key 的编号）和 `user`（名字）。
+
+**按用户看**：「事件」里点开某个 api-* 事件，按属性 `user` 分组，就是每个人提交、做完、失败、下载了多少。
+每个事件还带 umami 的访客标识：自己申请的 key 是 `ih:<IH 账号 id>`，站长发的是 `key:<编号>`。
+umami 按「站点 + 标识」认访客，所以同一个账号换了 key、隔了几天也是同一个访客，访客数里每个接口用户只算一个，
+不会把网页访客数刷上去；第一次见到某个人时还会登记访客属性（`name`、`account`、`via`），在「会话」的详情里看。
+本机地址上的服务端（开发、自检脚本）不发。
 
 本机和局域网地址（localhost、127.x、10.x、192.168.x…）上不加载统计：本地用生产配置构建时站点 id 也在，
 以前在 127.0.0.1 上的测试全进了线上统计。查数据时照样加 `hostname = 'holocard.longsizhuo.com'`。

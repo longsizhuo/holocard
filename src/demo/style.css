@@ -197,6 +197,10 @@ body {
   display: flex;
   align-items: center;
   gap: 8px;
+  /* 整组比屏幕还宽时（英文、日文的按钮字长，再加上登录按钮）组内换行，不把页面撑出横向滚动 */
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  max-width: 100%;
 }
 
 /*
@@ -954,6 +958,52 @@ select {
 .claim__card .athumb { border-radius: 8px; }
 .claim__card input:not(:checked) + .athumb { opacity: 0.4; }
 
+/* 页头的登录 / 个人中心按钮（account-ui.ts）：登录了是头像加名字，名字太长截断 */
+.account-open { display: inline-flex; align-items: center; gap: 6px; max-width: 12em; }
+.account-open__avatar { width: 18px; height: 18px; border-radius: 999px; object-fit: cover; flex: none; }
+.account-open__name { overflow: hidden; text-overflow: ellipsis; }
+
+/* 个人中心窗口：和卡册共用 .albums 的外壳 */
+.account__section { margin-top: 16px; padding-top: 14px; border-top: 1px solid var(--line); font-size: 13px; }
+.account__section h3 { margin: 0 0 8px; font-size: 15px; }
+.api__row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-bottom: 8px; }
+.api__info { flex: 1 1 12em; min-width: 0; overflow-wrap: anywhere; }
+.api__button {
+  padding: 6px 14px;
+  border-radius: 999px;
+  border: 1px solid var(--line);
+  background: var(--surface);
+  color: var(--fg);
+  font: inherit;
+  font-size: 12.5px;
+  font-weight: 600;
+  cursor: pointer;
+}
+.api__button--primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+.api__fresh { margin: 0 0 8px; font-weight: 600; overflow-wrap: anywhere; }
+.api__key {
+  flex: 1 1 16em;
+  min-width: 0;
+  padding: 6px 8px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  font: 12px ui-monospace, SFMono-Regular, Menlo, monospace;
+  background: var(--surface-solid);
+  color: var(--fg);
+}
+.api__hint,
+.api__note { margin: 0 0 6px; color: var(--muted); overflow-wrap: anywhere; }
+.api__note:empty { display: none; }
+.api__curl {
+  margin: 0 0 8px;
+  padding: 8px 10px;
+  border-radius: 8px;
+  background: var(--line);
+  font: 11.5px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
 .acard { display: grid; gap: 6px; }
 .acard a { display: block; border-radius: 10px; }
 .acard a:hover .athumb { box-shadow: 0 8px 20px -10px rgba(60, 50, 90, 0.7); }
@@ -1008,6 +1058,9 @@ select {
   .deck__nav { width: 36px; height: 36px; }
   .page__head h1 { font-size: 22px; }
   .gh { font-size: 12px; padding: 6px 12px; }
+  /* 窄屏上 GitHub 按钮只留图标，名字和意图靠 title 和读屏的 aria-label */
+  .gh span { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+  .gh { padding: 6px 8px; }
   .lang button { min-width: 26px; padding: 3px 6px; font-size: 11px; }
   .panel { max-height: none; }
   .panel__scroll { overflow: visible; }

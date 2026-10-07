@@ -16,6 +16,7 @@ import { onLangChange, t } from '../i18n';
 import { reducedMotion, type PackView } from './pack';
 import { createPack } from './pack-gl';
 import { sfx } from './sfx';
+import { track } from './track';
 
 const BASE = import.meta.env.BASE_URL;
 /** dialog 的 aria-labelledby 指向它，读屏软件打开窗口时能念出名字 */
@@ -145,7 +146,8 @@ function accountBox(): HTMLElement | null {
   const out = el('button', { type: 'button', className: 'account__logout', textContent: t('account.logout') });
   out.addEventListener('click', () => {
     out.disabled = true;
-    void logout().then(() => render(false));
+    // 刷新页面：页头、卡算不算「我的」都跟着变，和个人中心里的退出一样
+    void logout().then(() => location.reload());
   });
   return el(
     'div',
@@ -177,7 +179,10 @@ function claimBox(): HTMLElement | null {
     button.disabled = true;
     button.textContent = t('account.claiming');
     claimCards(chosen).then(
-      () => render(false),
+      (claimed) => {
+        track('claim', { n: claimed.length });
+        render(false);
+      },
       (error: unknown) => {
         button.disabled = false;
         button.textContent = t('account.claim');
