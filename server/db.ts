@@ -63,9 +63,24 @@ export interface CardRow {
   source: CardSource;
   /** api 卡是哪个 key 提交的（api_keys.id）。只有这个 key 能看、能下、能删 */
   api_key: string | null;
+  /**
+   * 归到哪个 IH 账号下（IH 的 user_accounts.id，见 auth.ts）。登录着做的卡、或者手动认领过的卡才有。
+   * 有了它，这张卡只认这个账号的会话：口令不再返回给任何人，认领时也换掉了
+   */
+  user_id: string | null;
 }
 
 export type CardSource = 'web' | 'api';
+
+/** 登录会话。浏览器拿着随机口令，库里只存它的哈希 */
+export interface SessionRow {
+  hash: string;
+  user_id: string;
+  name: string;
+  avatar: string | null;
+  created_at: number;
+  expires_at: number;
+}
 
 /**
  * 对外接口的 key。只由站长用 scripts/apikey.mjs 发，不自助申请。
@@ -109,6 +124,15 @@ CREATE TABLE IF NOT EXISTS cards (
 );
 CREATE INDEX IF NOT EXISTS cards_status  ON cards(status);
 CREATE INDEX IF NOT EXISTS cards_created ON cards(created_at);
+
+CREATE TABLE IF NOT EXISTS sessions (
+  hash       TEXT PRIMARY KEY,
+  user_id    TEXT NOT NULL,
+  name       TEXT NOT NULL,
+  avatar     TEXT,
+  created_at INTEGER NOT NULL,
+  expires_at INTEGER NOT NULL
+);
 
 CREATE TABLE IF NOT EXISTS api_keys (
   id          TEXT PRIMARY KEY,
@@ -166,6 +190,9 @@ export class CardDb {
     if (!columns.has('source')) this.#db.exec("ALTER TABLE cards ADD COLUMN source TEXT NOT NULL DEFAULT 'web'");
     if (!columns.has('api_key')) this.#db.exec('ALTER TABLE cards ADD COLUMN api_key TEXT');
     this.#db.exec('CREATE INDEX IF NOT EXISTS cards_api_key ON cards(api_key, created_at)');
+    // 账号之前建的库：存量卡都没有主人账号
+    if (!columns.has('user_id')) this.#db.exec('ALTER TABLE cards ADD COLUMN user_id TEXT');
+    this.#db.exec('CREATE INDEX IF NOT EXISTS cards_user ON cards(user_id, created_at)');
     // 性能埋点（见 perf.ts）也放这个库里：同一个进程写，同一个脚本（scripts/db.mjs）查
     this.#db.exec(PERF_SCHEMA);
   }
@@ -176,8 +203,8 @@ export class CardDb {
         `INSERT INTO cards (id, status, stage, error, created_at, updated_at,
            original_url, original_type, original_bytes, source_width, source_height,
            result_url, layer_count, shared, shared_at, hits, last_hit_at, delete_token, nsfw, nsfw_part,
-           source, api_key)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+           source, api_key, user_id)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       )
       .run(
         row.id,
@@ -202,6 +229,7 @@ export class CardDb {
         row.nsfw_part,
         row.source,
         row.api_key,
+        row.user_id,
       );
   }
 
@@ -287,6 +315,49 @@ export class CardDb {
       .prepare("SELECT COUNT(*) AS n FROM cards WHERE api_key = ? AND status IN ('queued', 'running')")
       .get(key);
     return Number((row as { n: number }).n);
+  }
+
+  /** 这个账号名下还在的卡，最新的在前 */
+  userCards(userId: string): string[] {
+    const rows = this.#db
+      .prepare(
+        "SELECT id FROM cards WHERE user_id = ? AND source = 'web' AND status IN ('queued', 'running', 'done') ORDER BY created_at DESC LIMIT 1000",
+      )
+      .all(userId) as { id: string }[];
+    return rows.map((row) => row.id);
+  }
+
+  /**
+   * 把一张没有主人账号的卡归到这个账号下，同时换掉口令（新口令不给任何人）：
+   * 认领之后，别的设备上、公用电脑上留着的旧口令都不再管用。
+   * 带着旧口令做条件：两个人拿同一个口令同时认领，只有一个改得到
+   */
+  claim(id: string, userId: string, oldToken: string, newToken: string): boolean {
+    const result = this.#db
+      .prepare(
+        "UPDATE cards SET user_id = ?, delete_token = ?, updated_at = ? WHERE id = ? AND user_id IS NULL AND delete_token = ? AND source = 'web'",
+      )
+      .run(userId, newToken, Date.now(), id, oldToken);
+    return Number(result.changes) > 0;
+  }
+
+  insertSession(row: SessionRow): void {
+    this.#db
+      .prepare('INSERT INTO sessions (hash, user_id, name, avatar, created_at, expires_at) VALUES (?, ?, ?, ?, ?, ?)')
+      .run(row.hash, row.user_id, row.name, row.avatar, row.created_at, row.expires_at);
+  }
+
+  session(hash: string, now: number): SessionRow | null {
+    const row = this.#db.prepare('SELECT * FROM sessions WHERE hash = ? AND expires_at > ?').get(hash, now);
+    return (row as SessionRow | undefined) ?? null;
+  }
+
+  deleteSession(hash: string): void {
+    this.#db.prepare('DELETE FROM sessions WHERE hash = ?').run(hash);
+  }
+
+  pruneSessions(now: number): number {
+    return Number(this.#db.prepare('DELETE FROM sessions WHERE expires_at <= ?').run(now).changes);
   }
 
   /** 记一条性能埋点，字段已经在 perf.ts 里校验过 */

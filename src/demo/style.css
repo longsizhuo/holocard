@@ -920,6 +920,40 @@ select {
   height: min(56vh, 460px);
 }
 
+/* 卡册顶上的账号区：登录入口，或者「已登录：名字」和认领框（albums-ui.ts） */
+.account { margin: 0 0 14px; padding: 12px; border: 1px solid var(--line); border-radius: 12px; font-size: 13px; }
+.account__hint { margin: 0 0 10px; color: var(--muted); overflow-wrap: anywhere; }
+.account__me { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.account__me span { flex: 1 1 auto; min-width: 0; overflow-wrap: anywhere; }
+.account__avatar { width: 28px; height: 28px; border-radius: 999px; object-fit: cover; }
+.account__login,
+.account__logout,
+.claim__button {
+  display: inline-block;
+  padding: 6px 14px;
+  border-radius: 999px;
+  border: 1px solid var(--line);
+  background: var(--surface);
+  color: var(--fg);
+  font: inherit;
+  font-size: 12.5px;
+  font-weight: 600;
+  text-decoration: none;
+  cursor: pointer;
+}
+.account__login,
+.claim__button { background: var(--accent); border-color: var(--accent); color: #fff; }
+.claim { margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--line); }
+.claim__title { margin: 0 0 4px; font-weight: 600; }
+.claim__hint,
+.claim__note { margin: 0 0 10px; color: var(--muted); overflow-wrap: anywhere; }
+.claim__note:empty { display: none; }
+.claim__grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(64px, 1fr)); gap: 8px; margin-bottom: 10px; }
+.claim__card { position: relative; display: block; cursor: pointer; }
+.claim__card input { position: absolute; top: 4px; left: 4px; z-index: 1; margin: 0; width: 18px; height: 18px; }
+.claim__card .athumb { border-radius: 8px; }
+.claim__card input:not(:checked) + .athumb { opacity: 0.4; }
+
 .acard { display: grid; gap: 6px; }
 .acard a { display: block; border-radius: 10px; }
 .acard a:hover .athumb { box-shadow: 0 8px 20px -10px rgba(60, 50, 90, 0.7); }

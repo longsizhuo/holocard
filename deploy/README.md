@@ -66,6 +66,21 @@ ssh oracle 'cd /opt/holocard && node22/bin/node apikey.mjs revoke <id>'    # 立
 被限流、排满、盘满拒绝的请求在日志里记一行 `[reject]`，`journalctl -u holocard | grep reject` 能看出有没有人在刷。
 产物目录所在的盘剩不到 5GB（`HOLOCARD_MIN_FREE_GB`）就不收上传，免得把和 Postgres 共用的根分区写满。
 
+## 登录（IH 通行证）
+
+用 involutionhell 账号登录，协议见 `server/auth.ts`。HoloCard 是 IH 后端里登记的 client `holocard`，回调地址
+`https://holocard.longsizhuo.com/auth/callback`。两边要配同一个 secret：
+
+- IH：`/home/ubuntu/involution-hell/.env` 里的 `SSO_HOLOCARD_SECRET`（改了要重建 backend 容器才生效）
+- HoloCard：`/etc/holocard/sso.env` 里的 `HOLOCARD_SSO_SECRET`（root 600），由 `holocard.service` 的 drop-in 用 `EnvironmentFile=` 读进来
+
+没配 secret 时登录入口不出现，其它一切照常。换码直连 `http://127.0.0.1:8080/internal/sso/token`，不走公网。
+会话 cookie 是 `__Host-hc_session`（30 天），库里只存它的哈希（`sessions` 表）；认会话改东西的请求只收 `Sec-Fetch-Site: same-origin` 的，
+挡住同站的兄弟子域（holocard-staging 跑着没合并的代码）借访客的会话。
+
+staging 被防火墙隔开、连不到 IH 后端，用假登录（`HOLOCARD_AUTH_FAKE=1`）：点登录直接登进一个测试账号 `Staging`。
+正式地址下开这个开关，服务端拒绝启动。
+
 ## 服务器上的布局
 
 | 路径 | 内容 |
@@ -246,8 +261,9 @@ ssh oracle 'cd /opt/holocard && node22/bin/node db.mjs perf 30'   # 最近 30 �
 删除：产出时服务端生成一个删除口令，**只在 `POST /api/jobs` 的响应里给一次**，
 前端存进 `localStorage`。`DELETE /api/cards/{id}` 带 `x-holocard-token` 头才能删。
 口令不放在 `GET /api/jobs/{id}` 里——那个接口任何知道 id 的人都能打，而卡一分享出去
-id 就是公开的。这个站没有账号，「所有者」就是「手上有口令的人」；用户清了浏览器数据
-就等于放弃删除权，页面上写明了这一点。
+id 就是公开的。不登录时「所有者」就是「手上有口令的人」；用户清了浏览器数据
+就等于放弃删除权，页面上写明了这一点。登录着做的、认领过的卡归到账号下：服务端不再给口令（认领时换掉），
+分享、改配置、删卡认会话（见下面「登录」）。
 
 ### 站长下架（裸露识别）
 

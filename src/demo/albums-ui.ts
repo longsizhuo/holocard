@@ -1,7 +1,8 @@
 /**
- * 我的卡册：这台设备上做过的卡，网格排列，最新的在前。
+ * 我的卡册：这台设备上做过的卡，登录了再加上账号名下的卡，网格排列，最新的在前。
  *
- * 这个站没有账号，数据就是删除口令那份记录（api.ts 的 holocard:owned），只在这台设备的浏览器里。
+ * 不登录时，数据就是删除口令那份记录（api.ts 的 holocard:owned），只在这台设备的浏览器里。
+ * 登录（用 involutionhell 账号，可选）以后账号名下的卡也在这里；这台设备上还没放进账号的，上面有个勾选认领的框。
  * 以前还能自己建卡册、把卡加进去，现在用的人还不多，先只留这一本自动记的。
  * 用原生 dialog：遮罩、Esc 关闭、焦点圈在窗口里，这些浏览器都管了。
  *
@@ -10,7 +11,7 @@
  * 一张卡都没有、或者开着「减少动态效果」时不出卡包，直接是网格。
  */
 
-import { ownedCards } from './api';
+import { account, claimCards, loginHref, logout, ownedCards, unclaimedCards } from './api';
 import { onLangChange, t } from '../i18n';
 import { reducedMotion, type PackView } from './pack';
 import { createPack } from './pack-gl';
@@ -21,6 +22,8 @@ const BASE = import.meta.env.BASE_URL;
 const TITLE_ID = 'albums-title';
 
 let dialog: HTMLDialogElement | null = null;
+/** 把错误翻成给人看的一句话（main.ts 的 describeError） */
+let describe: (error: unknown) => string = String;
 let body: HTMLElement | null = null;
 /** 正在等人开的卡包 */
 let pack: PackView | null = null;
@@ -122,6 +125,81 @@ function deal(stage: HTMLElement, grid: HTMLElement): void {
     .catch(() => undefined);
 }
 
+/** 登录入口；登录了就是「已登录：名字」、退出按钮，和认领框 */
+function accountBox(): HTMLElement | null {
+  const { login, user } = account();
+  if (!login) return null;
+  if (!user) {
+    return el(
+      'div',
+      { className: 'account' },
+      el('p', { className: 'account__hint', textContent: t('account.loginHint') }),
+      // 登录完回到这一页并接着打开卡册（main.ts 认 #albums）
+      el('a', {
+        className: 'account__login',
+        href: loginHref(`${location.pathname}${location.search}#albums`),
+        textContent: t('account.login'),
+      }),
+    );
+  }
+  const out = el('button', { type: 'button', className: 'account__logout', textContent: t('account.logout') });
+  out.addEventListener('click', () => {
+    out.disabled = true;
+    void logout().then(() => render(false));
+  });
+  return el(
+    'div',
+    { className: 'account' },
+    el(
+      'div',
+      { className: 'account__me' },
+      user.avatar && el('img', { className: 'account__avatar', src: user.avatar, alt: '', referrerPolicy: 'no-referrer' }),
+      el('span', { textContent: t('account.signedIn', { name: user.name }) }),
+      out,
+    ),
+    claimBox(),
+  );
+}
+
+/**
+ * 这台设备上还没放进账号的卡，勾选了认领。默认全勾：多数时候这就是自己的手机；
+ * 在公用电脑上能把别人留下的取消掉，所以不做成登录时自动认领
+ */
+function claimBox(): HTMLElement | null {
+  const ids = unclaimedCards();
+  if (!ids.length) return null;
+  const checks = ids.map((id) => el('input', { type: 'checkbox', checked: true, value: id }));
+  const button = el('button', { type: 'button', className: 'claim__button', textContent: t('account.claim') });
+  const note = el('p', { className: 'claim__note', role: 'status' });
+  button.addEventListener('click', () => {
+    const chosen = checks.filter((check) => check.checked).map((check) => check.value);
+    if (!chosen.length) return;
+    button.disabled = true;
+    button.textContent = t('account.claiming');
+    claimCards(chosen).then(
+      () => render(false),
+      (error: unknown) => {
+        button.disabled = false;
+        button.textContent = t('account.claim');
+        note.textContent = t('account.claimFailed', { message: describe(error) });
+      },
+    );
+  });
+  return el(
+    'div',
+    { className: 'claim' },
+    el('p', { className: 'claim__title', textContent: t('account.claimTitle', { n: ids.length }) }),
+    el('p', { className: 'claim__hint', textContent: t('account.claimHint') }),
+    el(
+      'div',
+      { className: 'claim__grid' },
+      ...ids.map((id, i) => el('label', { className: 'claim__card' }, checks[i], thumb(id))),
+    ),
+    button,
+    note,
+  );
+}
+
 function render(withPack: boolean): void {
   if (!body) return;
   const cards = ownedCards().map((cardId, index) =>
@@ -136,9 +214,14 @@ function render(withPack: boolean): void {
   const grid = cards.length ? el('div', { className: 'albums__grid' }, ...cards) : null;
   const stage = withPack && grid && !reducedMotion() ? el('div', { className: 'albums__pack' }) : null;
   if (grid && stage) grid.hidden = true;
+  const signedIn = account().user !== null;
+  const intro = signedIn
+    ? cards.length ? 'albums.accountHint' : 'albums.accountEmpty'
+    : cards.length ? 'albums.mineHint' : 'albums.mineEmpty';
   body.replaceChildren(
     el('h2', { id: TITLE_ID, textContent: t('albums.title') }),
-    el('p', { className: 'albums__intro', textContent: t(cards.length ? 'albums.mineHint' : 'albums.mineEmpty') }),
+    accountBox() ?? '',
+    el('p', { className: 'albums__intro', textContent: t(intro) }),
     ...(stage ? [stage] : []),
     ...(grid ? [grid] : []),
   );
@@ -146,8 +229,9 @@ function render(withPack: boolean): void {
 }
 
 /** 挂到页面上已有的 <dialog> */
-export function initAlbums(dialogEl: HTMLDialogElement): void {
+export function initAlbums(dialogEl: HTMLDialogElement, describeError: (error: unknown) => string): void {
   dialog = dialogEl;
+  describe = describeError;
   body = dialogEl.querySelector<HTMLElement>('.albums__body');
   dialogEl.querySelector('.albums__close')?.addEventListener('click', () => dialogEl.close());
   // 点遮罩关闭：遮罩上的点击，事件目标是 dialog 自己
