@@ -45,8 +45,25 @@ import {
 } from '../src/i18n/core';
 import { renderPreview, PREVIEW_HEIGHT, PREVIEW_WIDTH } from './preview';
 import { recordHit, flushHits, sweepCards, expiresAt, importLegacy } from './cards';
-import { CardDb, type ApiKeyRow, type CardRow, type CardSource } from './db';
+import { CardDb, type ApiKeyRow, type CardRow, type CardSource, type SessionRow } from './db';
 import { bearerKey, hashApiKey } from './apikeys';
+import {
+  SECRET_PATTERN,
+  SESSION_COOKIE,
+  SESSION_TTL_MS,
+  STATE_COOKIE,
+  STATE_TTL_S,
+  cookie,
+  decodeState,
+  encodeState,
+  exchangeCode,
+  newSecret,
+  parseCookies,
+  pkceChallenge,
+  safeNext,
+  sha256Hex,
+  type IhUser,
+} from './auth';
 import { parsePerf } from './perf';
 import { detectNudity } from './moderation';
 import {
@@ -109,6 +126,27 @@ const RATE_LIMIT = Number(process.env.HOLOCARD_RATE_LIMIT ?? 10);
 const RATE_WINDOW_MS = Number(process.env.HOLOCARD_RATE_WINDOW_MS ?? 10 * 60 * 1000);
 /** 站点对外的地址，用来拼分享链接里的绝对 URL（OG 标签必须是绝对地址） */
 const PUBLIC_ORIGIN = process.env.HOLOCARD_PUBLIC_ORIGIN ?? 'https://holocard.longsizhuo.com';
+/**
+ * 用 IH 账号登录（见 auth.ts）。secret 是 IH 后端给 holocard 这个 client 发的，没配就不开登录。
+ * 换码直连同机的 IH 后端，不走公网
+ */
+const SSO_SECRET = process.env.HOLOCARD_SSO_SECRET ?? '';
+/** 在 IH 登记的 client。staging 单独一个（holocard-staging），secret 和回跳地址都和线上分开 */
+const SSO_CLIENT_ID = process.env.HOLOCARD_SSO_CLIENT_ID ?? 'holocard';
+const SSO_AUTHORIZE_URL = process.env.HOLOCARD_SSO_AUTHORIZE_URL ?? 'https://involutionhell.com/sso/authorize';
+const SSO_TOKEN_URL = process.env.HOLOCARD_SSO_TOKEN_URL ?? 'http://127.0.0.1:8080/internal/sso/token';
+/**
+ * 假登录：/auth/login 直接登进一个测试账号，不经过 IH。只给 staging 用：要能在手机上试登录后的界面，
+ * 而 staging 的 IH client 密钥得由站长配（见 deploy/README.md「登录」）。staging 的地址上没配密钥时自动打开，
+ * 别处要显式设 HOLOCARD_AUTH_FAKE=1（本地开发）。正式站开着它谁都能登进同一个账号，所以正式地址下拒绝启动
+ */
+const AUTH_FAKE =
+  process.env.HOLOCARD_AUTH_FAKE === '1' ||
+  (PUBLIC_ORIGIN === 'https://holocard.staging.longsizhuo.com' && SSO_SECRET === '');
+if (AUTH_FAKE && PUBLIC_ORIGIN === 'https://holocard.longsizhuo.com') {
+  throw new Error('HOLOCARD_AUTH_FAKE 只能在 staging 用，正式站不能开');
+}
+const LOGIN_ENABLED = AUTH_FAKE || SSO_SECRET !== '';
 /**
  * 前端静态文件目录。留空则不发静态文件（开发时由 vite dev 发）。
  *
@@ -337,6 +375,31 @@ function clientIp(req: IncomingMessage): string {
   const fwd = req.headers['x-forwarded-for'];
   if (typeof fwd === 'string' && fwd) return fwd.split(',')[0]?.trim() ?? 'unknown';
   return req.socket.remoteAddress ?? 'unknown';
+}
+
+/** 带着有效会话 cookie 的，是哪个账号 */
+function sessionOf(req: IncomingMessage): SessionRow | null {
+  const token = parseCookies(req.headers.cookie)[SESSION_COOKIE];
+  return token && SECRET_PATTERN.test(token) ? db.session(sha256Hex(token), Date.now()) : null;
+}
+
+/**
+ * 认会话来改东西的请求，只收本站页面发的。
+ * holocard-staging、invite 这些兄弟子域和这里同站（same-site），它们发来的请求照样带着会话 cookie，
+ * SameSite=Lax 拦不住；浏览器给每个请求标的 Sec-Fetch-Site 能分出来
+ */
+function sameOrigin(req: IncomingMessage): boolean {
+  return req.headers['sec-fetch-site'] === 'same-origin';
+}
+
+/**
+ * 是不是这张卡的主人：手上有口令的人；卡归到账号下以后，是登录着这个账号、从本站页面发请求的人。
+ * 归到账号下的卡口令已经换掉、不给任何人，所以那时只剩会话这一条路
+ */
+function owns(req: IncomingMessage, card: CardRow): boolean {
+  const header = req.headers['x-holocard-token'];
+  if (typeof header === 'string' && header !== '' && timingSafeEqualStr(header, card.delete_token)) return true;
+  return card.user_id !== null && sameOrigin(req) && sessionOf(req)?.user_id === card.user_id;
 }
 
 /*
@@ -837,6 +900,7 @@ async function acceptUpload(
   source: CardSource,
   apiKey: ApiKeyRow | null,
   admit: () => boolean,
+  userId: string | null = null,
 ): Promise<CardRow | null> {
   // 盘快满了就先拒：放在读请求体之前，不白收一张图、白做一遍规范化
   const free = await freeBytes(OUT_DIR);
@@ -923,6 +987,7 @@ async function acceptUpload(
     nsfw_part: null,
     source,
     api_key: apiKey?.id ?? null,
+    user_id: userId,
   };
   db.insert(card);
   enqueue(id, source);
@@ -1349,8 +1414,9 @@ async function sweep(): Promise<void> {
   if (removed > 0) console.log(`[sweep] 清理了 ${removed} 张过期卡片`);
   try {
     db.prunePerf(90, 200_000);
+    db.pruneSessions(Date.now());
   } catch (error) {
-    console.error('[perf] 清理失败', error);
+    console.error('[sweep] 清理埋点、过期会话失败', error);
   }
 }
 
@@ -1571,6 +1637,165 @@ async function handleV1(req: IncomingMessage, res: ServerResponse, url: URL): Pr
   }
 }
 
+/*
+ * 用 IH 账号登录（协议见 auth.ts）。登录永远是可选的，不登录照常做卡。
+ *   GET  /auth/login?next=   跳到 IH 的授权页
+ *   GET  /auth/callback      IH 带着授权码跳回来：换用户、发会话、回到 next
+ *   POST /auth/logout        退出
+ */
+async function handleAuth(req: IncomingMessage, res: ServerResponse, url: URL): Promise<void> {
+  const redirectUri = `${PUBLIC_ORIGIN}/auth/callback`;
+
+  if (req.method === 'GET' && url.pathname === '/auth/login') {
+    const next = safeNext(url.searchParams.get('next'), PUBLIC_ORIGIN);
+    if (AUTH_FAKE) {
+      startSession(res, { id: 'staging', name: 'Staging', avatar: null }, next);
+      return;
+    }
+    if (!SSO_SECRET) {
+      loginFailed(req, res, url, next);
+      return;
+    }
+    const state = newSecret();
+    const verifier = newSecret();
+    const target = new URL(SSO_AUTHORIZE_URL);
+    target.search = new URLSearchParams({
+      client_id: SSO_CLIENT_ID,
+      redirect_uri: redirectUri,
+      state,
+      code_challenge: pkceChallenge(verifier),
+      code_challenge_method: 'S256',
+    }).toString();
+    res.writeHead(302, {
+      location: target.toString(),
+      'cache-control': 'no-store',
+      'set-cookie': cookie(STATE_COOKIE, encodeState({ state, verifier, next }), STATE_TTL_S),
+    });
+    res.end();
+    return;
+  }
+
+  if (req.method === 'GET' && url.pathname === '/auth/callback') {
+    const saved = decodeState(parseCookies(req.headers.cookie)[STATE_COOKIE]);
+    const code = url.searchParams.get('code') ?? '';
+    // state 对不上：不是这个浏览器发起的登录（登录 CSRF），或者在 IH 那边待太久、cookie 过期了
+    const user =
+      saved && SSO_SECRET && timingSafeEqualStr(url.searchParams.get('state') ?? '', saved.state) && /^[\w-]{20,200}$/.test(code)
+        ? await exchangeCode({
+            tokenUrl: SSO_TOKEN_URL,
+            clientId: SSO_CLIENT_ID,
+            secret: SSO_SECRET,
+            code,
+            verifier: saved.verifier,
+            redirectUri,
+          })
+        : null;
+    if (!user) {
+      loginFailed(req, res, url, saved?.next ?? '/');
+      return;
+    }
+    console.log(`[auth] 账号 ${user.id} 登录`);
+    startSession(res, user, saved?.next ?? '/');
+    return;
+  }
+
+  if (req.method === 'POST' && url.pathname === '/auth/logout') {
+    if (!sameOrigin(req)) {
+      fail(res, 403, 'forbidden', '只能从本站页面退出');
+      return;
+    }
+    const token = parseCookies(req.headers.cookie)[SESSION_COOKIE];
+    if (token) db.deleteSession(sha256Hex(token));
+    res.writeHead(204, { 'cache-control': 'no-store', 'set-cookie': cookie(SESSION_COOKIE, '', 0) });
+    res.end();
+    return;
+  }
+
+  fail(res, 404, 'not_found', '没有这个地址');
+}
+
+function startSession(res: ServerResponse, user: IhUser, next: string): void {
+  const token = newSecret();
+  const now = Date.now();
+  db.insertSession({
+    hash: sha256Hex(token),
+    user_id: user.id,
+    name: user.name,
+    avatar: user.avatar,
+    created_at: now,
+    expires_at: now + SESSION_TTL_MS,
+  });
+  res.writeHead(302, {
+    location: next,
+    'cache-control': 'no-store',
+    // 授权码在回调地址上，别让它跟着 Referer 出去
+    'referrer-policy': 'no-referrer',
+    'set-cookie': [cookie(SESSION_COOKIE, token, SESSION_TTL_MS / 1000), cookie(STATE_COOKIE, '', 0)],
+  });
+  res.end();
+}
+
+/** 登录没成：一个只有一句话和返回链接的页面。用户点「返回」回到原来的地方再点一次登录就行 */
+function loginFailed(req: IncomingMessage, res: ServerResponse, url: URL, next: string): void {
+  const lang = requestLang(req, url);
+  const body = `<!doctype html><html lang="${LANG_TAG[lang]}"><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><meta name="robots" content="noindex"><title>HoloCard</title><p>${escapeAttr(translate(lang, 'login.failed'))}</p><p><a href="${escapeAttr(next)}">${escapeAttr(translate(lang, 'login.back'))}</a></p></html>`;
+  res.writeHead(400, {
+    'content-type': 'text/html; charset=utf-8',
+    'cache-control': 'no-store',
+    'set-cookie': cookie(STATE_COOKIE, '', 0),
+  });
+  res.end(body);
+}
+
+/*
+ * 当前登录的账号，和它名下的卡（卡册用）。
+ *   GET  /api/me         { login: 开没开登录, user: 账号或 null, cards: 名下还在的卡，最新的在前 }
+ *   POST /api/me/claim   { cards: [{ id, token }] } 把这台设备上的卡（凭口令）认领到账号下，返回认领成功的 id
+ */
+async function handleMe(req: IncomingMessage, res: ServerResponse, url: URL): Promise<void> {
+  const session = sessionOf(req);
+  if (req.method === 'GET' && url.pathname === '/api/me') {
+    json(res, 200, {
+      login: LOGIN_ENABLED,
+      user: session ? { id: session.user_id, name: session.name, avatar: session.avatar } : null,
+      cards: session ? db.userCards(session.user_id) : [],
+    });
+    return;
+  }
+  if (req.method === 'POST' && url.pathname === '/api/me/claim') {
+    if (!session || !sameOrigin(req)) {
+      fail(res, 401, 'login_required', '要先登录');
+      return;
+    }
+    let entries: unknown;
+    try {
+      entries = (JSON.parse((await readBody(req, 64 * 1024)).toString('utf8')) as { cards?: unknown }).cards;
+    } catch {
+      entries = null;
+    }
+    if (!Array.isArray(entries) || entries.length > 500) {
+      fail(res, 400, 'bad_request', '请求不合法');
+      return;
+    }
+    const claimed: string[] = [];
+    for (const entry of entries) {
+      const { id, token } = (entry ?? {}) as { id?: unknown; token?: unknown };
+      if (typeof id !== 'string' || typeof token !== 'string' || !/^[0-9a-f-]{36}$/.test(id)) continue;
+      const card = db.get(id);
+      // 只认还没有主人账号、口令对得上的网页卡；删掉、过期、下架的不认
+      if (!card || card.user_id !== null || card.source !== 'web' || !CLAIMABLE.has(card.status)) continue;
+      if (!timingSafeEqualStr(token, card.delete_token)) continue;
+      if (db.claim(id, session.user_id, card.delete_token, randomUUID())) claimed.push(id);
+    }
+    console.log(`[claim] 账号 ${session.user_id} 认领了 ${claimed.length} 张`);
+    json(res, 200, { claimed });
+    return;
+  }
+  methodNotAllowed(res, url.pathname === '/api/me' ? 'GET' : 'POST');
+}
+
+const CLAIMABLE = new Set<CardRow['status']>(['queued', 'running', 'done', 'error']);
+
 const server = createServer((req, res) => {
   void (async () => {
     /*
@@ -1588,6 +1813,16 @@ const server = createServer((req, res) => {
     // 对外接口。要在下面「GET 非 /api 路径一律当静态文件」之前接住
     if (url.pathname === '/v1' || url.pathname.startsWith('/v1/')) {
       await handleV1(req, res, url);
+      return;
+    }
+
+    // 登录、退出。也要在「GET 非 /api 路径一律当静态文件」之前接住
+    if (url.pathname.startsWith('/auth/')) {
+      await handleAuth(req, res, url);
+      return;
+    }
+    if (url.pathname === '/api/me' || url.pathname === '/api/me/claim') {
+      await handleMe(req, res, url);
       return;
     }
 
@@ -1664,7 +1899,9 @@ const server = createServer((req, res) => {
         return false;
       };
       if (!admit()) return;
-      const card = await acceptUpload(req, res, 'web', null, admit);
+      // 登录着做的卡直接归到账号下。只认本站页面发的：兄弟子域借访客的会话传图，会塞进人家的卡册
+      const account = sameOrigin(req) ? sessionOf(req) : null;
+      const card = await acceptUpload(req, res, 'web', null, admit, account?.user_id ?? null);
       if (!card) return;
 
       /*
@@ -1674,7 +1911,12 @@ const server = createServer((req, res) => {
        * 而卡一旦分享出去，id 就是公开的——口令跟着泄漏，删除入口就等于没有。
        * 提交请求的响应只有上传者自己看得到。
        */
-      json(res, 202, { id: card.id, position: queue.indexOf(card.id) + 1, deleteToken: card.delete_token });
+      // 归到账号下的卡不给口令：主人认的是会话，口令留在设备上反而会落到下一个用这台设备的人手里
+      json(res, 202, {
+        id: card.id,
+        position: queue.indexOf(card.id) + 1,
+        deleteToken: card.user_id ? null : card.delete_token,
+      });
       return;
     }
 
@@ -1690,8 +1932,7 @@ const server = createServer((req, res) => {
       }
       // 只有卡的主人能分享：分享会把卡转成长期保留、公开卡片页、起浏览器渲染预览图。
       // 以前不鉴权，任何拿到 id 的人都能替别人的卡续命
-      const shareToken = req.headers['x-holocard-token'];
-      if (!timingSafeEqualStr(typeof shareToken === 'string' ? shareToken : '', card.delete_token)) {
+      if (!owns(req, card)) {
         fail(res, 403, 'share_forbidden', '只有生成这张卡的人能分享它');
         return;
       }
@@ -1760,15 +2001,13 @@ const server = createServer((req, res) => {
     if (req.method === 'PUT' && configMatch) {
       const id = configMatch[1] ?? '';
       const dir = join(OUT_DIR, id);
-      const header = req.headers['x-holocard-token'];
-      const token = typeof header === 'string' ? header : '';
 
       const card = db.get(id);
       if (!card || card.status !== 'done' || card.source === 'api') {
         fail(res, 404, 'card_not_found', '这张卡不存在或已过期');
         return;
       }
-      if (!timingSafeEqualStr(token, card.delete_token)) {
+      if (!owns(req, card)) {
         fail(res, 403, 'wrong_token', '口令不对，只有生成这张卡的人能改它');
         return;
       }
@@ -1827,15 +2066,13 @@ const server = createServer((req, res) => {
      * 删除自己的卡。
      *
      * 口令是产出时随 202 响应给上传者的，只有他们手上有（前端存在 localStorage）。
-     * 不做账号体系：这个站没有登录，一张卡的「所有者」就是「拿着口令的人」。
+     * 不登录时，一张卡的「所有者」就是「拿着口令的人」；归到账号下的卡认会话（见 owns）。
      * 比较用定长循环而不是 ===，避免把口令的正确前缀长度泄漏出去。
      */
     const deleteMatch = /^\/api\/cards\/([0-9a-f-]{36})$/.exec(url.pathname);
     if (req.method === 'DELETE' && deleteMatch) {
       const id = deleteMatch[1] ?? '';
       const dir = join(OUT_DIR, id);
-      const header = req.headers['x-holocard-token'];
-      const token = typeof header === 'string' ? header : '';
 
       const card = db.get(id);
       // 对外接口的卡走 /v1 删，这里当作不存在（不然错口令回 403、没有的卡回 404，能用来试探 id）
@@ -1843,7 +2080,7 @@ const server = createServer((req, res) => {
         fail(res, 404, 'card_not_found', '这张卡不存在或已过期');
         return;
       }
-      if (!timingSafeEqualStr(token, card.delete_token)) {
+      if (!owns(req, card)) {
         fail(res, 403, 'wrong_token', '口令不对，只有生成这张卡的人能删除它');
         return;
       }

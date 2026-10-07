@@ -114,8 +114,11 @@ export interface SegmentResult {
   layers: string;
   /** 这张卡的 id */
   id: string;
-  /** 删除口令。服务端只在提交响应里给这一次，丢了就再也拿不到 */
-  deleteToken: string;
+  /**
+   * 删除口令。服务端只在提交响应里给这一次，丢了就再也拿不到。
+   * 登录着做的卡没有口令（null）：它直接归到账号下，主人认的是登录状态
+   */
+  deleteToken: string | null;
 }
 
 /**
@@ -178,7 +181,7 @@ export async function segmentOnServer(
     throw await apiError(created, `上传失败（HTTP ${created.status}）`);
   }
 
-  const { id, deleteToken } = (await created.json()) as { id: string; deleteToken: string };
+  const { id, deleteToken } = (await created.json()) as { id: string; deleteToken: string | null };
   let deadline = Date.now() + TIMEOUT_MS;
   /*
    * 连续失败从什么时候开始算。
@@ -245,7 +248,7 @@ export async function segmentOnServer(
 /*
  * 删除口令存在 localStorage 里。
  *
- * 这个站没有账号，一张卡的「所有者」就是「手上有口令的人」。口令由服务端在
+ * 不登录时，一张卡的「所有者」就是「手上有口令的人」（登录以后见文件末尾）。口令由服务端在
  * 提交响应里给一次，别处再也拿不到，所以这里必须存下来——否则用户想删自己
  * 上传的东西时无从下手。清了浏览器数据就等于放弃了删除权，这一点在页面上写明。
  */
@@ -282,9 +285,30 @@ export function rememberOwned(id: string, token: string): void {
   }
 }
 
-/** 这台设备上做过的卡，最新的在前。存的顺序就是做好的先后（对象的字符串键按插入顺序遍历） */
-export function ownedCards(): string[] {
+/** 这台设备上有口令的卡，最新的在前。存的顺序就是做好的先后（对象的字符串键按插入顺序遍历） */
+function localCards(): string[] {
   return Object.keys(readOwned()).reverse();
+}
+
+/** 卡册里的卡：账号名下的在前（服务端按做好的先后排），再是这台设备上还没放进账号的 */
+export function ownedCards(): string[] {
+  return [...accountCards, ...unclaimedCards()];
+}
+
+/** 这台设备上有口令、还没放进账号的卡 */
+export function unclaimedCards(): string[] {
+  return localCards().filter((id) => !accountCards.includes(id));
+}
+
+/** 这张卡是不是我的：这台设备上有它的口令，或者它在登录着的账号名下 */
+export function isMine(id: string): boolean {
+  return ownedToken(id) !== null || accountCards.includes(id);
+}
+
+/** 带上口令（有的话）。没有口令的是账号名下的卡，会话 cookie 浏览器自己会带 */
+function ownerHeaders(id: string): Record<string, string> {
+  const token = ownedToken(id);
+  return token ? { ...apiHeaders(), 'x-holocard-token': token } : apiHeaders();
 }
 
 export function ownedToken(id: string): string | null {
@@ -292,6 +316,7 @@ export function ownedToken(id: string): string | null {
 }
 
 export function forgetOwned(id: string): void {
+  ownedInMemory.delete(id);
   try {
     const owned = readOwned();
     delete owned[id];
@@ -303,18 +328,18 @@ export function forgetOwned(id: string): void {
 
 /** 删除一张自己的卡。口令不对或卡不存在时抛错 */
 export async function deleteCard(id: string): Promise<void> {
-  const token = ownedToken(id);
-  if (!token) throw new ApiError('这台设备上没有这张卡的删除口令', 'no_token');
+  if (!isMine(id)) throw new ApiError('这台设备上没有这张卡的删除口令', 'no_token');
 
   const res = await fetch(`${import.meta.env.BASE_URL}api/cards/${id}`, {
     method: 'DELETE',
-    headers: { ...apiHeaders(), 'x-holocard-token': token },
+    headers: ownerHeaders(id),
   });
   if (!res.ok && res.status !== 404) {
     throw await apiError(res, `删除失败（HTTP ${res.status}）`);
   }
   // 404 说明已经被清理过了，对用户来说结果一样
   forgetOwned(id);
+  accountCards = accountCards.filter((card) => card !== id);
 }
 
 /**
@@ -322,13 +347,86 @@ export async function deleteCard(id: string): Promise<void> {
  * keepalive：页面关掉时还在路上的那次也要送到，不然最后一下调整就丢了
  */
 export async function saveConfig(id: string, config: CardConfig): Promise<void> {
-  const token = ownedToken(id);
-  if (!token) return;
+  if (!isMine(id)) return;
   const res = await fetch(`${import.meta.env.BASE_URL}api/cards/${id}/config`, {
     method: 'PUT',
-    headers: { ...apiHeaders(), 'content-type': 'application/json', 'x-holocard-token': token },
+    headers: { ...ownerHeaders(id), 'content-type': 'application/json' },
     body: JSON.stringify(config),
     keepalive: true,
   });
   if (!res.ok) throw await apiError(res, `保存失败（HTTP ${res.status}）`);
+}
+
+/** 分享一张自己的卡：转成长期保留、公开卡片页（服务端认口令或登录状态） */
+export async function shareCard(id: string): Promise<void> {
+  const res = await fetch(`${import.meta.env.BASE_URL}api/cards/${id}/share`, { method: 'POST', headers: ownerHeaders(id) });
+  if (!res.ok) throw await apiError(res, `HTTP ${res.status}`);
+}
+
+/*
+ * 用 involutionhell 账号登录（见 server/auth.ts）。登录是可选的，不登录照常用。
+ * 登录着做的卡直接归到账号下（服务端不再给口令），换设备登录也能看到、管理；
+ * 这台设备上以前做的卡，要用户自己勾选认领进来——公用电脑上留着别人的卡，不能一登录就收走。
+ */
+export interface Account {
+  id: string;
+  name: string;
+  avatar: string | null;
+}
+
+/** 这个部署开没开登录、现在是谁 */
+let me: { login: boolean; user: Account | null } = { login: false, user: null };
+/** 账号名下还在的卡，最新的在前 */
+let accountCards: string[] = [];
+
+export function account(): { login: boolean; user: Account | null } {
+  return me;
+}
+
+/** 问一下服务端现在是谁。慢了不等：首屏不能被它卡住，超时就先按没登录算 */
+export async function loadMe(timeoutMs = 2000): Promise<void> {
+  try {
+    const res = await fetch(`${import.meta.env.BASE_URL}api/me`, { signal: AbortSignal.timeout(timeoutMs) });
+    if (!res.ok) return;
+    const body = (await res.json()) as { login?: unknown; user?: Account | null; cards?: unknown };
+    me = { login: body.login === true, user: body.user ?? null };
+    accountCards = Array.isArray(body.cards) ? body.cards.filter((id): id is string => typeof id === 'string') : [];
+  } catch {
+    // 没有服务端（纯静态托管）、网络慢：按没登录算
+  }
+}
+
+/** 登录入口。登录完回到 next（只能是本站路径，服务端会再查一遍） */
+export function loginHref(next: string): string {
+  return `${import.meta.env.BASE_URL}auth/login?next=${encodeURIComponent(next)}`;
+}
+
+export async function logout(): Promise<void> {
+  await fetch(`${import.meta.env.BASE_URL}auth/logout`, { method: 'POST', headers: apiHeaders() }).catch(() => undefined);
+  me = { ...me, user: null };
+  accountCards = [];
+}
+
+/** 登录着刚做好的卡：服务端已经把它归到账号下了，卡册里马上要有 */
+export function rememberAccountCard(id: string): void {
+  if (!accountCards.includes(id)) accountCards.unshift(id);
+}
+
+/** 把这台设备上的卡认领到账号下。认领成功的，服务端换了口令，本机这份旧口令删掉 */
+export async function claimCards(ids: string[]): Promise<string[]> {
+  const cards = ids.flatMap((id) => {
+    const token = ownedToken(id);
+    return token ? [{ id, token }] : [];
+  });
+  const res = await fetch(`${import.meta.env.BASE_URL}api/me/claim`, {
+    method: 'POST',
+    headers: { ...apiHeaders(), 'content-type': 'application/json' },
+    body: JSON.stringify({ cards }),
+  });
+  if (!res.ok) throw await apiError(res, `HTTP ${res.status}`);
+  const { claimed } = (await res.json()) as { claimed: string[] };
+  for (const id of claimed) forgetOwned(id);
+  // 顺序以服务端为准（按做好的先后），重新拉一次
+  await loadMe();
+  return claimed;
 }

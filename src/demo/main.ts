@@ -9,14 +9,15 @@ import { LayerFormatError, loadLayerSet } from '../format/io';
 import { FOIL_TYPES, type FoilType, type LayerSet, type ParallaxEffect } from '../format/types';
 import {
   ApiError,
-  apiError,
-  apiHeaders,
   deleteCard,
+  isMine,
+  loadMe,
   NoBackendError,
-  ownedToken,
+  rememberAccountCard,
   rememberOwned,
   saveConfig,
   segmentOnServer,
+  shareCard,
 } from './api';
 import { configOf, type CardConfig } from '../format/config';
 import { initAlbums, openAlbums } from './albums-ui';
@@ -124,7 +125,7 @@ const deck = new Deck(need<HTMLElement>('.deck'), {
   revealed: (set, id, method) => {
     show(set, id);
     track('pack-open', { how: method });
-    if (id && ownedToken(id) === null) markSeen(id);
+    if (id && !isMine(id)) markSeen(id);
     // 地址栏换成这张卡的链接：用浏览器菜单分享、复制地址、刷新，拿到的都是这张卡而不是首页。
     // replaceState 只改地址，不刷新页面，也不多一条后退记录
     if (id) history.replaceState(history.state, '', shareUrl(id, lang()));
@@ -277,7 +278,7 @@ function show(set: LayerSet, id: string | null = null): void {
   // 只有服务端产出的卡才能分享；换卡时把上一张的链接收起来。
   // 卡片页（/c/<id>）上只给卡的主人：做完卡地址栏就换成了卡片链接，主人刷新后落在这里
   shareBox.hidden =
-    id === null || route.mode === 'render' || (route.mode === 'card' && ownedToken(id) === null);
+    id === null || route.mode === 'render' || (route.mode === 'card' && !isMine(id));
   shareResult.hidden = true;
   shareBtn.disabled = false;
   setText(shareBtn, 'share.create');
@@ -285,7 +286,7 @@ function show(set: LayerSet, id: string | null = null): void {
   exportBox.hidden = id === null || route.mode === 'render';
   if (!exporting) resetExport();
   // 只有手上有这张卡口令的人才看得到删除入口
-  ownerBox.hidden = id === null || ownedToken(id) === null;
+  ownerBox.hidden = id === null || !isMine(id);
   deleteBtn.disabled = false;
   setText(deleteBtn, 'delete.button');
 
@@ -359,7 +360,7 @@ let saveTimer = 0;
 
 /** 主人调了东西：记下这张卡此刻的配置，停手一会儿再存。别人的卡在本机随便调，不存 */
 function scheduleSave(): void {
-  if (!current || !currentId || route.mode === 'render' || ownedToken(currentId) === null) return;
+  if (!current || !currentId || route.mode === 'render' || !isMine(currentId)) return;
   const parallax = panelParallax();
   current.manifest.effects.parallax = parallax;
   // 等着存的是另一张卡（停手不到一秒就换了卡），那张先发出去
@@ -625,8 +626,10 @@ async function processImage(file: File): Promise<void> {
       stage = 'download';
       set = await loadLayerSet(result.layers);
       serverId = result.id;
-      // 删除口令服务端只给这一次，立刻存下来，否则这张卡就没法删了
-      rememberOwned(result.id, result.deleteToken);
+      // 删除口令服务端只给这一次，立刻存下来，否则这张卡就没法删了。
+      // 登录着做的卡没有口令：它已经归到账号下，卡册里记上就行
+      if (result.deleteToken) rememberOwned(result.id, result.deleteToken);
+      else rememberAccountCard(result.id);
       track('segment-ok', { where: 'server', layers: set.manifest.layers.length });
       setText(status, 'status.done', { n: set.manifest.layers.length, generator: set.manifest.generator ?? '' });
     } catch (serverError) {
@@ -757,12 +760,8 @@ async function doShare(auto = false, id: string | null = currentId): Promise<voi
   try {
     // 预览图按服务端上的配置渲染，刚调的那一下得先存上
     await flushSave();
-    // 分享只有卡的主人能做（服务端认删除口令）：分享会让卡长期保留、公开卡片页
-    const res = await fetch(`${import.meta.env.BASE_URL}api/cards/${id}/share`, {
-      method: 'POST',
-      headers: { ...apiHeaders(), 'x-holocard-token': ownedToken(id) ?? '' },
-    });
-    if (!res.ok) throw await apiError(res, `HTTP ${res.status}`);
+    // 分享只有卡的主人能做（服务端认删除口令或登录状态）：分享会让卡长期保留、公开卡片页
+    await shareCard(id);
     // 等待期间换了卡，这个结果就不是当前这张的了
     if (id !== currentId) return;
     shareUrlInput.value = shareUrl(id, lang());
@@ -787,7 +786,7 @@ async function doShare(auto = false, id: string | null = currentId): Promise<voi
  *
  * 二次确认是必须的：这个操作不可撤销，而且已经分享出去的链接会立刻失效。
  */
-initAlbums(need<HTMLDialogElement>('#albums'));
+initAlbums(need<HTMLDialogElement>('#albums'), describeError);
 need<HTMLButtonElement>('#albums-open').addEventListener('click', openAlbums);
 
 async function doDelete(): Promise<void> {
@@ -1120,7 +1119,7 @@ function markSeen(id: string): void {
  * 自己做的卡、开过包的卡直接看；截图和导出用的 render 页面、「减少动态效果」下也不出
  */
 function sharedPackDue(id: string): boolean {
-  return route.mode === 'card' && ownedToken(id) === null && !reducedMotion() && !seenCards().includes(id);
+  return route.mode === 'card' && !isMine(id) && !reducedMotion() && !seenCards().includes(id);
 }
 
 /** 按路由决定首屏加载什么 */
@@ -1128,6 +1127,16 @@ async function boot(): Promise<void> {
   // 服务端发页面时已经按语言换好了文字；这里再过一遍，本地开发（vite 直接发页面）时也对
   applyTranslations();
   markLangButtons(lang());
+
+  // 登录状态决定一张卡算不算「我的」（出不出卡包、给不给分享和删除），卡片页要等它；
+  // 首页不等，打开卡册的时候早就回来了。截图用的 render 页面不问
+  const meReady = route.mode === 'render' ? Promise.resolve() : loadMe();
+  if (route.id) await meReady;
+  // 从卡册点的登录，回来时地址带着 #albums：接着把卡册打开，好认领这台设备上的卡
+  if (location.hash === '#albums') {
+    history.replaceState(history.state, '', location.pathname + location.search);
+    void meReady.then(openAlbums);
+  }
 
   const exportLayout = route.mode === 'render' ? renderExportLayout() : null;
   if (route.mode === 'render') {
@@ -1146,7 +1155,7 @@ async function boot(): Promise<void> {
     pageView(route.mode === 'card' ? '/c' : '/');
     // 哪张卡带来的流量另走一个事件——pageview 的 payload 塞不下自定义字段
     // 主人自己刷新不算：做完卡地址栏就是卡片链接，刷一下不该算成「分享出去有人点开」
-    if (route.mode === 'card' && route.id && ownedToken(route.id) === null) {
+    if (route.mode === 'card' && route.id && !isMine(route.id)) {
       track('card-view', { card: route.id });
     }
   }

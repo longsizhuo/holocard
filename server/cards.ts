@@ -170,6 +170,7 @@ export async function importLegacy(
       nsfw_part: null,
       source: 'web',
       api_key: null,
+      user_id: null,
     });
     imported++;
   }

@@ -223,12 +223,22 @@ Finished cards are kept in sessionStorage so a reload restores the strip. After 
 
 ## My album
 
-"My album" is simply every card made on this device, in a grid, newest first, with nothing to add by hand.
+"My album" is simply every card made on this device (plus the cards in your account once you sign in), in a grid, newest first, with nothing to add by hand.
 Each time it opens you first open a pack: tear or tap it and the cards fly out one by one into the grid, all dealt within 2 seconds (tap to land them all at once).
 With no cards, or with reduced motion, it goes straight to the grid.
-It is read from the delete-token record (each finished card stores its id and token), which lives only in this device's browser, just like delete tokens, since the site has no accounts.
+When you are not signed in, it is read from the delete-token record (each finished card stores its id and token), which lives only in this device's browser, just like delete tokens.
 The cards themselves live on the server and show as "Expired" once they are gone. Hand-made albums used to exist too; with few people using them, only this automatic one is kept for now.
 Grid thumbnails (`/api/layers/<id>/thumb.jpg`, longest side 480) are made when layering finishes; early cards that never stored an original get one on first request, stacked from their layers, made once per card and queued one at a time. Code: `src/demo/albums-ui.ts`.
+
+## Signing in (optional)
+
+You can sign in with an [involutionhell](https://involutionhell.com) account (the button is at the top of the album); everything works without it. Once signed in:
+
+- cards you make go straight into your account, so you can see, share and delete them from any phone or computer you sign in on;
+- cards made earlier on this device can be claimed from the album ("Add to account"). After that the old delete keys on this device stop working and only the account owns them;
+- HoloCard only receives the account id, name and avatar — no email, and it never sees your involutionhell session.
+
+It is an authorization-code flow with PKCE: HoloCard sends you to involutionhell's consent page, you come back with a one-time code, and the server exchanges it directly with the involutionhell backend before issuing its own session. Code: `server/auth.ts`; self-check: `scripts/verify-auth.mjs`.
 
 ## Public API (allowlisted)
 
