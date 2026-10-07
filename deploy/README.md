@@ -347,7 +347,15 @@ id 通过 `.env.production` 里的 `VITE_UMAMI_ID` 在构建时注入。
 `segment-fail`（错误信息前 120 字，外加走到哪一步 `stage`：upload / server / download / browser）、
 `share`（手动点分享按钮；做完卡的自动分享不计）、`share-copy`（点「复制」）、
 `card-view`（打开卡片页，卡的主人自己刷新不计）、`delete`、`export` / `export-fail` / `export-share`（带格式）、
-`lang`（手动切换语言）。不带文件名。
+`lang`（手动切换语言）、`login`（登录完回到站里，带从哪登录的 `from`：albums / account）、
+`claim`（认领了几张 `n`）、`api-key` / `api-key-revoke`（个人中心申请、吊销 key）。不带文件名。
+
+对外接口（`/v1`）不经过浏览器，事件由服务端发进**同一个站点**（`server/umami.ts`），在「事件」里和网页的放在一起看：
+`api-submit`（`via`：self-serve 自己申请的 key / issued 站长发的）、`api-done`（`layers`、处理用时 `seconds`）、
+`api-fail`（`reason`：nsfw 之类裸露拒绝 / key_revoked / error）、`api-fetch`（调用方下载了结果，按第一层算）、
+`api-reject`（被拒的 `code`：quota_exceeded、rate_limited、queue_full…）。都带 `key`（key 的编号）。
+服务端发事件时每个 key 用一个固定的 UA，umami 里一个 key 只算一个访客，不会把网页访客数刷上去；
+要只看网页的访客，筛选里排除这些事件或按 key 区分即可。本机地址上的服务端（开发、自检脚本）不发。
 
 本机和局域网地址（localhost、127.x、10.x、192.168.x…）上不加载统计：本地用生产配置构建时站点 id 也在，
 以前在 127.0.0.1 上的测试全进了线上统计。查数据时照样加 `hostname = 'holocard.longsizhuo.com'`。

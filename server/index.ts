@@ -65,6 +65,7 @@ import {
   type IhUser,
 } from './auth';
 import { parsePerf } from './perf';
+import { apiTracker } from './umami';
 import { detectNudity } from './moderation';
 import {
   EXPORT_FILE,
@@ -149,6 +150,8 @@ if (AUTH_FAKE && PUBLIC_ORIGIN === 'https://holocard.longsizhuo.com') {
   throw new Error('HOLOCARD_AUTH_FAKE 只能在 staging 用，正式站不能开');
 }
 const LOGIN_ENABLED = AUTH_FAKE || SSO_SECRET !== '';
+/** 对外接口的活动记进 umami（见 umami.ts） */
+const trackApi = apiTracker(PUBLIC_ORIGIN);
 /**
  * 前端静态文件目录。留空则不发静态文件（开发时由 vite dev 发）。
  *
@@ -722,11 +725,18 @@ async function runJob(id: string): Promise<void> {
   // 排队期间 key 被吊销了：吊销要立即生效，这张不做了，原图也不留
   if (card.source === 'api' && !(card.api_key && db.apiKeyActive(card.api_key))) {
     await rm(dir, { recursive: true, force: true }).catch(() => undefined);
-    db.update(id, { status: 'error', stage: null, error: 'key_revoked' }, 'queued');
+    if (db.update(id, { status: 'error', stage: null, error: 'key_revoked' }, 'queued')) {
+      trackApi(card.api_key ?? '', 'api-fail', { reason: 'key_revoked' });
+    }
     return;
   }
   // 只从 queued 转到 running：排队期间被删了（deleted）就不做
   if (!db.update(id, { status: 'running', stage: null }, 'queued')) return;
+  const startedAt = Date.now();
+  /** 接口卡的结果记进 umami；网页卡的由浏览器自己报（segment-ok / segment-fail） */
+  const report = (name: string, data: Record<string, string | number>): void => {
+    if (card.source === 'api') trackApi(card.api_key ?? '', name, data);
+  };
 
   // 上次就是在处理它的时候崩的（多半是抠图吃爆了内存），这次不抠，免得反复崩
   const matte = MATTE_READY && !crashedJobs.has(id);
@@ -762,7 +772,9 @@ async function runJob(id: string): Promise<void> {
       if (rejection) {
         finishJob(id, false);
         await rm(dir, { recursive: true, force: true }).catch(() => undefined);
-        db.update(id, { status: 'error', stage: null, error: rejection }, 'running');
+        if (db.update(id, { status: 'error', stage: null, error: rejection }, 'running')) {
+          report('api-fail', { reason: rejection });
+        }
         return;
       }
     }
@@ -788,6 +800,7 @@ async function runJob(id: string): Promise<void> {
       return;
     }
     finishJob(id, true);
+    report('api-done', { layers: set.manifest.layers.length, seconds: Math.round((Date.now() - startedAt) / 1000) });
     // 接口的卡不进卡册、识别也已经做过了
     if (card.source === 'api') return;
     // 缩略图顺手做掉，卡册里第一次打开时就不用现做了。不等它，也不让它的失败影响这张卡
@@ -803,6 +816,7 @@ async function runJob(id: string): Promise<void> {
       await rm(dir, { recursive: true, force: true }).catch(() => undefined);
       return;
     }
+    report('api-fail', { reason: 'error' });
     /*
      * 删掉半截产物，但**留着原图**：失败的那张图正是排查时最需要的东西。
      * 它和其他卡一样受保留期约束，7 天后随目录一起清掉。
@@ -1480,8 +1494,13 @@ async function handleV1(req: IncomingMessage, res: ServerResponse, url: URL): Pr
       methodNotAllowed(res, 'POST');
       return;
     }
+    /** 被拒（限流、额度、排满）也记一笔：看得出有没有人被卡住 */
+    const reject = (status: number, code: string, message: string, params?: Record<string, string | number>): void => {
+      fail(res, status, code, message, params);
+      trackApi(key.id, 'api-reject', { code });
+    };
     if (apiAttemptLimited(key.id)) {
-      fail(res, 429, 'rate_limited', '提交太频繁了，过几分钟再试');
+      reject(429, 'rate_limited', '提交太频繁了，过几分钟再试');
       return;
     }
     /** 这个请求自己是不是已经算进 v1Uploading 了：第二次检查时要减掉自己 */
@@ -1495,26 +1514,26 @@ async function handleV1(req: IncomingMessage, res: ServerResponse, url: URL): Pr
       const busy = db.apiInFlight(key.id) + (v1Uploading.get(key.id) ?? 0) - counted;
       const since = Date.now() - DAY_MS;
       if (db.apiUsedSince(since, key) >= key.daily_limit) {
-        fail(res, 429, 'quota_exceeded', `这个 key 24 小时内最多提交 ${key.daily_limit} 张`, { limit: key.daily_limit });
+        reject(429, 'quota_exceeded', `这个 key 24 小时内最多提交 ${key.daily_limit} 张`, { limit: key.daily_limit });
         return false;
       }
       if (busy >= API_KEY_IN_FLIGHT) {
-        fail(res, 429, 'too_many_in_flight', `同一个 key 同时最多 ${API_KEY_IN_FLIGHT} 张在上传或处理`, { limit: API_KEY_IN_FLIGHT });
+        reject(429, 'too_many_in_flight', `同一个 key 同时最多 ${API_KEY_IN_FLIGHT} 张在上传或处理`, { limit: API_KEY_IN_FLIGHT });
         return false;
       }
       if (db.apiSubmittedSince(since) >= API_DAILY_LIMIT) {
-        fail(res, 503, 'api_daily_limit', '对外接口今天的总量用完了，明天再试');
+        reject(503, 'api_daily_limit', '对外接口今天的总量用完了，明天再试');
         return false;
       }
       if (apiJobs.size >= MAX_API_QUEUE) {
-        fail(res, 503, 'queue_full', `排队的太多（${apiJobs.size} 个在等），稍后再试`, { queued: apiJobs.size });
+        reject(503, 'queue_full', `排队的太多（${apiJobs.size} 个在等），稍后再试`, { queued: apiJobs.size });
         return false;
       }
       return true;
     };
     if (!admit()) return;
     if (v1UploadingAll >= V1_MAX_UPLOADING) {
-      fail(res, 503, 'busy', '同时上传的太多，稍后再试');
+      reject(503, 'busy', '同时上传的太多，稍后再试');
       return;
     }
     v1Uploading.set(key.id, (v1Uploading.get(key.id) ?? 0) + 1);
@@ -1530,6 +1549,7 @@ async function handleV1(req: IncomingMessage, res: ServerResponse, url: URL): Pr
       v1UploadingAll--;
     }
     if (!card) return;
+    trackApi(key.id, 'api-submit', { via: key.user_id ? 'self-serve' : 'issued' });
     json(res, 202, {
       id: card.id,
       status: 'queued',
@@ -1625,6 +1645,8 @@ async function handleV1(req: IncomingMessage, res: ServerResponse, url: URL): Pr
       'x-robots-tag': 'noindex',
     });
     res.end(data);
+    // 结果有没有被取走：每张卡都有第一层，下它就算一次（HEAD 不算）
+    if (req.method === 'GET' && fileName.startsWith('layer-0.')) trackApi(key.id, 'api-fetch');
     return;
   }
 

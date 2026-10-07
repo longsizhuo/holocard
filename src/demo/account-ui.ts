@@ -9,6 +9,7 @@
 import { account, loginHref, logout, myKeys, ownedCards, requestKey, revokeKey, unclaimedCards, type MyKey } from './api';
 import { lang, onLangChange, t } from '../i18n';
 import { openAlbums } from './albums-ui';
+import { track } from './track';
 
 const TITLE_ID = 'account-title';
 
@@ -83,6 +84,7 @@ function keyBox(state: { keys: MyKey[]; used: number; dailyLimit: number }): HTM
       revoke.disabled = true;
       revokeKey(active.id).then(
         () => {
+          track('api-key-revoke');
           fresh = null;
           void render();
         },
@@ -115,6 +117,7 @@ function keyBox(state: { keys: MyKey[]; used: number; dailyLimit: number }): HTM
       ask.textContent = t('api.requesting');
       requestKey().then(
         (created) => {
+          track('api-key');
           fresh = { id: created.id, key: created.key };
           void render();
         },

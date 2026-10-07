@@ -8,6 +8,7 @@ import { ensureTextures } from '../renderer/textures';
 import { LayerFormatError, loadLayerSet } from '../format/io';
 import { FOIL_TYPES, type FoilType, type LayerSet, type ParallaxEffect } from '../format/types';
 import {
+  account,
   ApiError,
   deleteCard,
   isMine,
@@ -1137,9 +1138,14 @@ async function boot(): Promise<void> {
   if (route.id) await meReady;
   // 从卡册点的登录，回来时地址带着 #albums：接着把卡册打开，好认领这台设备上的卡；从页头点的带着 #account，打开个人中心
   if (location.hash === '#albums' || location.hash === '#account') {
-    const open = location.hash === '#albums' ? openAlbums : openAccount;
+    const from = location.hash === '#albums' ? 'albums' : 'account';
     history.replaceState(history.state, '', location.pathname + location.search);
-    void meReady.then(open);
+    void meReady.then(() => {
+      // 带着这个地址回来的只有刚登录完的人（登录入口在卡册和页头）
+      if (account().user) track('login', { from });
+      if (from === 'albums') openAlbums();
+      else openAccount();
+    });
   }
 
   const exportLayout = route.mode === 'render' ? renderExportLayout() : null;

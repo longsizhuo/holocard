@@ -16,6 +16,7 @@ import { onLangChange, t } from '../i18n';
 import { reducedMotion, type PackView } from './pack';
 import { createPack } from './pack-gl';
 import { sfx } from './sfx';
+import { track } from './track';
 
 const BASE = import.meta.env.BASE_URL;
 /** dialog 的 aria-labelledby 指向它，读屏软件打开窗口时能念出名字 */
@@ -178,7 +179,10 @@ function claimBox(): HTMLElement | null {
     button.disabled = true;
     button.textContent = t('account.claiming');
     claimCards(chosen).then(
-      () => render(false),
+      (claimed) => {
+        track('claim', { n: claimed.length });
+        render(false);
+      },
       (error: unknown) => {
         button.disabled = false;
         button.textContent = t('account.claim');
