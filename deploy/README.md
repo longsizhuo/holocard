@@ -50,7 +50,8 @@ ssh oracle 'rm /var/lib/holocard/paused'             # 修好之后恢复自动�
 
 ## 对外接口的 key
 
-接口用法见仓库 README「对外接口」。key 只由站长发，库里只存哈希，key 本身只在发的时候显示一次：
+接口用法见仓库 README「对外接口」。登录用户可以在个人中心自己申请（每个账号 24 小时 20 张，`HOLOCARD_SELF_SERVE_DAILY_LIMIT`），
+额度要更高的由站长发。库里只存哈希，key 本身只在申请、发的时候显示一次；`list` 里自己申请的会标出 IH 账号：
 
 ```bash
 ssh oracle 'cd /opt/holocard && node22/bin/node apikey.mjs create <调用方名字> [每天上限，默认 50]'

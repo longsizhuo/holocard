@@ -430,3 +430,28 @@ export async function claimCards(ids: string[]): Promise<string[]> {
   await loadMe();
   return claimed;
 }
+
+/** 个人中心里的对外接口 key（服务端见 handleMyKeys）。key 本身只在申请那一次的响应里有 */
+export interface MyKey {
+  id: string;
+  createdAt: string;
+  revokedAt: string | null;
+  dailyLimit: number;
+}
+
+export async function myKeys(): Promise<{ keys: MyKey[]; used: number; dailyLimit: number }> {
+  const res = await fetch(`${import.meta.env.BASE_URL}api/me/keys`, { headers: apiHeaders() });
+  if (!res.ok) throw await apiError(res, `HTTP ${res.status}`);
+  return (await res.json()) as { keys: MyKey[]; used: number; dailyLimit: number };
+}
+
+export async function requestKey(): Promise<{ id: string; key: string; dailyLimit: number }> {
+  const res = await fetch(`${import.meta.env.BASE_URL}api/me/keys`, { method: 'POST', headers: apiHeaders() });
+  if (!res.ok) throw await apiError(res, `HTTP ${res.status}`);
+  return (await res.json()) as { id: string; key: string; dailyLimit: number };
+}
+
+export async function revokeKey(id: string): Promise<void> {
+  const res = await fetch(`${import.meta.env.BASE_URL}api/me/keys/${id}`, { method: 'DELETE', headers: apiHeaders() });
+  if (!res.ok) throw await apiError(res, `HTTP ${res.status}`);
+}

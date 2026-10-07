@@ -7,6 +7,8 @@
  *   - 归属：登录着做的卡不给口令、归到账号下；兄弟子域借会话传的图不归；认会话改东西只认本站页面发的
  *   - 认领：凭口令认领、认领后旧口令作废；口令不对、别人的卡不认
  *   - 别的账号动不了；退出后会话作废
+ *   - 个人中心的 API key：要登录、只认本站页面发的、同时只有一个、别人吊销不了、吊销立即生效、
+ *     额度按账号算（吊销了再申请不重新计数）
  *   - 假登录开关在正式地址下拒绝启动
  *
  * 用法（要 Node 22，node:sqlite）：/opt/holocard/node22/bin/node scripts/verify-auth.mjs
@@ -85,6 +87,7 @@ const env = {
   HOLOCARD_MODEL_DIR: process.env.HOLOCARD_MODEL_DIR ?? '/srv/holocard-models',
   HOLOCARD_MIN_FREE_GB: '0',
   HOLOCARD_RATE_LIMIT: '1000',
+  HOLOCARD_SELF_SERVE_DAILY_LIMIT: '2',
   HOLOCARD_SSO_SECRET: SECRET,
   HOLOCARD_SSO_AUTHORIZE_URL: `${IH}/sso/authorize`,
   HOLOCARD_SSO_TOKEN_URL: `${IH}/internal/sso/token`,
@@ -283,6 +286,43 @@ const config = (b, site) =>
 assert.equal((await config(bob)).status, 403);
 assert.equal((await config(alice, 'same-site')).status, 403);
 assert.equal((await config(alice)).status, 200, '主人登录着能改配置');
+
+// ---------- 个人中心的 API key ----------
+const keys = (b, method = 'GET', site = 'same-origin', path = '/api/me/keys') => b.call(path, { method, site });
+assert.equal((await keys(browser())).status, 401, '没登录看不到');
+assert.deepEqual(await (await keys(alice)).json(), { keys: [], used: 0, dailyLimit: 2 });
+assert.equal((await keys(alice, 'POST', 'same-site')).status, 401, '申请只认本站页面发的');
+const granted = await keys(alice, 'POST');
+assert.equal(granted.status, 201);
+const first = await granted.json();
+assert.match(first.key, /^hc_[A-Za-z0-9_-]{32}$/);
+assert.equal((await keys(alice, 'POST')).status, 409, '同时只能有一个能用的 key');
+const listed = await (await keys(alice)).json();
+assert.equal(listed.keys.length, 1);
+assert.equal(listed.keys[0].id, first.id);
+assert.equal(listed.keys[0].revokedAt, null);
+assert.ok(!JSON.stringify(listed).includes(first.key), '列表里不该有 key 本身');
+const v1 = (key, path = '/v1/cards', init = {}) =>
+  fetch(`${BASE}${path}`, { ...init, headers: { authorization: `Bearer ${key}`, ...(init.headers ?? {}) } });
+assert.equal((await v1(first.key, `/v1/cards/${'0'.repeat(8)}-0000-0000-0000-${'0'.repeat(12)}`)).status, 404, 'key 能用');
+assert.equal((await bob.call(`/api/me/keys/${first.id}`, { method: 'DELETE' })).status, 404, '别人吊销不了');
+// 额度按账号算：上限 2，交两张（交完就删，删掉的也算），第三张 429；吊销了再申请，还是 429
+const submitV1 = (key) => v1(key, '/v1/cards', { method: 'POST', body: IMAGE, headers: { 'content-type': 'image/jpeg' } });
+for (let i = 0; i < 2; i++) {
+  const r = await submitV1(first.key);
+  assert.equal(r.status, 202, `第 ${i + 1} 张应当 202，实际 ${r.status}`);
+  assert.equal((await v1(first.key, `/v1/cards/${(await r.json()).id}`, { method: 'DELETE' })).status, 200);
+}
+assert.equal((await submitV1(first.key)).status, 429, '到额度了');
+assert.equal((await alice.call(`/api/me/keys/${first.id}`, { method: 'DELETE' })).status, 200);
+assert.equal((await v1(first.key, `/v1/cards/${'0'.repeat(8)}-0000-0000-0000-${'0'.repeat(12)}`)).status, 401, '吊销立即生效');
+const second = await (await keys(alice, 'POST')).json();
+assert.ok(second.key && second.key !== first.key);
+const again = await submitV1(second.key);
+assert.equal(again.status, 429, '吊销了再申请，额度不重新计数');
+assert.equal((await again.json()).code, 'quota_exceeded');
+assert.equal((await keys(alice)).status, 200);
+assert.equal((await (await keys(alice)).json()).used, 2);
 
 // ---------- 退出 ----------
 assert.equal((await alice.call('/auth/logout', { method: 'POST', site: 'same-site' })).status, 403);

@@ -21,6 +21,7 @@ import {
 } from './api';
 import { configOf, type CardConfig } from '../format/config';
 import { initAlbums, openAlbums } from './albums-ui';
+import { initAccount, openAccount, refreshAccountButton } from './account-ui';
 import { Deck, forgetSession } from './deck';
 import { reducedMotion } from './pack';
 import { initTracking, pageView, track } from './track';
@@ -787,6 +788,7 @@ async function doShare(auto = false, id: string | null = currentId): Promise<voi
  * 二次确认是必须的：这个操作不可撤销，而且已经分享出去的链接会立刻失效。
  */
 initAlbums(need<HTMLDialogElement>('#albums'), describeError);
+initAccount(need<HTMLDialogElement>('#account'), need<HTMLButtonElement>('#account-open'), describeError);
 need<HTMLButtonElement>('#albums-open').addEventListener('click', openAlbums);
 
 async function doDelete(): Promise<void> {
@@ -1131,11 +1133,13 @@ async function boot(): Promise<void> {
   // 登录状态决定一张卡算不算「我的」（出不出卡包、给不给分享和删除），卡片页要等它；
   // 首页不等，打开卡册的时候早就回来了。截图用的 render 页面不问
   const meReady = route.mode === 'render' ? Promise.resolve() : loadMe();
+  void meReady.then(refreshAccountButton);
   if (route.id) await meReady;
-  // 从卡册点的登录，回来时地址带着 #albums：接着把卡册打开，好认领这台设备上的卡
-  if (location.hash === '#albums') {
+  // 从卡册点的登录，回来时地址带着 #albums：接着把卡册打开，好认领这台设备上的卡；从页头点的带着 #account，打开个人中心
+  if (location.hash === '#albums' || location.hash === '#account') {
+    const open = location.hash === '#albums' ? openAlbums : openAccount;
     history.replaceState(history.state, '', location.pathname + location.search);
-    void meReady.then(openAlbums);
+    void meReady.then(open);
   }
 
   const exportLayout = route.mode === 'render' ? renderExportLayout() : null;

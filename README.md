@@ -240,9 +240,10 @@ CSS 变量名（`--pointer-x`、`--background-x`、`--card-opacity` 等）刻意
 
 流程是授权码加 PKCE：HoloCard 跳到 involutionhell 的授权页，用户确认后带着一次性的码跳回来，服务端拿码直接找 involutionhell 后端换用户，之后发自己的会话。代码在 `server/auth.ts`，自检是 `scripts/verify-auth.mjs`。
 
-## 对外接口（白名单）
+## 对外接口
 
-给认识的少数调用方用，key 由站长发（见 deploy/README.md「对外接口的 key」），不开放自助申请。
+用 involutionhell 账号登录后，在页头的个人中心里自己申请 key（每个账号 24 小时最多 20 张，同时只能有一个 key，可以随时吊销重新申请）。
+要更高额度的找站长，由站长发（见 deploy/README.md「对外接口的 key」）。
 接口做的卡是私有的：只有提交它的 key 能看、能下载、能删，不能分享、不能导出，**提交后 24 小时自动清掉**，结果请自己存走。
 裸露识别做完才交付，分数高的直接拒绝（网页上传只记录不拦）。排队时网页用户优先。
 

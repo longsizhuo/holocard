@@ -83,7 +83,8 @@ export interface SessionRow {
 }
 
 /**
- * 对外接口的 key。只由站长用 scripts/apikey.mjs 发，不自助申请。
+ * 对外接口的 key。两个来源：登录用户在个人中心自己申请（user_id 是申请人的账号），
+ * 或者站长用 scripts/apikey.mjs 发（user_id 为空）。
  * 库里只存哈希：库文件泄露了，拿到的也不是能用的 key
  */
 export interface ApiKeyRow {
@@ -92,8 +93,10 @@ export interface ApiKeyRow {
   hash: string;
   created_at: number;
   revoked_at: number | null;
-  /** 这个 key 每 24 小时最多提交几张 */
+  /** 每 24 小时最多提交几张。账号自己申请的 key 按账号算（吊销了再申请不重新计数） */
   daily_limit: number;
+  /** 申请人的 IH 账号（user_accounts.id）。站长发的为空 */
+  user_id: string | null;
 }
 
 const SCHEMA = `
@@ -190,8 +193,11 @@ export class CardDb {
     if (!columns.has('source')) this.#db.exec("ALTER TABLE cards ADD COLUMN source TEXT NOT NULL DEFAULT 'web'");
     if (!columns.has('api_key')) this.#db.exec('ALTER TABLE cards ADD COLUMN api_key TEXT');
     this.#db.exec('CREATE INDEX IF NOT EXISTS cards_api_key ON cards(api_key, created_at)');
-    // 账号之前建的库：存量卡都没有主人账号
+    // 账号之前建的库：存量卡都没有主人账号，存量 key 都是站长发的
     if (!columns.has('user_id')) this.#db.exec('ALTER TABLE cards ADD COLUMN user_id TEXT');
+    const keyColumns = new Set((this.#db.prepare('PRAGMA table_info(api_keys)').all() as { name: string }[]).map((c) => c.name));
+    if (!keyColumns.has('user_id')) this.#db.exec('ALTER TABLE api_keys ADD COLUMN user_id TEXT');
+    this.#db.exec('CREATE INDEX IF NOT EXISTS api_keys_user ON api_keys(user_id)');
     this.#db.exec('CREATE INDEX IF NOT EXISTS cards_user ON cards(user_id, created_at)');
     // 性能埋点（见 perf.ts）也放这个库里：同一个进程写，同一个脚本（scripts/db.mjs）查
     this.#db.exec(PERF_SCHEMA);
@@ -307,6 +313,42 @@ export class CardDb {
       ? this.#db.prepare("SELECT COUNT(*) AS n FROM cards WHERE source = 'api' AND api_key = ? AND created_at >= ?").get(key, since)
       : this.#db.prepare("SELECT COUNT(*) AS n FROM cards WHERE source = 'api' AND created_at >= ?").get(since);
     return Number((row as { n: number }).n);
+  }
+
+  /**
+   * 这个 key 的额度用了多少：账号申请的 key 数这个账号所有 key 的，免得吊销了再申请一个重新计数；
+   * 站长发的 key 只数它自己
+   */
+  apiUsedSince(since: number, key: ApiKeyRow): number {
+    const row = key.user_id
+      ? this.#db
+          .prepare(
+            "SELECT COUNT(*) AS n FROM cards WHERE source = 'api' AND created_at >= ? AND api_key IN (SELECT id FROM api_keys WHERE user_id = ?)",
+          )
+          .get(since, key.user_id)
+      : this.#db.prepare("SELECT COUNT(*) AS n FROM cards WHERE source = 'api' AND api_key = ? AND created_at >= ?").get(key.id, since);
+    return Number((row as { n: number }).n);
+  }
+
+  /** 这个账号申请过的 key（含吊销的），最新的在前 */
+  userApiKeys(userId: string): ApiKeyRow[] {
+    return this.#db
+      .prepare('SELECT * FROM api_keys WHERE user_id = ? ORDER BY created_at DESC LIMIT 20')
+      .all(userId) as unknown as ApiKeyRow[];
+  }
+
+  insertApiKey(row: ApiKeyRow): void {
+    this.#db
+      .prepare('INSERT INTO api_keys (id, name, hash, created_at, revoked_at, daily_limit, user_id) VALUES (?, ?, ?, ?, ?, ?, ?)')
+      .run(row.id, row.name, row.hash, row.created_at, row.revoked_at, row.daily_limit, row.user_id);
+  }
+
+  /** 账号吊销自己的 key。别人的、已经吊销的改不到 */
+  revokeUserApiKey(id: string, userId: string): boolean {
+    const result = this.#db
+      .prepare('UPDATE api_keys SET revoked_at = ? WHERE id = ? AND user_id = ? AND revoked_at IS NULL')
+      .run(Date.now(), id, userId);
+    return Number(result.changes) > 0;
   }
 
   /** 某个 key 现在排着队、正在处理的有几张 */

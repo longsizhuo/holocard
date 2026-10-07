@@ -145,7 +145,8 @@ function accountBox(): HTMLElement | null {
   const out = el('button', { type: 'button', className: 'account__logout', textContent: t('account.logout') });
   out.addEventListener('click', () => {
     out.disabled = true;
-    void logout().then(() => render(false));
+    // 刷新页面：页头、卡算不算「我的」都跟着变，和个人中心里的退出一样
+    void logout().then(() => location.reload());
   });
   return el(
     'div',

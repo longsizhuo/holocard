@@ -1,8 +1,9 @@
 /**
  * 发、查、吊销对外接口（/v1）的 key
  *
- * key 不自助申请，只由站长在服务器上用这个脚本发给认识的调用方。库里只存 SHA-256，
- * key 本身只在 create 时打印这一次，丢了就吊销重发。
+ * 登录用户可以在个人中心自己申请（每个账号每天 20 张，见 server/index.ts 的 handleMyKeys）；
+ * 要更高额度的，由站长在服务器上用这个脚本发。库里只存 SHA-256，
+ * key 本身只在 create 时打印这一次，丢了就吊销重发。list 能看到所有 key，包括自己申请的，revoke 也都能吊销。
  * 生成和哈希的规则和 server/apikeys.ts 一致，两处要一起改。
  *
  * 用法：
@@ -46,7 +47,7 @@ if (command === 'create') {
   const since = Date.now() - 24 * 60 * 60 * 1000;
   const rows = db
     .prepare(
-      `SELECT k.id, k.name, k.daily_limit, k.created_at, k.revoked_at,
+      `SELECT k.id, k.name, k.daily_limit, k.created_at, k.revoked_at, k.user_id,
          (SELECT COUNT(*) FROM cards c WHERE c.source = 'api' AND c.api_key = k.id AND c.created_at >= ?) AS used
        FROM api_keys k ORDER BY k.created_at`,
     )
@@ -54,7 +55,7 @@ if (command === 'create') {
   if (rows.length === 0) console.log('还没有发过 key');
   for (const r of rows) {
     console.log(
-      `${r.id}  ${r.name}  24h ${r.used}/${r.daily_limit}  发于 ${time(r.created_at)}${r.revoked_at ? `  已吊销 ${time(r.revoked_at)}` : ''}`,
+      `${r.id}  ${r.name}${r.user_id ? `（IH 账号 ${r.user_id}，自己申请）` : ''}  24h ${r.used}/${r.daily_limit}  发于 ${time(r.created_at)}${r.revoked_at ? `  已吊销 ${time(r.revoked_at)}` : ''}`,
     );
   }
 } else if (command === 'revoke') {
