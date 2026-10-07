@@ -353,9 +353,13 @@ id 通过 `.env.production` 里的 `VITE_UMAMI_ID` 在构建时注入。
 对外接口（`/v1`）不经过浏览器，事件由服务端发进**同一个站点**（`server/umami.ts`），在「事件」里和网页的放在一起看：
 `api-submit`（`via`：self-serve 自己申请的 key / issued 站长发的）、`api-done`（`layers`、处理用时 `seconds`）、
 `api-fail`（`reason`：nsfw 之类裸露拒绝 / key_revoked / error）、`api-fetch`（调用方下载了结果，按第一层算）、
-`api-reject`（被拒的 `code`：quota_exceeded、rate_limited、queue_full…）。都带 `key`（key 的编号）。
-服务端发事件时每个 key 用一个固定的 UA，umami 里一个 key 只算一个访客，不会把网页访客数刷上去；
-要只看网页的访客，筛选里排除这些事件或按 key 区分即可。本机地址上的服务端（开发、自检脚本）不发。
+`api-reject`（被拒的 `code`：quota_exceeded、rate_limited、queue_full…）。都带 `key`（key 的编号）和 `user`（名字）。
+
+**按用户看**：「事件」里点开某个 api-* 事件，按属性 `user` 分组，就是每个人提交、做完、失败、下载了多少。
+每个事件还带 umami 的访客标识：自己申请的 key 是 `ih:<IH 账号 id>`，站长发的是 `key:<编号>`。
+umami 按「站点 + 标识」认访客，所以同一个账号换了 key、隔了几天也是同一个访客，访客数里每个接口用户只算一个，
+不会把网页访客数刷上去；第一次见到某个人时还会登记访客属性（`name`、`account`、`via`），在「会话」的详情里看。
+本机地址上的服务端（开发、自检脚本）不发。
 
 本机和局域网地址（localhost、127.x、10.x、192.168.x…）上不加载统计：本地用生产配置构建时站点 id 也在，
 以前在 127.0.0.1 上的测试全进了线上统计。查数据时照样加 `hostname = 'holocard.longsizhuo.com'`。

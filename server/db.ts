@@ -330,6 +330,12 @@ export class CardDb {
     return Number((row as { n: number }).n);
   }
 
+  /** 按编号找 key（含吊销的）：处理完一张接口卡，记统计时要知道是谁的 */
+  apiKey(id: string): ApiKeyRow | null {
+    const row = this.#db.prepare('SELECT * FROM api_keys WHERE id = ?').get(id);
+    return (row as ApiKeyRow | undefined) ?? null;
+  }
+
   /** 这个账号申请过的 key（含吊销的），最新的在前 */
   userApiKeys(userId: string): ApiKeyRow[] {
     return this.#db

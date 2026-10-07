@@ -725,8 +725,9 @@ async function runJob(id: string): Promise<void> {
   // 排队期间 key 被吊销了：吊销要立即生效，这张不做了，原图也不留
   if (card.source === 'api' && !(card.api_key && db.apiKeyActive(card.api_key))) {
     await rm(dir, { recursive: true, force: true }).catch(() => undefined);
-    if (db.update(id, { status: 'error', stage: null, error: 'key_revoked' }, 'queued')) {
-      trackApi(card.api_key ?? '', 'api-fail', { reason: 'key_revoked' });
+    const key = card.api_key ? db.apiKey(card.api_key) : null;
+    if (db.update(id, { status: 'error', stage: null, error: 'key_revoked' }, 'queued') && key) {
+      trackApi(key, 'api-fail', { reason: 'key_revoked' });
     }
     return;
   }
@@ -735,7 +736,8 @@ async function runJob(id: string): Promise<void> {
   const startedAt = Date.now();
   /** 接口卡的结果记进 umami；网页卡的由浏览器自己报（segment-ok / segment-fail） */
   const report = (name: string, data: Record<string, string | number>): void => {
-    if (card.source === 'api') trackApi(card.api_key ?? '', name, data);
+    const key = card.source === 'api' && card.api_key ? db.apiKey(card.api_key) : null;
+    if (key) trackApi(key, name, data);
   };
 
   // 上次就是在处理它的时候崩的（多半是抠图吃爆了内存），这次不抠，免得反复崩
@@ -1497,7 +1499,7 @@ async function handleV1(req: IncomingMessage, res: ServerResponse, url: URL): Pr
     /** 被拒（限流、额度、排满）也记一笔：看得出有没有人被卡住 */
     const reject = (status: number, code: string, message: string, params?: Record<string, string | number>): void => {
       fail(res, status, code, message, params);
-      trackApi(key.id, 'api-reject', { code });
+      trackApi(key, 'api-reject', { code });
     };
     if (apiAttemptLimited(key.id)) {
       reject(429, 'rate_limited', '提交太频繁了，过几分钟再试');
@@ -1549,7 +1551,7 @@ async function handleV1(req: IncomingMessage, res: ServerResponse, url: URL): Pr
       v1UploadingAll--;
     }
     if (!card) return;
-    trackApi(key.id, 'api-submit', { via: key.user_id ? 'self-serve' : 'issued' });
+    trackApi(key, 'api-submit', { via: key.user_id ? 'self-serve' : 'issued' });
     json(res, 202, {
       id: card.id,
       status: 'queued',
@@ -1646,7 +1648,7 @@ async function handleV1(req: IncomingMessage, res: ServerResponse, url: URL): Pr
     });
     res.end(data);
     // 结果有没有被取走：每张卡都有第一层，下它就算一次（HEAD 不算）
-    if (req.method === 'GET' && fileName.startsWith('layer-0.')) trackApi(key.id, 'api-fetch');
+    if (req.method === 'GET' && fileName.startsWith('layer-0.')) trackApi(key, 'api-fetch');
     return;
   }
 
