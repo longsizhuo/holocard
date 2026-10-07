@@ -28,8 +28,6 @@ Environment=HOLOCARD_CONCURRENCY=1
 Environment=HOLOCARD_MAX_QUEUE=4
 # 测试数据不用留久：没人看的卡 2 天就清
 Environment=HOLOCARD_TTL_MS=172800000
-# 假登录：防火墙不让 staging 连 IH 后端，点登录直接登进测试账号（见 deploy/README.md「登录」）
-Environment=HOLOCARD_AUTH_FAKE=1
 Restart=on-failure
 RestartSec=5s
 

@@ -68,18 +68,36 @@ ssh oracle 'cd /opt/holocard && node22/bin/node apikey.mjs revoke <id>'    # 立
 
 ## 登录（IH 通行证）
 
-用 involutionhell 账号登录，协议见 `server/auth.ts`。HoloCard 是 IH 后端里登记的 client `holocard`，回调地址
-`https://holocard.longsizhuo.com/auth/callback`。两边要配同一个 secret：
+用 involutionhell 账号登录，协议见 `server/auth.ts`。HoloCard 在 IH 后端登记了两个 client（IH 的 SECURITY.md INV-010）：
 
-- IH：`/home/ubuntu/involution-hell/.env` 里的 `SSO_HOLOCARD_SECRET`（改了要重建 backend 容器才生效）
-- HoloCard：`/etc/holocard/sso.env` 里的 `HOLOCARD_SSO_SECRET`（root 600），由 `holocard.service` 的 drop-in 用 `EnvironmentFile=` 读进来
+| client | 回跳地址 | IH 的 `.env` | HoloCard 这边 |
+|---|---|---|---|
+| `holocard` | `https://holocard.longsizhuo.com/auth/callback` | `SSO_HOLOCARD_SECRET` | `/etc/holocard/sso.env` |
+| `holocard-staging` | `https://holocard.staging.longsizhuo.com/auth/callback` | `SSO_HOLOCARD_STAGING_SECRET` | `/etc/holocard-staging/sso.env` |
 
-没配 secret 时登录入口不出现，其它一切照常。换码直连 `http://127.0.0.1:8080/internal/sso/token`，不走公网。
+两边配同一个 secret，HoloCard 那份由 systemd 的 drop-in 用 `EnvironmentFile=` 读进来（root 600）。没配 secret 的 client 两边都不认（fail closed）；
+HoloCard 没配 secret 时正式站不出登录入口，staging 自动换成测试账号登录（点登录直接登进共用的 `Staging` 账号，不经过 IH），
+正式地址下开假登录（`HOLOCARD_AUTH_FAKE=1`）服务端拒绝启动。
+
+换码：正式站直连 `http://127.0.0.1:8080/internal/sso/token`；staging 被防火墙挡着、连不到本机端口，走公网的 `https://api.involutionhell.com/internal/sso/token`。
 会话 cookie 是 `__Host-hc_session`（30 天），库里只存它的哈希（`sessions` 表）；认会话改东西的请求只收 `Sec-Fetch-Site: same-origin` 的，
 挡住同站的兄弟子域（holocard-staging 跑着没合并的代码）借访客的会话。
 
-staging 被防火墙隔开、连不到 IH 后端，用假登录（`HOLOCARD_AUTH_FAKE=1`）：点登录直接登进一个测试账号 `Staging`。
-正式地址下开这个开关，服务端拒绝启动。
+配 staging 的真实登录（IH 后端带 SSO 的版本上线之后；以 ubuntu 跑，secret 不落屏幕）：
+
+```bash
+S=$(openssl rand -hex 32)
+printf '\nSSO_HOLOCARD_STAGING_SECRET=%s\n' "$S" >> ~/involution-hell/.env
+sudo install -d -m 755 /etc/holocard-staging /etc/systemd/system/holocard-staging.service.d
+printf 'HOLOCARD_SSO_CLIENT_ID=holocard-staging\nHOLOCARD_SSO_SECRET=%s\nHOLOCARD_SSO_TOKEN_URL=https://api.involutionhell.com/internal/sso/token\n' "$S" \
+  | sudo install -m 600 /dev/stdin /etc/holocard-staging/sso.env
+printf '[Service]\nEnvironmentFile=/etc/holocard-staging/sso.env\n' | sudo install -m 644 /dev/stdin /etc/systemd/system/holocard-staging.service.d/sso.conf
+unset S
+cd ~/involution-hell && docker compose up -d backend       # IH 读新的 .env；日志里出现 [SSO] client holocard-staging 已启用
+sudo systemctl daemon-reload && sudo systemctl restart holocard-staging
+```
+
+正式站同理：`SSO_HOLOCARD_SECRET`、`/etc/holocard/sso.env`（`HOLOCARD_SSO_SECRET=…`，client id 和换码地址用默认值），drop-in 挂在 `holocard.service.d/`。
 
 ## 服务器上的布局
 

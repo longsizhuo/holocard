@@ -96,6 +96,7 @@ export interface IhUser {
  */
 export async function exchangeCode(o: {
   tokenUrl: string;
+  clientId: string;
   secret: string;
   code: string;
   verifier: string;
@@ -106,7 +107,7 @@ export async function exchangeCode(o: {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({
-        clientId: 'holocard',
+        clientId: o.clientId,
         clientSecret: o.secret,
         code: o.code,
         codeVerifier: o.verifier,

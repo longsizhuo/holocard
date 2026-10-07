@@ -131,13 +131,18 @@ const PUBLIC_ORIGIN = process.env.HOLOCARD_PUBLIC_ORIGIN ?? 'https://holocard.lo
  * 换码直连同机的 IH 后端，不走公网
  */
 const SSO_SECRET = process.env.HOLOCARD_SSO_SECRET ?? '';
+/** 在 IH 登记的 client。staging 单独一个（holocard-staging），secret 和回跳地址都和线上分开 */
+const SSO_CLIENT_ID = process.env.HOLOCARD_SSO_CLIENT_ID ?? 'holocard';
 const SSO_AUTHORIZE_URL = process.env.HOLOCARD_SSO_AUTHORIZE_URL ?? 'https://involutionhell.com/sso/authorize';
 const SSO_TOKEN_URL = process.env.HOLOCARD_SSO_TOKEN_URL ?? 'http://127.0.0.1:8080/internal/sso/token';
 /**
- * 假登录：/auth/login 直接登进一个测试账号，不经过 IH。只给 staging 用——它被防火墙隔开、连不到 IH 后端，
- * 又得能在手机上试登录后的界面。正式站开着它，谁都能登进同一个账号，所以正式地址下拒绝启动
+ * 假登录：/auth/login 直接登进一个测试账号，不经过 IH。只给 staging 用：要能在手机上试登录后的界面，
+ * 而 staging 的 IH client 密钥得由站长配（见 deploy/README.md「登录」）。staging 的地址上没配密钥时自动打开，
+ * 别处要显式设 HOLOCARD_AUTH_FAKE=1（本地开发）。正式站开着它谁都能登进同一个账号，所以正式地址下拒绝启动
  */
-const AUTH_FAKE = process.env.HOLOCARD_AUTH_FAKE === '1';
+const AUTH_FAKE =
+  process.env.HOLOCARD_AUTH_FAKE === '1' ||
+  (PUBLIC_ORIGIN === 'https://holocard.staging.longsizhuo.com' && SSO_SECRET === '');
 if (AUTH_FAKE && PUBLIC_ORIGIN === 'https://holocard.longsizhuo.com') {
   throw new Error('HOLOCARD_AUTH_FAKE 只能在 staging 用，正式站不能开');
 }
@@ -1655,7 +1660,7 @@ async function handleAuth(req: IncomingMessage, res: ServerResponse, url: URL): 
     const verifier = newSecret();
     const target = new URL(SSO_AUTHORIZE_URL);
     target.search = new URLSearchParams({
-      client_id: 'holocard',
+      client_id: SSO_CLIENT_ID,
       redirect_uri: redirectUri,
       state,
       code_challenge: pkceChallenge(verifier),
@@ -1676,7 +1681,14 @@ async function handleAuth(req: IncomingMessage, res: ServerResponse, url: URL): 
     // state 对不上：不是这个浏览器发起的登录（登录 CSRF），或者在 IH 那边待太久、cookie 过期了
     const user =
       saved && SSO_SECRET && timingSafeEqualStr(url.searchParams.get('state') ?? '', saved.state) && /^[\w-]{20,200}$/.test(code)
-        ? await exchangeCode({ tokenUrl: SSO_TOKEN_URL, secret: SSO_SECRET, code, verifier: saved.verifier, redirectUri })
+        ? await exchangeCode({
+            tokenUrl: SSO_TOKEN_URL,
+            clientId: SSO_CLIENT_ID,
+            secret: SSO_SECRET,
+            code,
+            verifier: saved.verifier,
+            redirectUri,
+          })
         : null;
     if (!user) {
       loginFailed(req, res, url, saved?.next ?? '/');
