@@ -43,7 +43,8 @@ const browser = await chromium.launch({
 const page = await browser.newPage({ viewport: { width: 900, height: 700 } });
 // 示例页引用的是本地 dist；给了 PLAYER_URL 就换成那份（发版后核对 CDN）
 if (process.env.PLAYER_URL) {
-  await page.route('**/dist/holocard.js', async (route) => route.fulfill({ response: await route.fetch({ url: process.env.PLAYER_URL }) }));
+  const body = Buffer.from(await (await fetch(process.env.PLAYER_URL)).arrayBuffer());
+  await page.route('**/dist/holocard.js', (route) => route.fulfill({ body, contentType: 'text/javascript' }));
 }
 const errors = [];
 page.on('pageerror', (e) => errors.push(String(e)));
