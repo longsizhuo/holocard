@@ -16,7 +16,7 @@ The full documentation is published at https://holocard.longsizhuo.com/docs/en/ 
 
 | Topic | Link |
 |---|---|
-| Guide | [/docs/en/guide/](https://holocard.longsizhuo.com/docs/en/guide/) |
+| Guide | [/docs/en/](https://holocard.longsizhuo.com/docs/en/) |
 | API | [/docs/en/api/](https://holocard.longsizhuo.com/docs/en/api/) |
 | Player `@holocard/player` | [/docs/en/player/](https://holocard.longsizhuo.com/docs/en/player/) |
 | File format `.layers` | [/docs/en/format/](https://holocard.longsizhuo.com/docs/en/format/) |

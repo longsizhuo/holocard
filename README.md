@@ -16,7 +16,7 @@ HoloCard 将照片自动分层，渲染为可交互的全息卡片：服务端�
 
 | 主题 | 链接 |
 |---|---|
-| 介绍与使用 | [/docs/guide/](https://holocard.longsizhuo.com/docs/guide/) |
+| 介绍与使用 | [/docs/](https://holocard.longsizhuo.com/docs/) |
 | API | [/docs/api/](https://holocard.longsizhuo.com/docs/api/) |
 | 播放器 `@holocard/player` | [/docs/player/](https://holocard.longsizhuo.com/docs/player/) |
 | 文件格式 `.layers` | [/docs/format/](https://holocard.longsizhuo.com/docs/format/) |
