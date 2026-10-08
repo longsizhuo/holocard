@@ -932,12 +932,6 @@ select {
 
 .albums__grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(132px, 1fr)); gap: 14px; }
 
-/* 每次打开先开一包（albums-ui.ts），放在网格的位置上 */
-.albums__pack {
-  position: relative;
-  height: min(56vh, 460px);
-}
-
 /* 卡册顶上的账号区：登录入口，或者「已登录：名字」和认领框（albums-ui.ts） */
 .account { margin: 0 0 14px; padding: 12px; border: 1px solid var(--line); border-radius: 12px; font-size: 13px; }
 .account__hint { margin: 0 0 10px; color: var(--muted); overflow-wrap: anywhere; }

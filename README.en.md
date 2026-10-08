@@ -226,8 +226,7 @@ Finished cards are kept in sessionStorage so a reload restores the strip. After 
 ## My album
 
 "My album" is simply every card made on this device (plus the cards in your account once you sign in), in a grid, newest first, with nothing to add by hand.
-Each time it opens you first open a pack: tear or tap it and the cards fly out one by one into the grid, all dealt within 2 seconds (tap to land them all at once).
-With no cards, or with reduced motion, it goes straight to the grid.
+It opens straight to the grid, with no pack to open.
 When you are not signed in, it is read from the delete-token record (each finished card stores its id and token), which lives only in this device's browser, just like delete tokens.
 The cards themselves live on the server and show as "Expired" once they are gone. Hand-made albums used to exist too; with few people using them, only this automatic one is kept for now.
 Grid thumbnails (`/api/layers/<id>/thumb.jpg`, longest side 480) are made when layering finishes; early cards that never stored an original get one on first request, stacked from their layers, made once per card and queued one at a time. Code: `src/demo/albums-ui.ts`.
