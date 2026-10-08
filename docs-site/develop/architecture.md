@@ -60,7 +60,7 @@ holocard/
 | `morph.ts` | 形态学工具：深度边缘吸附、膨胀、最近源像素传播、alpha 抗锯齿、碎块清理 |
 | `matte.ts` | BiRefNet_lite 抠主体，仅服务端使用 |
 | `runtime.ts` | 权重来源（Hugging Face、`VITE_MODEL_HOST` 镜像或本站 `/models/`）、设备选择（WebGPU / WASM / CPU）、推理线程数 |
-| `image-io.ts` | 图片解码 / 编码后端抽象。浏览器用 OffscreenCanvas，服务端注入 sharp 实现（`server/images.ts`） |
+| `image-io.ts` | 图片解码 / 编码后端抽象。浏览器用 OffscreenCanvas，服务端注入 sharp 实现（`server/pipeline/images.ts`） |
 
 ### `src/renderer`
 
@@ -87,7 +87,7 @@ holocard/
 | `api.ts` | 分层服务的客户端：提交与轮询、删除口令记录、分享、作者配置、账号与 key 接口。判断何时回退到浏览器端流水线 |
 | `deck.ts` | 首页卡带：本次访问的卡左右切换，上传时先放卡包，开包后换成新卡 |
 | `pack.ts` / `pack-gl.ts` / `pack-art.ts` | 卡包。`pack.ts` 是共用接口与外壳；`pack-gl.ts` 是 WebGL 三维铝箔袋；`pack-art.ts` 是无 WebGL 时的平面版图案 |
-| `albums-ui.ts` | 「我的卡册」：本设备做过的卡（登录后加上账号名下的卡），原生 `<dialog>`，打开时先开包再发牌 |
+| `albums-ui.ts` | 「我的卡册」：本设备做过的卡（登录后加上账号名下的卡），原生 `<dialog>`，打开即为网格 |
 | `account-ui.ts` | 个人中心：登录账号、退出、卡册入口，以及对外接口 key 的申请、用量与吊销 |
 | `export.ts` | 导出动图：按设备选择 GIF / 动态照片 / APNG，提交并等待服务端生成 |
 | `sfx.ts` | 开包音效，用 Web Audio 实时合成，开关保存在本机 |
@@ -120,19 +120,29 @@ holocard/
 
 | 文件 | 职责 |
 |---|---|
-| `index.ts` | HTTP 路由、任务队列、限流、分享页 OG 标签、层文件与缩略图、作者配置、导出、登录、个人中心、对外接口 `/v1`（`handleV1`）、健康检查 `/api/health` |
-| `segment-worker.ts` | 分层流水线的常驻工作线程 |
-| `db.ts` | 卡片数据库（`node:sqlite`）：卡片、会话、API key、性能埋点 |
-| `cards.ts` | 保留策略（`keepMs`、`expiresAt`）、访问计数、过期清理、旧格式迁移 |
-| `auth.ts` | involutionhell（IH）账号登录：授权码 + PKCE、会话与 state cookie |
-| `apikeys.ts` | 对外接口 key 的生成、哈希与从请求头读取 |
-| `eta.ts` | 剩余时间估计：按阶段的耗时指数平均 |
-| `images.ts` | sharp 图片编解码：原图规范化（摆正方向、去除 EXIF、HEIC 解码）、层图转 WebP、卡册缩略图 |
-| `moderation.ts` | NudeNet 裸露识别 |
-| `preview.ts` | 用无头 Chromium 打开 `/render/<id>` 截分享图，浏览器常驻复用 |
-| `export.ts` / `motionphoto.ts` | 导出动图（GIF、APNG、安卓动态照片） |
-| `perf.ts` | 性能埋点 `POST /api/perf` 的校验与表结构 |
+| `index.ts` | 入口：按路径分发请求、健康检查 `/api/health`、性能埋点 `POST /api/perf`、定时清理、启动（续跑中断的任务、补分享图与裸露识别） |
+| `config.ts` | 环境变量与由其推导的配置（端口、目录、额度、保留期、登录、抠图模型），各模块从这里读取 |
+| `http.ts` | JSON 与错误响应、读请求体、来源 IP、请求语言、限流、同源判断、HTML 转义 |
 | `umami.ts` | 对外接口的活动由服务端发送到 umami |
+| `routes/cards.ts` | 网页的卡片接口：上传、任务状态、分享、导出、作者配置、删除、层文件与缩略图、`/models/` 权重 |
+| `routes/static.ts` | 前端静态文件：按语言发页面、首页与分享页的 OG 标签、`robots.txt`、`sitemap.xml` |
+| `routes/account.ts` | `/auth/*` 登录与退出，`/api/me/*` 当前账号、认领与个人中心的 API key |
+| `routes/v1.ts` | 对外接口 `/v1` |
+| `pipeline/jobs.ts` | 分层任务：收上传（`acceptUpload`）、队列、调度工作线程、裸露识别、缩略图、启动时续跑 |
+| `pipeline/segment-worker.ts` | 分层流水线的常驻工作线程 |
+| `pipeline/images.ts` | sharp 图片编解码：原图规范化（摆正方向、去除 EXIF、HEIC 解码）、层图转 WebP、卡册缩略图 |
+| `pipeline/moderation.ts` | NudeNet 裸露识别 |
+| `pipeline/eta.ts` | 剩余时间估计：按阶段的耗时指数平均 |
+| `render/preview.ts` | 用无头 Chromium 打开 `/render/<id>` 截分享图，浏览器常驻复用 |
+| `render/previews.ts` | 分享图的渲染队列与失败重试 |
+| `render/export.ts` / `render/motionphoto.ts` | 导出动图（GIF、APNG、安卓动态照片） |
+| `render/exports.ts` | 导出的排队与状态 |
+| `store/db.ts` | 卡片数据库（`node:sqlite`）：卡片、会话、API key、管理员、性能埋点；`store/index.ts` 打开库 |
+| `store/cards.ts` | 保留策略（`keepMs`、`expiresAt`）、访问计数、过期清理、旧格式迁移 |
+| `store/perf.ts` | 性能埋点的校验与表结构 |
+| `account/auth.ts` | involutionhell（IH）账号登录：授权码 + PKCE、会话与 state cookie |
+| `account/session.ts` | 请求属于哪个账号、是否为卡片主人 |
+| `account/apikeys.ts` | 对外接口 key 的生成、哈希与从请求头读取 |
 | `dev.env` | `pnpm dev:server` 的本地目录默认值 |
 
 ### `packages/player`
@@ -177,11 +187,11 @@ npm 包 `@holocard/player` 的发布目录：`package.json`、`README.md`、示�
 - **提交重试**：网络断开或 5xx 时按 1、3、6 秒重试三次；`queue_full`、`disk_full` 不重试，避免重复上传整张照片。
 - **轮询容错**：轮询连续失败 60 秒才报错；排队期间不计入 5 分钟的总超时。
 - **回退到浏览器端**：只有部署中根本没有分层服务时才回退，判据是 `POST /api/jobs` 返回 404 / 405，或开发模式下 Vite 代理返回 502。服务端临时不可用时只报错，不回退，因为回退需要下载深度模型。浏览器端流水线不抠主体。
-- **剩余时间**：`eta` 由 `server/eta.ts` 按阶段计算，各阶段耗时取本机最近几张图的指数平均，排队时再加上前面的任务。
+- **剩余时间**：`eta` 由 `server/pipeline/eta.ts` 按阶段计算，各阶段耗时取本机最近几张图的指数平均，排队时再加上前面的任务。
 
 ### 分层工作线程
 
-onnxruntime-node 的推理同步运行在调用线程上，切层与补全是纯 JS 计算。放在主线程会使整个服务在处理期间无法响应，因此流水线运行在 `server/segment-worker.ts` 的工作线程中，主线程只负责收发请求。
+onnxruntime-node 的推理同步运行在调用线程上，切层与补全是纯 JS 计算。放在主线程会使整个服务在处理期间无法响应，因此流水线运行在 `server/pipeline/segment-worker.ts` 的工作线程中，主线程只负责收发请求。
 
 - 工作线程常驻一个，启动时预加载模型；分层一次只处理一张图（`HOLOCARD_CONCURRENCY` 调大也不会并行）。
 - 是否抠主体（`MATTE_READY`）取决于两个条件：模型目录中有抠图权重，且进程内存上限（systemd `MemoryMax`）不低于 8 GB 或未设上限。抠图模型可用 `HOLOCARD_MATTE_MODEL`、`HOLOCARD_MATTE_SIZE`、`HOLOCARD_MATTE_DTYPE` 更换。
@@ -192,9 +202,9 @@ onnxruntime-node 的推理同步运行在调用线程上，切层与补全是纯
 
 ### 卡片存储与保留
 
-`server/db.ts` 中每张卡一行，是卡片状态的唯一来源。状态有 `queued`、`running`、`done`、`error`、`deleted`（上传者删除，文件真删）、`expired`（过期清理）、`removed`（站长下架，文件移入 `.removed/<id>`，可恢复）。
+`server/store/db.ts` 中每张卡一行，是卡片状态的唯一来源。状态有 `queued`、`running`、`done`、`error`、`deleted`（上传者删除，文件真删）、`expired`（过期清理）、`removed`（站长下架，文件移入 `.removed/<id>`，可恢复）。
 
-保留期由 `server/cards.ts` 计算：
+保留期由 `server/store/cards.ts` 计算：
 
 | 卡片 | 保留期 |
 |---|---|
@@ -222,8 +232,8 @@ onnxruntime-node 的推理同步运行在调用线程上，切层与补全是纯
 
 两者都由服务端用 Playwright 打开自己的 `/render/<id>` 页面截取，画面与用户看到的是同一套渲染。
 
-- **分享图**（`server/preview.ts`）：1200×630，每种语言一张（`preview.jpg`、`preview-en.jpg`、`preview-ja.jpg`）。渲染队列一次一张，失败重试；卡片页被打开时发现缺图会补做，服务启动时也会补齐。
-- **导出动图**（`server/export.ts`）：`POST /api/cards/<id>/export/<gif|motion|apng>` 提交，`GET` 同一地址查询状态。前端按设备选择格式：iPhone / iPad 为 GIF，安卓为动态照片（JPEG 末尾接 MP4），电脑为 APNG。导出按 IP 限流，生成的文件放在卡片目录中，随卡片一起过期或删除。
+- **分享图**（`server/render/preview.ts`）：1200×630，每种语言一张（`preview.jpg`、`preview-en.jpg`、`preview-ja.jpg`）。渲染队列一次一张，失败重试；卡片页被打开时发现缺图会补做，服务启动时也会补齐。
+- **导出动图**（`server/render/export.ts`）：`POST /api/cards/<id>/export/<gif|motion|apng>` 提交，`GET` 同一地址查询状态。前端按设备选择格式：iPhone / iPad 为 GIF，安卓为动态照片（JPEG 末尾接 MP4），电脑为 APNG。导出按 IP 限流，生成的文件放在卡片目录中，随卡片一起过期或删除。
 
 本地 `pnpm dev:server` 不发送前端页面，因此无法截图；调试这两项使用 `pnpm og`。
 
@@ -246,7 +256,7 @@ onnxruntime-node 的推理同步运行在调用线程上，切层与补全是纯
 
 ### 对外接口
 
-`/v1` 由 `server/index.ts` 的 `handleV1` 处理，与网页共用上传处理（`acceptUpload`）和分层队列，区别如下：
+`/v1` 由 `server/routes/v1.ts` 处理，与网页共用上传处理（`acceptUpload`）和分层队列，区别如下：
 
 - 以 `Authorization: Bearer hc_…` 鉴权，key 的哈希存在 `api_keys` 表。
 - 卡片私有：只对提交它的 key 可见，在 `/api/jobs`、`/api/layers`、分享、导出、作者配置、`/c/<id>` 上视同不存在。

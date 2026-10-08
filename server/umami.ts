@@ -15,7 +15,8 @@
  * 发不出去就算了：统计不能影响接口本身。
  */
 
-import type { ApiKeyRow } from './db';
+import type { ApiKeyRow } from './store/db';
+import { PUBLIC_ORIGIN } from './config';
 
 const ENDPOINT = `${import.meta.env.VITE_UMAMI_URL ?? 'https://umami.involutionhell.com'}/api/send`;
 const WEBSITE_ID: string = import.meta.env.VITE_UMAMI_ID ?? '';
@@ -49,3 +50,6 @@ export function apiTracker(origin: string): (key: KeyInfo, name: string, data?: 
     send('event', { id, name, data: { key: key.id, user: key.name, ...data } });
   };
 }
+
+/** 对外接口的活动记进 umami */
+export const trackApi = apiTracker(PUBLIC_ORIGIN);

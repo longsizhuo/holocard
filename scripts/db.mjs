@@ -42,7 +42,7 @@ const median = (values) => {
 };
 
 if (arg === 'nsfw') {
-  // 默认阈值和服务端打日志的一样（server/index.ts 的 NSFW_LOG_THRESHOLD）
+  // 默认阈值和服务端打日志的一样（server/pipeline/jobs.ts 的 NSFW_LOG_THRESHOLD）
   const threshold = Number(process.argv[3] ?? 0.4);
   const rows = db
     .prepare(

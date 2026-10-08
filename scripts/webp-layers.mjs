@@ -2,7 +2,7 @@
  * 把早期的卡（层图还是 PNG）转成 WebP。
  *
  * 2026-09 下旬以前做的卡，每层是 PNG，四层加起来十来 MB，手机上卡片页要白屏很久才出来；
- * 后来的卡存盘时就转成了 WebP（画面有损、alpha 无损，体积约一成，见 server/images.ts 的 layerToWebp），这里用同样的参数补转。
+ * 后来的卡存盘时就转成了 WebP（画面有损、alpha 无损，体积约一成，见 server/pipeline/images.ts 的 layerToWebp），这里用同样的参数补转。
  *
  * 用法（以 ubuntu 跑，产物目录默认 /srv/holocard-layers）：
  *   node scripts/webp-layers.mjs              只列出要转的卡，不动文件

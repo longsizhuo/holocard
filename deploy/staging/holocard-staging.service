@@ -35,7 +35,7 @@ RestartSec=5s
 # 内存上限是给抠主体留的：峰值约 7GB，推理完回落。和线上恰好同时抠图时整机会吃紧，
 # OOMScoreAdjust 让内核真要杀进程时先杀 staging。
 # ponytail: 没加跨服务的锁，staging 用的人少、撞上的概率低；真撞上多了再给两边套一个共享 slice
-# 不到 8G 服务就不抠主体（server/index.ts 的 MATTE_MIN_MEMORY），多给 1G 留给预览图的 Chromium
+# 不到 8G 服务就不抠主体（server/config.ts 的 MATTE_MIN_MEMORY），多给 1G 留给预览图的 Chromium
 MemoryMax=9G
 OOMScoreAdjust=500
 CPUQuota=100%

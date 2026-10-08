@@ -34,7 +34,7 @@ The service listens on `127.0.0.1` only and does not expose a port directly.
 
 At startup the service reads its own memory limit (`process.constrainedMemory()`, i.e. the cgroup memory limit such as systemd's `MemoryMax`):
 
-- If the limit is below 8 GB (`MATTE_MIN_MEMORY` in `server/index.ts`), subject matting is disabled even when its weights are present, and layering uses depth only. This prevents the cgroup from killing the process during inference.
+- If the limit is below 8 GB (`MATTE_MIN_MEMORY` in `server/config.ts`), subject matting is disabled even when its weights are present, and layering uses depth only. This prevents the cgroup from killing the process during inference.
 - If no limit is set, matting is enabled whenever the weights exist; physical memory is not checked. On machines with less than 10 GB of RAM, set `MemoryMax` or leave out the matting weights.
 
 The "模型目录" (model directory) line in the startup log shows whether matting is enabled: it lists the model in parentheses when enabled, and states that the memory limit is insufficient or that the matting weights are missing otherwise.
@@ -346,7 +346,7 @@ The `status` field moves through `queued` → `running` → `done` / `error`, an
 
 ### Cleanup rules
 
-Cleanup is driven by the database (`server/cards.ts`), not by directory modification times. It runs once at startup and every 15 minutes afterwards.
+Cleanup is driven by the database (`server/store/cards.ts`), not by directory modification times. It runs once at startup and every 15 minutes afterwards.
 
 | Card | Retention starts at | Retention |
 |---|---|---|
@@ -400,7 +400,7 @@ Back up the database and the output directory; model weights and build outputs c
 
 ### Nudity detection
 
-After each card is layered, the server checks the original with NudeNet (a body-part detection model, `server/moderation.ts`). Only full nudity counts: exposed genitalia, anus or female breasts; swimwear, low necklines, bare backs and similar are not counted. The highest score and the part are stored in the `nsfw` (0..1) and `nsfw_part` columns. The model runs locally; images never leave the server.
+After each card is layered, the server checks the original with NudeNet (a body-part detection model, `server/pipeline/moderation.ts`). Only full nudity counts: exposed genitalia, anus or female breasts; swimwear, low necklines, bare backs and similar are not counted. The highest score and the part are stored in the `nsfw` (0..1) and `nsfw_part` columns. The model runs locally; images never leave the server.
 
 | Source | Score ≥ 0.4 | Model unavailable |
 |---|---|---|
@@ -458,7 +458,7 @@ Cards created through the API are removed 24 hours after submission. Requests re
 
 ## Login
 
-Login enables the online album, saving cards to an account (where they never expire) and self-service API keys; the protocol is implemented in `server/auth.ts`. When `HOLOCARD_SSO_SECRET` is not set, login is disabled, no login entry is shown, and all other features work normally.
+Login enables the online album, saving cards to an account (where they never expire) and self-service API keys; the protocol is implemented in `server/account/auth.ts`. When `HOLOCARD_SSO_SECRET` is not set, login is disabled, no login entry is shown, and all other features work normally.
 
 The defaults point to the involutionhell (IH) account service, which only accepts clients registered with IH. A self-hosted deployment can leave login disabled or connect to an authorization server that implements the protocol below.
 

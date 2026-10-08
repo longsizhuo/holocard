@@ -113,9 +113,9 @@ pnpm og --export gif       # 导出动图：gif / motion / apng，写到 out/exp
 | 回退到浏览器端分层的判断（`src/demo/api.ts`） | `pnpm build && node scripts/verify-fallback.mjs` | 无，脚本自带模拟服务端 |
 | 陀螺仪（`src/renderer/gyro.ts`） | `node scripts/verify-gyro.mjs` | 无 |
 | 作者配置的校验（`src/format/config.ts`） | `node scripts/verify-config.mjs` | 无 |
-| 性能埋点（`src/demo/perf.ts`、`server/perf.ts`） | `node scripts/verify-perf.mjs [--url …] [--browser chromium\|webkit\|firefox]` | `pnpm dev` 与 `pnpm dev:server` |
-| 对外接口 `/v1`（`server/index.ts` 的 `handleV1`、`server/apikeys.ts`） | `HOLOCARD_DB=out/data/holocard.db HOLOCARD_OUT_DIR=out/layers node scripts/verify-api.mjs http://127.0.0.1:8791` | `pnpm dev:server`，且 `.models/` 下有 NudeNet 权重 |
-| 登录、卡片归属与认领、个人中心的 API key（`server/auth.ts` 及相关路由） | `pnpm build:server && HOLOCARD_MODEL_DIR=.models node scripts/verify-auth.mjs` | 深度模型权重。脚本自行启动模拟 IH 与临时服务端，不需要开发服务 |
+| 性能埋点（`src/demo/perf.ts`、`server/store/perf.ts`） | `node scripts/verify-perf.mjs [--url …] [--browser chromium\|webkit\|firefox]` | `pnpm dev` 与 `pnpm dev:server` |
+| 对外接口 `/v1`（`server/routes/v1.ts`、`server/account/apikeys.ts`） | `HOLOCARD_DB=out/data/holocard.db HOLOCARD_OUT_DIR=out/layers node scripts/verify-api.mjs http://127.0.0.1:8791` | `pnpm dev:server`，且 `.models/` 下有 NudeNet 权重 |
+| 登录、卡片归属与认领、个人中心的 API key（`server/account/auth.ts` 及相关路由） | `pnpm build:server && HOLOCARD_MODEL_DIR=.models node scripts/verify-auth.mjs` | 深度模型权重。脚本自行启动模拟 IH 与临时服务端，不需要开发服务 |
 | 页头与个人中心界面（`account-ui.ts`） | `pnpm build && pnpm build:server && node scripts/verify-account.mjs` | 无。脚本以假登录启动临时服务端 |
 | 播放器 `<holo-card>`（`src/player/`、`packages/player/`） | `pnpm build:player && node scripts/verify-player.mjs [截图目录]` | Chromium，见下方说明 |
 | 开包音效（`src/demo/sfx.ts`） | `node scripts/render-sfx.mjs`，试听 `/tmp/sfx/reel.wav` | `pnpm dev` |
@@ -180,7 +180,7 @@ node scripts/blind/score.mjs /tmp/exp/pack/key.json "1A 2= 3B 4X ..." --candidat
 
 | 脚本 | 作用 |
 |---|---|
-| `run-variant.mjs` | 以最低优先级（`nice 19`）启动临时分层服务，逐张提交，输出 `layers/`、`ids.tsv`（原图名 → 卡片 id）与 `timing.json`。待比较的配置通过环境变量传入，服务端支持的变量见 `server/index.ts`（抠图模型为 `HOLOCARD_MATTE_*`） |
+| `run-variant.mjs` | 以最低优先级（`nice 19`）启动临时分层服务，逐张提交，输出 `layers/`、`ids.tsv`（原图名 → 卡片 id）与 `timing.json`。待比较的配置通过环境变量传入，服务端支持的变量见 `server/config.ts`（抠图模型为 `HOLOCARD_MATTE_*`） |
 | `pack.mjs` | 配对、按 `--min-iou` 筛选、随机分配 A/B，生成对比页 `page/` 与答案 `key.json`。页面数据中去除了 manifest 的 `generator`（含模型名） |
 | `score.mjs` | 结果串中 `A` / `B` 表示该侧更好，`=` 表示相近，`X` 表示两侧都有问题，`A!` / `B!` 表示对面有明显缺陷。分别统计偏好与缺陷率，核对组单独计算 |
 

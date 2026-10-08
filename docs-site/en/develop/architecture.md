@@ -60,7 +60,7 @@ The layering pipeline: photo → depth estimation → slicing → (server) subje
 | `morph.ts` | Morphology helpers: depth-edge snapping, dilation, nearest-source propagation, alpha anti-aliasing, fragment removal |
 | `matte.ts` | BiRefNet_lite subject matting, server only |
 | `runtime.ts` | Weight source (Hugging Face, a `VITE_MODEL_HOST` mirror, or the site's own `/models/`), device selection (WebGPU / WASM / CPU), inference thread count |
-| `image-io.ts` | Image decode / encode backend abstraction. The browser uses OffscreenCanvas; the server injects a sharp implementation (`server/images.ts`) |
+| `image-io.ts` | Image decode / encode backend abstraction. The browser uses OffscreenCanvas; the server injects a sharp implementation (`server/pipeline/images.ts`) |
 
 ### `src/renderer`
 
@@ -87,7 +87,7 @@ The site frontend, i.e. holocard.longsizhuo.com.
 | `api.ts` | Client of the layering service: submit and poll, delete-token records, share, author config, account and key endpoints. Decides when to fall back to the in-browser pipeline |
 | `deck.ts` | The card strip on the home page: cards made in this visit, a pack shown while uploading, replaced by the new card after opening |
 | `pack.ts` / `pack-gl.ts` / `pack-art.ts` | Card packs. `pack.ts` is the shared interface and shell; `pack-gl.ts` is the WebGL 3D foil bag; `pack-art.ts` draws the flat fallback without WebGL |
-| `albums-ui.ts` | "My albums": cards made on this device (plus the account's cards when signed in), a native `<dialog>` that opens a pack and deals cards into the grid |
+| `albums-ui.ts` | "My albums": cards made on this device (plus the account's cards when signed in), a native `<dialog>` that opens straight to the grid |
 | `account-ui.ts` | Account panel: signed-in account, sign-out, album entry, and requesting, monitoring and revoking public API keys |
 | `export.ts` | Exported animations: picks GIF / motion photo / APNG by device, submits and waits for the server |
 | `sfx.ts` | Pack sound effects synthesised with Web Audio; the on/off switch is stored locally |
@@ -120,19 +120,29 @@ The layering service is one Node process that serves the frontend's static files
 
 | File | Responsibility |
 |---|---|
-| `index.ts` | HTTP routing, job queue, rate limits, OG tags for share pages, layer files and thumbnails, author config, export, sign-in, account endpoints, the public API `/v1` (`handleV1`), health check `/api/health` |
-| `segment-worker.ts` | Long-lived worker thread running the layering pipeline |
-| `db.ts` | Card database (`node:sqlite`): cards, sessions, API keys, performance beacons |
-| `cards.ts` | Retention (`keepMs`, `expiresAt`), hit counting, expiry sweep, legacy migration |
-| `auth.ts` | Sign-in with an involutionhell (IH) account: authorization code + PKCE, session and state cookies |
-| `apikeys.ts` | Generating, hashing and reading public API keys from request headers |
-| `eta.ts` | Remaining-time estimate from exponentially averaged per-stage durations |
-| `images.ts` | sharp image codecs: normalising originals (orientation, EXIF removal, HEIC decoding), converting layers to WebP, album thumbnails |
-| `moderation.ts` | NudeNet nudity detection |
-| `preview.ts` | Captures share images by opening `/render/<id>` in headless Chromium, keeping the browser warm |
-| `export.ts` / `motionphoto.ts` | Exported animations (GIF, APNG, Android motion photo) |
-| `perf.ts` | Validation and schema for the `POST /api/perf` beacon |
+| `index.ts` | Entry: request dispatch, health check `/api/health`, performance beacon `POST /api/perf`, periodic sweep, startup (resuming interrupted jobs, backfilling share images and nudity scores) |
+| `config.ts` | Environment variables and derived settings (port, directories, quotas, retention, sign-in, matting model); other modules read from here |
+| `http.ts` | JSON and error responses, reading request bodies, client IP, request language, rate limiting, same-origin checks, HTML escaping |
 | `umami.ts` | Sends public API activity to umami from the server |
+| `routes/cards.ts` | Card endpoints for the website: upload, job status, sharing, export, author config, deletion, layer files and thumbnails, `/models/` weights |
+| `routes/static.ts` | Frontend static files: pages in the request language, OG tags for the home and share pages, `robots.txt`, `sitemap.xml` |
+| `routes/account.ts` | `/auth/*` sign-in and sign-out; `/api/me/*` current account, claiming and API keys in the account panel |
+| `routes/v1.ts` | The public API `/v1` |
+| `pipeline/jobs.ts` | Layering jobs: accepting uploads (`acceptUpload`), the queue, dispatching to the worker thread, nudity detection, thumbnails, resuming on startup |
+| `pipeline/segment-worker.ts` | Long-lived worker thread running the layering pipeline |
+| `pipeline/images.ts` | sharp image codecs: normalising originals (orientation, EXIF removal, HEIC decoding), converting layers to WebP, album thumbnails |
+| `pipeline/moderation.ts` | NudeNet nudity detection |
+| `pipeline/eta.ts` | Remaining-time estimate from exponentially averaged per-stage durations |
+| `render/preview.ts` | Captures share images by opening `/render/<id>` in headless Chromium, keeping the browser warm |
+| `render/previews.ts` | Share-image render queue and retries |
+| `render/export.ts` / `render/motionphoto.ts` | Exported animations (GIF, APNG, Android motion photo) |
+| `render/exports.ts` | Export queue and status |
+| `store/db.ts` | Card database (`node:sqlite`): cards, sessions, API keys, admins, performance beacons; `store/index.ts` opens it |
+| `store/cards.ts` | Retention (`keepMs`, `expiresAt`), hit counting, expiry sweep, legacy migration |
+| `store/perf.ts` | Validation and schema for performance beacons |
+| `account/auth.ts` | Sign-in with an involutionhell (IH) account: authorization code + PKCE, session and state cookies |
+| `account/session.ts` | Which account a request belongs to, and whether it owns a card |
+| `account/apikeys.ts` | Generating, hashing and reading public API keys from request headers |
 | `dev.env` | Local directory defaults for `pnpm dev:server` |
 
 ### `packages/player`
@@ -177,11 +187,11 @@ Rules:
 - **Submit retries**: on network errors or 5xx the frontend retries after 1, 3 and 6 seconds; `queue_full` and `disk_full` are not retried, to avoid re-uploading the whole photo.
 - **Polling tolerance**: polling reports an error only after failing continuously for 60 seconds; time spent queued does not count toward the 5-minute overall timeout.
 - **Falling back to the browser**: only when the deployment has no layering service at all, i.e. `POST /api/jobs` returns 404 / 405, or the Vite proxy returns 502 in development. A temporarily unavailable server yields an error, not a fallback, because the fallback downloads the depth model. The in-browser pipeline does not matte the subject.
-- **Remaining time**: `eta` is computed per stage by `server/eta.ts` from exponential averages of the last few images on this machine, plus the jobs ahead when queued.
+- **Remaining time**: `eta` is computed per stage by `server/pipeline/eta.ts` from exponential averages of the last few images on this machine, plus the jobs ahead when queued.
 
 ### Layering worker thread
 
-onnxruntime-node runs inference synchronously on the calling thread, and slicing and completion are plain JS. On the main thread this would make the whole service unresponsive during processing, so the pipeline runs in the worker thread of `server/segment-worker.ts` and the main thread only handles requests.
+onnxruntime-node runs inference synchronously on the calling thread, and slicing and completion are plain JS. On the main thread this would make the whole service unresponsive during processing, so the pipeline runs in the worker thread of `server/pipeline/segment-worker.ts` and the main thread only handles requests.
 
 - One long-lived worker preloads the models at startup; layering processes one image at a time (raising `HOLOCARD_CONCURRENCY` does not parallelise it).
 - Subject matting (`MATTE_READY`) requires both matting weights in the model directory and a process memory limit (systemd `MemoryMax`) of at least 8 GB, or no limit. The matting model can be switched with `HOLOCARD_MATTE_MODEL`, `HOLOCARD_MATTE_SIZE` and `HOLOCARD_MATTE_DTYPE`.
@@ -192,9 +202,9 @@ onnxruntime-node runs inference synchronously on the calling thread, and slicing
 
 ### Storage and retention
 
-`server/db.ts` keeps one row per card as the single source of truth. Statuses are `queued`, `running`, `done`, `error`, `deleted` (deleted by the uploader; files are really removed), `expired` (swept after retention) and `removed` (taken down by the operator; files are moved to `.removed/<id>` and can be restored).
+`server/store/db.ts` keeps one row per card as the single source of truth. Statuses are `queued`, `running`, `done`, `error`, `deleted` (deleted by the uploader; files are really removed), `expired` (swept after retention) and `removed` (taken down by the operator; files are moved to `.removed/<id>` and can be restored).
 
-Retention is computed in `server/cards.ts`:
+Retention is computed in `server/store/cards.ts`:
 
 | Card | Retention |
 |---|---|
@@ -222,8 +232,8 @@ Operations that require ownership:
 
 Both are captured by the server opening its own `/render/<id>` page with Playwright, so they use the same rendering users see.
 
-- **Share images** (`server/preview.ts`): 1200×630, one per language (`preview.jpg`, `preview-en.jpg`, `preview-ja.jpg`). Rendering is queued one at a time with retries; a missing image is rendered when the card page is opened, and missing ones are backfilled at startup.
-- **Exported animations** (`server/export.ts`): `POST /api/cards/<id>/export/<gif|motion|apng>` submits, `GET` on the same URL reports status. The frontend picks the format by device: GIF on iPhone / iPad, a motion photo (JPEG followed by MP4) on Android, APNG on desktop. Exports are rate-limited per IP, and the files live in the card directory, expiring or being deleted with the card.
+- **Share images** (`server/render/preview.ts`): 1200×630, one per language (`preview.jpg`, `preview-en.jpg`, `preview-ja.jpg`). Rendering is queued one at a time with retries; a missing image is rendered when the card page is opened, and missing ones are backfilled at startup.
+- **Exported animations** (`server/render/export.ts`): `POST /api/cards/<id>/export/<gif|motion|apng>` submits, `GET` on the same URL reports status. The frontend picks the format by device: GIF on iPhone / iPad, a motion photo (JPEG followed by MP4) on Android, APNG on desktop. Exports are rate-limited per IP, and the files live in the card directory, expiring or being deleted with the card.
 
 `pnpm dev:server` does not serve the frontend, so it cannot take these screenshots; use `pnpm og` to work on them locally.
 
@@ -246,7 +256,7 @@ Sign-in is optional and is enabled when an IH client secret (`HOLOCARD_SSO_SECRE
 
 ### Public API
 
-`/v1` is handled by `handleV1` in `server/index.ts`. It shares upload handling (`acceptUpload`) and the layering queue with the website, with these differences:
+`/v1` is handled by `server/routes/v1.ts`. It shares upload handling (`acceptUpload`) and the layering queue with the website, with these differences:
 
 - Authentication with `Authorization: Bearer hc_…`; key hashes are stored in the `api_keys` table.
 - Cards are private: visible only to the key that submitted them, and treated as nonexistent on `/api/jobs`, `/api/layers`, share, export, author config and `/c/<id>`.

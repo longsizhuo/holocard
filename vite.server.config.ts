@@ -31,10 +31,10 @@ export default defineConfig({
     minify: false, // 服务端不在乎体积，可读的堆栈更有用
     rollupOptions: {
       /*
-       * 两个入口：服务本体，和跑分层流水线的工作线程（为什么要单独一个线程见 server/segment-worker.ts）。
+       * 两个入口：服务本体，和跑分层流水线的工作线程（为什么要单独一个线程见 server/pipeline/segment-worker.ts）。
        * 两边共用的代码拆成 chunks/ 下的文件，发版脚本整个目录一起传
        */
-      input: { 'holocard-server': 'server/index.ts', 'segment-worker': 'server/segment-worker.ts' },
+      input: { 'holocard-server': 'server/index.ts', 'segment-worker': 'server/pipeline/segment-worker.ts' },
       external: ['sharp', '@huggingface/transformers', 'onnxruntime-node', /^node:/],
       output: { format: 'esm', entryFileNames: '[name].mjs', chunkFileNames: 'chunks/[name]-[hash].mjs' },
     },

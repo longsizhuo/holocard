@@ -462,7 +462,7 @@ let progressBase = 0;
 let progressAt = 0;
 let progressTimer = 0;
 /**
- * 服务端给的剩余秒数（见 server/eta.ts）和收到它的时刻，倒计时在两次轮询之间自己往下走。
+ * 服务端给的剩余秒数（见 server/pipeline/eta.ts）和收到它的时刻，倒计时在两次轮询之间自己往下走。
  * 有它的时候进度条也跟着它走：「已用 / (已用 + 剩余)」，和倒计时说的是同一件事
  */
 let etaSeconds: number | null = null;
@@ -744,7 +744,7 @@ drop.addEventListener('drop', (event) => {
 // ---------- 分享与删除 ----------
 
 /**
- * 把这张卡转为分享状态（保留期改按访问续期，见 server/cards.ts 的 expiresAt），并拿到分享链接。
+ * 把这张卡转为分享状态（保留期改按访问续期，见 server/store/cards.ts 的 expiresAt），并拿到分享链接。
  * 请求头带着当前语言：服务端按它渲染这个语言的分享图，链接上也带上语言，
  * 发到群里别人点开看到的标题、描述、分享图都是分享人的语言。
  *
@@ -1050,7 +1050,7 @@ async function preloadTextures(): Promise<void> {
 }
 
 /**
- * 给服务端逐帧导出用的两个钩子（server/export.ts）：
+ * 给服务端逐帧导出用的两个钩子（server/render/export.ts）：
  *   __hcExportPose   摆一个姿态
  *   __hcExportLayer  竖屏导出分两遍截——背景是静的只截一次，卡片每帧截、透明底，
  *                    最后由 ffmpeg 叠起来。服务器没有显卡，模糊过的背景每帧重画太贵
