@@ -7,7 +7,7 @@ import { defineConfig } from 'vitepress';
  */
 /** 顶栏：回到网站 + 几个主要栏目 */
 const nav = (prefix: string, t: { guide: string; api: string; player: string; develop?: string }) => [
-  { text: t.guide, link: `${prefix}/guide/` },
+  { text: t.guide, link: `${prefix}/` },
   { text: 'API', link: `${prefix}/api/` },
   { text: t.player, link: `${prefix}/player/` },
   ...(t.develop ? [{ text: t.develop, link: `${prefix}/develop/` }] : []),
@@ -23,7 +23,7 @@ const sidebar = (
   {
     text: t.use,
     items: [
-      { text: t.guide, link: `${prefix}/guide/` },
+      { text: t.guide, link: `${prefix}/` },
       { text: 'API', link: `${prefix}/api/` },
       { text: t.player, link: `${prefix}/player/` },
       { text: t.format, link: `${prefix}/format/` },
