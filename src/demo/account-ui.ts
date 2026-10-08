@@ -68,7 +68,16 @@ function keyBox(state: { keys: MyKey[]; used: number; dailyLimit: number }): HTM
       field.select();
       void navigator.clipboard?.writeText(field.value).then(() => (copy.textContent = t('api.copied')), () => undefined);
     });
-    const curl = `curl -X POST ${location.origin}/v1/cards \\\n  -H "Authorization: Bearer ${fresh.key}" \\\n  -H "Content-Type: image/jpeg" --data-binary @photo.jpg`;
+    const auth = `-H "Authorization: Bearer ${fresh.key}"`;
+    const curl = [
+      `# ${t('api.curlSubmit')}`,
+      `curl -X POST ${location.origin}/v1/cards \\`,
+      `  ${auth} \\`,
+      `  -H "Content-Type: image/jpeg" --data-binary @photo.jpg`,
+      '',
+      `# ${t('api.curlPoll')}`,
+      `curl ${location.origin}/v1/cards/<id> ${auth}`,
+    ].join('\n');
     box.append(
       el('p', { className: 'api__fresh', textContent: t('api.fresh') }),
       el('div', { className: 'api__row' }, field, copy),
@@ -197,6 +206,21 @@ async function render(): Promise<void> {
         ' ',
         el('a', { href: docsUrl(), target: '_blank', rel: 'noreferrer', textContent: t('api.docs') }),
       ),
+      // 四步：拿 key → 交图 → 取文件 → 放进网页。只给 curl 不说流程，第一次用的人卡在「photo.jpg 是什么」
+      el(
+        'ol',
+        { className: 'api__steps' },
+        el('li', { textContent: t('api.step1') }),
+        el('li', { textContent: t('api.step2') }),
+        el('li', { textContent: t('api.step3') }),
+        el(
+          'li',
+          {},
+          t('api.step4'),
+          ' ',
+          el('a', { href: 'https://www.npmjs.com/package/@holocard/player', target: '_blank', rel: 'noreferrer', textContent: '@holocard/player' }),
+        ),
+      ),
       keyBox(state),
     );
   } catch (error) {
@@ -214,9 +238,11 @@ export function initAccount(
   body = dialogEl.querySelector<HTMLElement>('.albums__body');
   button = openButton;
   describe = describeError;
+  // 只有右上角 × 能关：点遮罩关闭在复制 key、选中文字时太容易误触，刚申请的 key 关了就再也看不到
   dialogEl.querySelector('.albums__close')?.addEventListener('click', () => dialogEl.close());
-  dialogEl.addEventListener('click', (event) => {
-    if (event.target === dialogEl) dialogEl.close();
+  // Esc 同理：key 还显示着的时候不让它关
+  dialogEl.addEventListener('cancel', (event) => {
+    if (fresh) event.preventDefault();
   });
   // 刚申请的 key 只显示这一次：关了窗口就忘掉
   dialogEl.addEventListener('close', () => (fresh = null));
