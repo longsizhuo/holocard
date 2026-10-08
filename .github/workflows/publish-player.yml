@@ -12,8 +12,8 @@ on:
     tags: ['player-v*']
 
 permissions:
-  contents: read
-  id-token: write
+  contents: write   # 发完建 GitHub Release
+  id-token: write   # npm 可信发布（OIDC）
 
 jobs:
   publish:
@@ -36,5 +36,30 @@ jobs:
           [ "$want" = "$have" ] || { echo "tag 是 $want，packages/player/package.json 是 $have"; exit 1; }
       - run: pnpm exec tsc --noEmit
       - run: pnpm build:player
-      - run: npm publish --access public --provenance
+      # 已经发过的版本（比如第一次手动发的 0.1.0，后来补打 tag）跳过，只补建 Release
+      - name: 发到 npm
         working-directory: packages/player
+        run: |
+          ver="${GITHUB_REF_NAME#player-v}"
+          if npm view "@holocard/player@$ver" version >/dev/null 2>&1; then
+            echo "@holocard/player@$ver 已经在 npm 上了，跳过发布"
+          else
+            npm publish --access public --provenance
+          fi
+      - name: 建 GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          ver="${GITHUB_REF_NAME#player-v}"
+          gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1 && exit 0
+          {
+            echo "npm: https://www.npmjs.com/package/@holocard/player/v/$ver"
+            echo
+            echo '```html'
+            echo "<script type=\"module\" src=\"https://cdn.jsdelivr.net/npm/@holocard/player@$ver/dist/holocard.js\"></script>"
+            echo '<holo-card src="https://example.com/cards/my-card"></holo-card>'
+            echo '```'
+            echo
+            echo "用法见 packages/player/README.md。"
+          } > notes.md
+          gh release create "$GITHUB_REF_NAME" --title "@holocard/player $ver" --notes-file notes.md
