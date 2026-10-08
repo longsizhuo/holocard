@@ -980,6 +980,8 @@ select {
   cursor: pointer;
 }
 .api__button--primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+.api__steps { margin: 0 0 10px; padding-left: 1.4em; color: var(--muted); overflow-wrap: anywhere; }
+.api__steps li { margin-bottom: 4px; }
 .api__fresh { margin: 0 0 8px; font-weight: 600; overflow-wrap: anywhere; }
 .api__key {
   flex: 1 1 16em;
