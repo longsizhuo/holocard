@@ -34,7 +34,7 @@ function el<K extends keyof HTMLElementTagNameMap>(
 
 /** 接口文档在站内（docs-site/，VitePress），按当前语言进对应的那份 */
 function docsUrl(): string {
-  return `${import.meta.env.BASE_URL}docs/${lang() === 'zh' ? '' : `${lang()}/`}`;
+  return `${import.meta.env.BASE_URL}docs/${lang() === 'zh' ? '' : `${lang()}/`}api/`;
 }
 
 /** 页头按钮跟着登录状态变。loadMe 回来之后调一次 */

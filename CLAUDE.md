@@ -4,9 +4,14 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## 先看哪里
 
-- [DEVELOPMENT.md](DEVELOPMENT.md)：本地怎么跑、**改完代码跑哪个验证脚本**（「改完跑什么」那张表）、常见问题
-- [README.md](README.md)：一张卡怎么叠、分层流水线和边缘精修的设计取舍、`.layers` 格式、对外接口
-- [deploy/README.md](deploy/README.md)：线上、staging、数据库、权重。各源码目录的 README 写着每个文件管什么
+文档都在 `docs-site/`（VitePress，发布在 https://holocard.longsizhuo.com/docs/ ，`pnpm docs:dev` 本地预览）：
+
+- [docs-site/develop/index.md](docs-site/develop/index.md)：本地怎么跑、**改完代码跑哪个验证脚本**（「改完代码运行哪个验证脚本」那张表）、常见问题
+- [docs-site/develop/architecture.md](docs-site/develop/architecture.md)：各目录、各文件管什么；[pipeline.md](docs-site/develop/pipeline.md)、[renderer.md](docs-site/develop/renderer.md)：分层流水线、边缘精修、渲染器的设计取舍
+- [docs-site/format/index.md](docs-site/format/index.md)：`.layers` 格式；[docs-site/api/index.md](docs-site/api/index.md)：对外接口
+- [deploy/README.md](deploy/README.md)：本站自己的运维手册（线上、staging、数据库、权重），不发布到文档站
+
+改了行为就同步改 `docs-site/` 里对应的页面：中文是源头，英文（`en/`）、日文（`ja/`，只有使用类页面）跟着改。文档用正式的技术文档写法
 
 ## 常用命令
 
@@ -19,7 +24,7 @@ pnpm build          # 提交前跑：先核对生成的珠光动画没被手改�
 
 没有单元测试框架，也没有 lint / 格式化配置。验证靠 `scripts/verify-*.mjs`，每个都能单独跑（如 `node scripts/verify-gyro.mjs`），文件开头写着核对什么、要先起什么。
 
-- **改完代码**：先 `pnpm typecheck`，再按 DEVELOPMENT.md「改完跑什么」跑对应的脚本，跑了什么、结果如何写进 PR 的「验证」。加了验证脚本或改了开发流程，同时更新那张表
+- **改完代码**：先 `pnpm typecheck`，再按 docs-site/develop/index.md 的验证脚本对照表跑对应的脚本，跑了什么、结果如何写进 PR 的「验证」。加了验证脚本或改了开发流程，同时更新那张表
 - 本地常常已经开着 `pnpm dev` / `pnpm dev:server`：起服务前先看端口（`lsof -nP -iTCP:5273 -sTCP:LISTEN`），能复用就复用，别关不是自己起的进程
 - `verify-api`、`verify-perf` 往库里写测试数据，`verify-live` 打的是线上，都别对着线上跑
 

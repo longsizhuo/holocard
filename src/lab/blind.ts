@@ -5,7 +5,7 @@
  * 每次实验的数据由 scripts/blind/pack.mjs 生成，放在页面旁边：
  *   experiment.json   { id, total, focus }       实验编号、对数、评审时重点看什么
  *   pairs/NN.json     { a: {manifest, layers}, b: {...} }   layers 是 { 文件名: base64 }
- * A、B 各是哪种做法只写在 pack 另存的 key.json 里，不随页面发出去。流程见 scripts/blind/README.md
+ * A、B 各是哪种做法只写在 pack 另存的 key.json 里，不随页面发出去。流程见 docs-site/develop/index.md「双盲对比」
  */
 import { HoloCard } from '../renderer/card';
 import { parseManifest } from '../format/io';

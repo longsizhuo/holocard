@@ -50,7 +50,7 @@ ssh oracle 'rm /var/lib/holocard/paused'             # 修好之后恢复自动�
 
 ## 对外接口的 key
 
-接口用法见仓库 README「对外接口」。登录用户可以在个人中心自己申请（每个账号 24 小时 20 张，`HOLOCARD_SELF_SERVE_DAILY_LIMIT`），
+接口用法见文档站 /docs/api/（docs-site/api/index.md）。登录用户可以在个人中心自己申请（每个账号 24 小时 20 张，`HOLOCARD_SELF_SERVE_DAILY_LIMIT`），
 额度要更高的由站长发。库里只存哈希，key 本身只在申请、发的时候显示一次；`list` 里自己申请的会标出 IH 账号：
 
 ```bash
@@ -409,7 +409,7 @@ curl -sL $B/onnx/model_quantized.onnx -o $D/onnx/model_quantized.onnx
 
 用 q8 而不是 fp16：在 ARM CPU 上实测快一倍（2.7s 对 5s+）、内存省三成，而深度图差别在切层这一步看不出来。
 
-抠主体的权重（选型和为什么用 fp32 见仓库 README 的「BiRefNet：服务端抠主体」）：
+抠主体的权重（选型和为什么用 fp32 见 docs-site/develop/pipeline.md）：
 
 ```bash
 D=/srv/holocard-models/onnx-community/BiRefNet_lite-ONNX
