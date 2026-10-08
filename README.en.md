@@ -266,13 +266,13 @@ Limits: 50 cards per key per 24 hours by default (set when the key is issued), a
 Over the limit you get 429 (`quota_exceeded`, `too_many_in_flight`, `rate_limited`) or 503 (`api_daily_limit`, `queue_full`, `busy`). A revoked key stops working at once, and its queued cards are not processed.
 A failed card has `error.code` set to `nsfw_rejected`, `moderation_unavailable` (detection unavailable, so the card is refused) or `processing_failed`.
 
-## Embedding in your page (npm package `holocard`)
+## Embedding in your page (npm package `@holocard/player`)
 
 The API delivers files (`manifest.json` plus layer images); to make them move on a web page you need a player.
 `packages/player` is that: a custom element `<holo-card>`, one snippet to paste, usable as-is in React or Vue.
 
 ```html
-<script type="module" src="https://cdn.jsdelivr.net/npm/holocard@0.1/dist/holocard.js"></script>
+<script type="module" src="https://cdn.jsdelivr.net/npm/@holocard/player@0.1/dist/holocard.js"></script>
 <holo-card src="https://your-site.example/cards/my-card"></holo-card>
 ```
 

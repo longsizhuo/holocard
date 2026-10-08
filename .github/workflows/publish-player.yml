@@ -1,11 +1,11 @@
-# 打 player-v<版本> 的 tag 时，把 packages/player 发到 npm（包名 holocard）。
+# 打 player-v<版本> 的 tag 时，把 packages/player 发到 npm（包名 @holocard/player）。
 #
-# 用 npm 的可信发布（Trusted Publishing）：npmjs.com 上 holocard 的设置里登记了「这个仓库的这个工作流」，
+# 用 npm 的可信发布（Trusted Publishing）：npmjs.com 上 @holocard/player 的设置里登记了「这个仓库的这个工作流」，
 # CI 发布时用 GitHub 的 OIDC 临时证明身份，仓库里不存任何 npm 令牌。顺带生成来源证明（provenance）。
 #
 # 发版：改 packages/player/package.json 的 version，合进 main，然后
 #   git tag player-v0.1.1 && git push origin player-v0.1.1
-name: 发布 npm 包 holocard
+name: 发布 npm 包 @holocard/player
 
 on:
   push:

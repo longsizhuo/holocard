@@ -1,7 +1,7 @@
 /**
  * <holo-card>：把一组 .layers 文件（manifest.json + 各层图片）放进别人的网页里，和 HoloCard 站上看到的一样会动。
  *
- *   <script type="module" src="https://cdn.jsdelivr.net/npm/holocard"></script>
+ *   <script type="module" src="https://cdn.jsdelivr.net/npm/@holocard/player"></script>
  *   <holo-card src="https://example.com/cards/abc"></holo-card>
  *
  * src 指向 .layers 目录（里面有 manifest.json），直接写到 manifest.json 也认。

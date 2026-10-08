@@ -1,7 +1,7 @@
 import { defineConfig } from 'vite';
 
 /**
- * npm 包 holocard（<holo-card> 播放器）的构建：只打 src/player 和它用到的渲染器，打成一个 ES 模块。
+ * npm 包 @holocard/player（<holo-card> 播放器）的构建：只打 src/player 和它用到的渲染器，打成一个 ES 模块。
  * 样式用 ?inline 读成字符串、装进 Shadow DOM；card.ts 自己 import 的全局 CSS 会被单独抽成一个文件，不进包。
  */
 export default defineConfig({

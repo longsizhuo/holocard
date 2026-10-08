@@ -266,13 +266,13 @@ curl -X DELETE https://holocard.longsizhuo.com/v1/cards/<id> -H "Authorization: 
 超了回 429（`quota_exceeded`、`too_many_in_flight`、`rate_limited`）或 503（`api_daily_limit`、`queue_full`、`busy`）。key 被吊销后立即失效，还在排队的卡也不再处理。
 失败时 `error.code` 是 `nsfw_rejected`（裸露识别拒绝）、`moderation_unavailable`（识别不可用，宁可不做）或 `processing_failed`。
 
-## 嵌入到你的网页（npm 包 `holocard`）
+## 嵌入到你的网页（npm 包 `@holocard/player`）
 
 接口交付的是一组文件（`manifest.json` 和各层图片），要在网页上动起来得有播放器。`packages/player` 就是它：
 一个自定义元素 `<holo-card>`，贴一段代码就能用，React、Vue 里也能直接写。
 
 ```html
-<script type="module" src="https://cdn.jsdelivr.net/npm/holocard@0.1/dist/holocard.js"></script>
+<script type="module" src="https://cdn.jsdelivr.net/npm/@holocard/player@0.1/dist/holocard.js"></script>
 <holo-card src="https://你的域名/cards/my-card"></holo-card>
 ```
 

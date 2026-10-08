@@ -1,10 +1,10 @@
-# holocard
+# @holocard/player
 
 `<holo-card>` — show a [HoloCard](https://holocard.longsizhuo.com) layered holographic card in any web page.
 It tilts with the pointer or the phone, with the foils, glare and parallax the author chose.
 
 ```html
-<script type="module" src="https://cdn.jsdelivr.net/npm/holocard@0.1/dist/holocard.js"></script>
+<script type="module" src="https://cdn.jsdelivr.net/npm/@holocard/player@0.1/dist/holocard.js"></script>
 
 <holo-card src="https://example.com/cards/my-card"></holo-card>
 ```
@@ -12,11 +12,11 @@ It tilts with the pointer or the phone, with the foils, glare and parallax the a
 Or from npm:
 
 ```sh
-npm install holocard
+npm install @holocard/player
 ```
 
 ```js
-import 'holocard'; // registers <holo-card>
+import '@holocard/player'; // registers <holo-card>
 ```
 
 It is a standard custom element, so it works in plain HTML, React, Vue, Svelte… without a wrapper.
@@ -56,7 +56,7 @@ Styles live in a shadow root: your page's CSS does not reach inside the card, an
 
 ## Pin a version
 
-For production, pin an exact version (for example `holocard@0.1.0`) and add a
+For production, pin an exact version (for example `@holocard/player@0.1.0`) and add a
 [Subresource Integrity](https://www.jsdelivr.com/using-sri-with-dynamic-files) hash to the script tag.
 
 ## Credits

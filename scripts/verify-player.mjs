@@ -1,5 +1,5 @@
 /**
- * 验证 npm 包 holocard 的 <holo-card>（packages/player）：先 pnpm build:player。
+ * 验证 npm 包 @holocard/player 的 <holo-card>（packages/player）：先 pnpm build:player。
  *
  * 起一个静态服务器发 packages/player（示例页 + dist），demo/sample 指到 public/samples/demo，
  * 用无头浏览器打开示例页，核对：

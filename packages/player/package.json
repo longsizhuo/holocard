@@ -1,5 +1,5 @@
 {
-  "name": "holocard",
+  "name": "@holocard/player",
   "version": "0.1.0",
   "description": "<holo-card>: embed HoloCard layered holographic cards (manifest.json + layers) in any web page",
   "type": "module",
@@ -30,5 +30,8 @@
     "url": "git+https://github.com/longsizhuo/holocard.git",
     "directory": "packages/player"
   },
-  "bugs": "https://github.com/longsizhuo/holocard/issues"
+  "bugs": "https://github.com/longsizhuo/holocard/issues",
+  "publishConfig": {
+    "access": "public"
+  }
 }
