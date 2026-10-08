@@ -98,6 +98,12 @@ const statusText = (page) => page.locator('#status').textContent();
 const channel =
   process.env.HOLOCARD_BROWSER_CHANNEL ??
   (process.platform === 'darwin' ? 'chrome' : process.platform === 'win32' ? 'msedge' : '');
+/** 卡册的入口在个人中心里：页头的账号按钮 → 「打开卡册」 */
+async function openAlbum(page) {
+  await page.click('#account-open');
+  await page.click('#account[open] .account__section .api__button');
+}
+
 const browser = await chromium.launch({
   ...(channel ? { channel } : {}),
   args: [
@@ -185,8 +191,8 @@ const browser = await chromium.launch({
   await page.waitForTimeout(800);
   check(await visible(page, '.deck__card .hc'), '恢复出来的上一张点到时才加载，加载得出来');
 
-  // 卡册：打开直接是网格，不出卡包、不发牌
-  await page.click('#albums-open');
+  // 卡册：入口在个人中心里；打开直接是网格，不出卡包、不发牌
+  await openAlbum(page);
   await page.waitForSelector('.albums__grid', { timeout: 5000 });
   check(await page.locator('.albums__grid').isVisible(), '卡册打开直接是网格');
   check(!(await page.locator('#albums .pack__gl').count()), '卡册里不出卡包');
@@ -272,7 +278,7 @@ const browser = await chromium.launch({
   await page.keyboard.press('Enter');
   await page.waitForFunction(() => !document.querySelector('.deck__pack'), null, { timeout: 5000 });
   check(Date.now() - started < 1000, `减少动态效果下回车立刻开出来（${Date.now() - started}ms）`);
-  await page.click('#albums-open');
+  await openAlbum(page);
   await page.waitForSelector('.albums__grid .acard');
   check(!(await page.locator('.albums__pack').count()), '减少动态效果下卡册不出卡包，直接是网格');
   await page.keyboard.press('Escape');
