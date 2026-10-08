@@ -1171,8 +1171,16 @@ async function boot(): Promise<void> {
   }
 
   if (route.id) {
+    // 层图下完才能挂卡片，网速慢时卡片区会空着很久：先放这张卡的缩略图（约 40KB）占位，挂上卡片再撤掉
+    const placeholder =
+      route.mode === 'render' ? null : Object.assign(document.createElement('img'), { className: 'deck__placeholder', alt: '', src: `${import.meta.env.BASE_URL}api/layers/${route.id}/thumb.jpg` });
+    if (placeholder) {
+      placeholder.addEventListener('error', () => placeholder.remove());
+      need<HTMLElement>('.deck__view').append(placeholder);
+      setText(status, 'status.loadingCard');
+    }
     try {
-      const set = await loadLayerSet(`${import.meta.env.BASE_URL}api/layers/${route.id}`);
+      const set = await loadLayerSet(`${import.meta.env.BASE_URL}api/layers/${route.id}`).finally(() => placeholder?.remove());
       if (sharedPackDue(route.id)) {
         // 卡包格：状态栏由卡带清空，这里不写层数
         deck.addPack(set, route.id);

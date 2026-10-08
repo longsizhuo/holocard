@@ -291,6 +291,20 @@ body {
   min-width: 0;
   container-type: size;
 }
+/* 卡片页加载层图时的缩略图占位（main.ts boot），层图到了就撤掉 */
+.deck__placeholder {
+  position: absolute;
+  inset: 0;
+  margin: auto;
+  max-width: min(100%, 420px);
+  max-height: 100%;
+  border-radius: 14px;
+  object-fit: contain;
+  animation: deck-placeholder 1.4s ease-in-out infinite alternate;
+}
+@keyframes deck-placeholder { from { opacity: 0.45; } to { opacity: 0.85; } }
+@media (prefers-reduced-motion: reduce) { .deck__placeholder { animation: none; opacity: 0.7; } }
+
 .deck__card,
 .deck__pack {
   position: absolute;
