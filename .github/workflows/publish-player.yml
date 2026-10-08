@@ -1,0 +1,40 @@
+# 打 player-v<版本> 的 tag 时，把 packages/player 发到 npm（包名 @holocard/player）。
+#
+# 用 npm 的可信发布（Trusted Publishing）：npmjs.com 上 @holocard/player 的设置里登记了「这个仓库的这个工作流」，
+# CI 发布时用 GitHub 的 OIDC 临时证明身份，仓库里不存任何 npm 令牌。顺带生成来源证明（provenance）。
+#
+# 发版：改 packages/player/package.json 的 version，合进 main，然后
+#   git tag player-v0.1.1 && git push origin player-v0.1.1
+name: 发布 npm 包 @holocard/player
+
+on:
+  push:
+    tags: ['player-v*']
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+          registry-url: https://registry.npmjs.org
+      # 可信发布要 npm 11.5 以上，Node 22 自带的不够新
+      - run: npm install -g npm@latest
+      - run: pnpm install --frozen-lockfile
+      - name: tag 和包的版本要一致
+        run: |
+          want="${GITHUB_REF_NAME#player-v}"
+          have=$(node -p "require('./packages/player/package.json').version")
+          [ "$want" = "$have" ] || { echo "tag 是 $want，packages/player/package.json 是 $have"; exit 1; }
+      - run: pnpm exec tsc --noEmit
+      - run: pnpm build:player
+      - run: npm publish --access public --provenance
+        working-directory: packages/player

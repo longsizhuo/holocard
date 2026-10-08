@@ -266,6 +266,20 @@ curl -X DELETE https://holocard.longsizhuo.com/v1/cards/<id> -H "Authorization: 
 超了回 429（`quota_exceeded`、`too_many_in_flight`、`rate_limited`）或 503（`api_daily_limit`、`queue_full`、`busy`）。key 被吊销后立即失效，还在排队的卡也不再处理。
 失败时 `error.code` 是 `nsfw_rejected`（裸露识别拒绝）、`moderation_unavailable`（识别不可用，宁可不做）或 `processing_failed`。
 
+## 嵌入到你的网页（npm 包 `@holocard/player`）
+
+接口交付的是一组文件（`manifest.json` 和各层图片），要在网页上动起来得有播放器。`packages/player` 就是它：
+一个自定义元素 `<holo-card>`，贴一段代码就能用，React、Vue 里也能直接写。
+
+```html
+<script type="module" src="https://cdn.jsdelivr.net/npm/@holocard/player@0.1/dist/holocard.js"></script>
+<holo-card src="https://你的域名/cards/my-card"></holo-card>
+```
+
+把卡片的 `manifest.json` 和各层文件下载到自己的服务器上（文件名不变），`src` 指向那个目录。
+作者调好的箔面、炫光、视差照样生效；样式装在 Shadow DOM 里，和宿主页面互不影响。用法见 [packages/player/README.md](packages/player/README.md)。
+构建 `pnpm build:player`，自检 `node scripts/verify-player.mjs`；打 `player-v<版本>` 的 tag 由 CI 发到 npm（`.github/workflows/publish-player.yml`）。
+
 ## `.layers` 格式
 
 这个格式把算法和渲染解耦。任何能产出它的东西都能喂给渲染器，渲染器也可以被单独拿去用——

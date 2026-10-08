@@ -1,0 +1,37 @@
+{
+  "name": "@holocard/player",
+  "version": "0.1.0",
+  "description": "<holo-card>: embed HoloCard layered holographic cards (manifest.json + layers) in any web page",
+  "type": "module",
+  "main": "./dist/holocard.js",
+  "module": "./dist/holocard.js",
+  "exports": {
+    ".": "./dist/holocard.js"
+  },
+  "jsdelivr": "./dist/holocard.js",
+  "unpkg": "./dist/holocard.js",
+  "files": [
+    "dist/holocard.js",
+    "README.md",
+    "LICENSE"
+  ],
+  "sideEffects": true,
+  "keywords": [
+    "holographic",
+    "card",
+    "web-component",
+    "parallax",
+    "3d",
+    "foil"
+  ],
+  "homepage": "https://holocard.longsizhuo.com",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/longsizhuo/holocard.git",
+    "directory": "packages/player"
+  },
+  "bugs": "https://github.com/longsizhuo/holocard/issues",
+  "publishConfig": {
+    "access": "public"
+  }
+}
