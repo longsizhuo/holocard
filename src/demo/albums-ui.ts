@@ -219,14 +219,15 @@ function render(withPack: boolean): void {
   const grid = cards.length ? el('div', { className: 'albums__grid' }, ...cards) : null;
   const stage = withPack && grid && !reducedMotion() ? el('div', { className: 'albums__pack' }) : null;
   if (grid && stage) grid.hidden = true;
+  // 登录了就是「在线卡册」，名字本身说明了卡在账号里，不再另配一句说明；空的时候才提示怎么放进来
   const signedIn = account().user !== null;
   const intro = signedIn
-    ? cards.length ? 'albums.accountHint' : 'albums.accountEmpty'
+    ? cards.length ? null : 'albums.accountEmpty'
     : cards.length ? 'albums.mineHint' : 'albums.mineEmpty';
   body.replaceChildren(
-    el('h2', { id: TITLE_ID, textContent: t('albums.title') }),
+    el('h2', { id: TITLE_ID, textContent: t(signedIn ? 'albums.titleOnline' : 'albums.title') }),
     accountBox() ?? '',
-    el('p', { className: 'albums__intro', textContent: t(intro) }),
+    intro ? el('p', { className: 'albums__intro', textContent: t(intro) }) : '',
     ...(stage ? [stage] : []),
     ...(grid ? [grid] : []),
   );

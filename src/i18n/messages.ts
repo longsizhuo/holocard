@@ -116,6 +116,7 @@ export const zh = {
   // ---------- 卡册（只存在本机，见 src/demo/albums.ts） ----------
   'albums.open': '我的卡册',
   'albums.title': '我的卡册',
+  'albums.titleOnline': '我的在线卡册',
   'albums.close': '关闭',
   'albums.mineHint': '这台设备上做好的卡都在这里，最新的在前。没分享过的卡会过期，分享出去有人看就会一直续期。',
   'albums.mineEmpty': '这台设备上还没做过卡。上传一张照片，做好的卡会自动出现在这里。',
@@ -132,7 +133,6 @@ export const zh = {
   'pack.dismiss': '关掉',
   'albums.cardGone': '已过期',
   'albums.cardN': '第 {n} 张',
-  'albums.accountHint': '你账号里的卡都在这里，最新的在前，换设备登录也能看到。没分享过的卡会过期，分享出去有人看就会一直续期。',
   'albums.accountEmpty': '账号里还没有卡。登录着做的卡会自动放进来。',
   'account.login': '用 involutionhell 账号登录',
   'account.loginHint': '登录后，换手机、换电脑也能看到和管理你做的卡。不登录也能照常用。',
@@ -293,6 +293,7 @@ export const en: Messages = {
   // ---------- 卡册 ----------
   'albums.open': 'My album',
   'albums.title': 'My album',
+  'albums.titleOnline': 'My online album',
   'albums.close': 'Close',
   'albums.mineHint': 'Every card you made on this device, newest first. Cards you haven’t shared expire; shared cards keep renewing while people view them.',
   'albums.mineEmpty': 'You haven’t made any cards on this device yet. Upload a photo and the finished card will show up here.',
@@ -309,7 +310,6 @@ export const en: Messages = {
   'pack.dismiss': 'Close',
   'albums.cardGone': 'Expired',
   'albums.cardN': 'Card {n}',
-  'albums.accountHint': 'All the cards in your account, newest first — sign in on any device to see them. Cards you haven’t shared expire; shared cards keep renewing while people view them.',
   'albums.accountEmpty': 'No cards in your account yet. Cards you make while signed in land here automatically.',
   'account.login': 'Sign in with involutionhell',
   'account.loginHint': 'Sign in to see and manage your cards on any phone or computer. Everything still works without signing in.',
@@ -467,6 +467,7 @@ export const ja: Messages = {
   // ---------- 卡册 ----------
   'albums.open': 'マイアルバム',
   'albums.title': 'マイアルバム',
+  'albums.titleOnline': 'オンラインアルバム',
   'albums.close': '閉じる',
   'albums.mineHint': 'この端末で作ったカードが新しい順に並びます。共有していないカードは期限が来ると消えます。共有して見てもらえている間は期限が延び続けます。',
   'albums.mineEmpty': 'この端末で作ったカードはまだありません。写真をアップロードすると、できあがったカードがここに並びます。',
@@ -483,7 +484,6 @@ export const ja: Messages = {
   'pack.dismiss': '閉じる',
   'albums.cardGone': '期限切れ',
   'albums.cardN': '{n} 枚目',
-  'albums.accountHint': 'アカウントのカードが新しい順に並びます。どの端末でもログインすれば見られます。共有していないカードは期限が来ると消えます。共有して見てもらえている間は期限が延び続けます。',
   'albums.accountEmpty': 'アカウントにはまだカードがありません。ログイン中に作ったカードは自動でここに入ります。',
   'account.login': 'involutionhell アカウントでログイン',
   'account.loginHint': 'ログインすると、スマホでもパソコンでも作ったカードを見たり管理したりできます。ログインしなくても今まで通り使えます。',

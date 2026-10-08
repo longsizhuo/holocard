@@ -34,6 +34,9 @@ export const API_TTL_MS = 24 * 60 * 60 * 1000;
 /** 到期时间。没分享过的从产出算起，分享过的从最后一次访问算起；对外接口的卡一律提交后 24 小时 */
 export function expiresAt(card: CardRow, baseMs: number, doublingsCap: number): number {
   if (card.source === 'api') return card.created_at + API_TTL_MS;
+  // 放进账号的卡（登录着做的、认领过的）一直留着：用户存进来就是要它在。
+  // ponytail: 一张中位数 1.7MB，全站每天十来张，一年也就几 GB；哪天盘紧了再给很久没人看的加个上限
+  if (card.user_id) return Infinity;
   const from = card.shared ? (card.last_hit_at ?? card.created_at) : card.created_at;
   return from + keepMs(card, baseMs, doublingsCap);
 }

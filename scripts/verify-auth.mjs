@@ -6,7 +6,7 @@
  *   - 登录：state cookie、换码、会话 cookie 的属性；state 对不上、码用第二次都登不进；next 只认本站路径
  *   - 归属：登录着做的卡不给口令、归到账号下；兄弟子域借会话传的图不归；认会话改东西只认本站页面发的
  *   - 认领：凭口令认领、认领后旧口令作废；口令不对、别人的卡不认
- *   - 别的账号动不了；退出后会话作废
+ *   - 别的账号动不了；退出后会话作废；放进账号的卡不过期
  *   - 个人中心的 API key：要登录、只认本站页面发的、同时只有一个、别人吊销不了、吊销立即生效、
  *     额度按账号算（吊销了再申请不重新计数）
  *   - 假登录开关在正式地址下拒绝启动
@@ -274,7 +274,9 @@ const share = (b, site) => b.call(`/api/cards/${cardC.id}/share`, { method: 'POS
 assert.equal((await share(bob)).status, 403, '别的账号不能分享');
 assert.equal((await share(alice, 'same-site')).status, 403, '兄弟子域借会话不能分享');
 assert.equal((await share(alice, null)).status, 403, '没有 Sec-Fetch-Site 的不认会话');
-assert.equal((await share(alice)).status, 200, '主人登录着能分享');
+const shared = await share(alice);
+assert.equal(shared.status, 200, '主人登录着能分享');
+assert.equal((await shared.json()).expiresAt, null, '放进账号的卡不过期');
 const manifest = await (await fetch(`${BASE}/api/layers/${cardC.id}/manifest.json`)).json();
 const valid = JSON.stringify({
   foils: manifest.layers.map(() => ({ type: 'holo', intensity: 0.5 })),
