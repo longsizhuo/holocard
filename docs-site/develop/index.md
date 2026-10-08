@@ -116,20 +116,22 @@ pnpm og --export gif       # 导出动图：gif / motion / apng，写到 out/exp
 | 性能埋点（`src/demo/perf.ts`、`server/perf.ts`） | `node scripts/verify-perf.mjs [--url …] [--browser chromium\|webkit\|firefox]` | `pnpm dev` 与 `pnpm dev:server` |
 | 对外接口 `/v1`（`server/index.ts` 的 `handleV1`、`server/apikeys.ts`） | `HOLOCARD_DB=out/data/holocard.db HOLOCARD_OUT_DIR=out/layers node scripts/verify-api.mjs http://127.0.0.1:8791` | `pnpm dev:server`，且 `.models/` 下有 NudeNet 权重 |
 | 登录、卡片归属与认领、个人中心的 API key（`server/auth.ts` 及相关路由） | `pnpm build:server && HOLOCARD_MODEL_DIR=.models node scripts/verify-auth.mjs` | 深度模型权重。脚本自行启动模拟 IH 与临时服务端，不需要开发服务 |
+| 页头与个人中心界面（`account-ui.ts`） | `pnpm build && pnpm build:server && node scripts/verify-account.mjs` | 无。脚本以假登录启动临时服务端 |
 | 播放器 `<holo-card>`（`src/player/`、`packages/player/`） | `pnpm build:player && node scripts/verify-player.mjs [截图目录]` | Chromium，见下方说明 |
 | 开包音效（`src/demo/sfx.ts`） | `node scripts/render-sfx.mjs`，试听 `/tmp/sfx/reel.wav` | `pnpm dev` |
 | 分享图、导出动图的画面 | `pnpm og` | 无 |
 
 各脚本的核对内容：
 
-- `verify-pack`：上传 → WebGL 卡包 → 切换卡带 → 撕开 / 点开 → 新卡亮相的完整流程；分享卡首次打开出卡包；卡册发牌；状态栏文字；上传区的读屏名称与键盘操作。关键步骤截图到 `--out`。
+- `verify-pack`：上传 → WebGL 卡包 → 切换卡带 → 撕开 / 点开 → 新卡亮相的完整流程；分享卡首次打开出卡包；卡册直接显示网格（未开启登录时页头按钮直接打开卡册）；状态栏文字；上传区的读屏名称与键盘操作。关键步骤截图到 `--out`。
 - `verify-pearl`：将当前写法（每秒 12 次、Chromium 下加 `will-change`）与逐帧平滑写法冻结在同一时刻逐像素比较，超过阈值则失败。WebKit 需单独运行一次。
 - `verify-fallback`：模拟服务端返回 404（无后端，回退）、502 / 断开（重试 3 次后报错，不下载模型）、503 排队满（直接报错，不重传）。
 - `verify-gyro`：转动后指针偏移、静止数秒后回正、持续慢转不累积偏移、越过竖直位置的读数跳变、横屏轴对调。
 - `verify-config`：合法配置原样合并、其余字段不变；层数不符、未知箔面类型、数值越界、试图修改文件名等一律拒收或忽略。
 - `verify-perf`：页面静置后上报一条埋点、服务端收到；畸形数据被拒。
 - `verify-api`：鉴权、私有性（接口卡在 `/api`、分享、导出、删除路由上视同不存在）、交付与缓存头、配额、吊销、处理途中删除、网页任务优先、畸形请求行与超限请求的处理。每张卡实际分层，耗时 30–60 秒。
-- `verify-auth`：登录流程（state cookie、换码、PKCE、一次性授权码、`next` 只认本站路径）；登录状态下的卡片归属；凭口令认领；其他账号无权操作；退出后会话失效；账号名下的卡不过期；个人中心 API key 的申请、吊销与按账号计数的额度；正式地址下开启假登录时拒绝启动。
+- `verify-account`：页头「文档」链接随界面语言切换；未登录时个人中心的登录入口与本机卡册；登录后申请多个 key、新 key 只显示一次、吊销其中一个。
+- `verify-auth`：登录流程（state cookie、换码、PKCE、一次性授权码、`next` 只认本站路径）；登录状态下的卡片归属；凭口令认领；其他账号无权操作；退出后会话失效；账号名下的卡不过期；个人中心 API key 的申请（每个账号最多 10 个）、吊销、按账号合计的额度与管理员不限额度；正式地址下开启假登录时拒绝启动。
 - `verify-player`：目录地址与 `manifest.json` 地址两种写法均可加载并触发 `load`；地址错误时触发 `error`；宿主页面 CSS 无法影响卡片内部、组件不向宿主注入样式；指针划过时卡片转动。设置 `PLAYER_URL=https://cdn.jsdelivr.net/npm/@holocard/player@<版本>/dist/holocard.js` 可核对已发布到 CDN 的版本。
 - `render-sfx`：将每个音效离线渲染为 wav，并检查非静音、峰值小于 1。
 
@@ -148,7 +150,7 @@ pnpm og --export gif       # 导出动图：gif / motion / apng，写到 out/exp
 | `node scripts/probe-matte.mjs --image 照片 [--out out/matte.png]` | 在浏览器中单独运行抠图模型并保存 alpha，用于复现 BiRefNet 在浏览器中无法运行的问题 | 本机 Edge，`pnpm dev` |
 | `node scripts/verify-live.mjs --image 照片 [--url …]` | 线上冒烟测试：以全新浏览器配置走一遍上传与分层，记录跨源隔离状态、下载的大文件与层数 | 本机 Edge |
 | `HOLOCARD_DB=out/data/holocard.db node scripts/db.mjs [id \| SQL \| perf [天数] \| nsfw [阈值]]` | 以只读方式查询卡片库：最近卡片与状态计数、单张卡、任意只读 SQL、性能埋点汇总、疑似裸露的卡 | 无 |
-| `node scripts/apikey.mjs create <名字> [每天上限] \| list \| revoke <id>` | 发放、列出、吊销对外接口的 key。key 只在 `create` 时打印一次，库中只存 SHA-256 | 数据库取 `HOLOCARD_DB` |
+| `node scripts/apikey.mjs create <名字> [每天上限] \| list \| revoke <id> \| admin <账号> \| unadmin <账号>` | 发放、列出、吊销对外接口的 key，设置不受额度限制的管理员账号。key 只在 `create` 时打印一次，库中只存 SHA-256 | 数据库取 `HOLOCARD_DB` |
 | `node scripts/takedown.mjs [restore] <卡片 id>` | 站长下架 / 恢复卡片。软删除：文件移入产物目录下的 `.removed/<id>`，状态改为 `removed` | 取 `HOLOCARD_OUT_DIR`、`HOLOCARD_DB` |
 | `node scripts/webp-layers.mjs [--apply \| --cleanup]` | 将早期 PNG 层图的卡片转为 WebP。无参数时只列出；`--apply` 写入 WebP 并原子替换 manifest；`--cleanup` 删除 manifest 不再引用的 PNG | 取 `HOLOCARD_OUT_DIR` |
 | `bash scripts/deploy.sh` | 手动发版，见[自托管部署](/deploy/) | SSH 访问服务器 |

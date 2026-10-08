@@ -98,10 +98,10 @@ const statusText = (page) => page.locator('#status').textContent();
 const channel =
   process.env.HOLOCARD_BROWSER_CHANNEL ??
   (process.platform === 'darwin' ? 'chrome' : process.platform === 'win32' ? 'msedge' : '');
-/** 卡册的入口在个人中心里：页头的账号按钮 → 「打开卡册」 */
+/** 卡册的入口在个人中心里：页头的账号按钮 → 「打开卡册」。没开登录时（本地连不上服务端也算）按钮直接开卡册 */
 async function openAlbum(page) {
   await page.click('#account-open');
-  await page.click('#account[open] .account__section .api__button');
+  if (await page.locator('#account[open]').count()) await page.click('#account[open] .account__section .api__button');
 }
 
 const browser = await chromium.launch({

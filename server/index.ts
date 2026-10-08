@@ -102,6 +102,8 @@ const API_KEY_IN_FLIGHT = 3;
 const API_DAILY_LIMIT = Number(process.env.HOLOCARD_API_DAILY_LIMIT ?? 500);
 /** 登录用户在个人中心自己申请的 key，每个账号 24 小时最多几张。要更多的找站长用 scripts/apikey.mjs 发 */
 const SELF_SERVE_DAILY_LIMIT = Number(process.env.HOLOCARD_SELF_SERVE_DAILY_LIMIT ?? 20);
+/** 一个账号同时能有几个没吊销的 key。会忘记手上有哪个，就再申请一个，额度是账号共用的 */
+const MAX_KEYS_PER_ACCOUNT = 10;
 /**
  * 产物目录所在的盘剩下不到这么多就不收上传。和 Postgres 等别的服务共用根分区，
  * 有人持续上传把盘写满，挂的不只是这个服务
@@ -1520,15 +1522,17 @@ async function handleV1(req: IncomingMessage, res: ServerResponse, url: URL): Pr
       }
       const busy = db.apiInFlight(key.id) + (v1Uploading.get(key.id) ?? 0) - counted;
       const since = Date.now() - DAY_MS;
-      if (db.apiUsedSince(since, key) >= key.daily_limit) {
-        reject(429, 'quota_exceeded', `这个 key 24 小时内最多提交 ${key.daily_limit} 张`, { limit: key.daily_limit });
+      // 管理员只免额度（账号的、全站每天的），同时在处理几张、排队上限照旧：那是保护机器的
+      const unlimited = db.isAdmin(key.user_id);
+      if (!unlimited && db.apiUsedSince(since, key) >= key.daily_limit) {
+        reject(429, 'quota_exceeded', `24 小时内最多提交 ${key.daily_limit} 张`, { limit: key.daily_limit });
         return false;
       }
       if (busy >= API_KEY_IN_FLIGHT) {
         reject(429, 'too_many_in_flight', `同一个 key 同时最多 ${API_KEY_IN_FLIGHT} 张在上传或处理`, { limit: API_KEY_IN_FLIGHT });
         return false;
       }
-      if (db.apiSubmittedSince(since) >= API_DAILY_LIMIT) {
+      if (!unlimited && db.apiSubmittedSince(since) >= API_DAILY_LIMIT) {
         reject(503, 'api_daily_limit', '对外接口今天的总量用完了，明天再试');
         return false;
       }
@@ -1835,10 +1839,10 @@ async function handleMe(req: IncomingMessage, res: ServerResponse, url: URL): Pr
 
 /*
  * 个人中心里的对外接口 key（用法见 docs-site/api/index.md）。登录了就能自己申请，不用找站长：
- *   GET    /api/me/keys       申请过的 key（不含 key 本身，只有编号）和 24 小时内用了几张
- *   POST   /api/me/keys       申请一个。同时只能有一个没吊销的；key 只在这个响应里出现一次
+ *   GET    /api/me/keys       还能用的 key（不含 key 本身，只有编号）、24 小时内用了几张、额度（管理员为 null，不限）
+ *   POST   /api/me/keys       再申请一个，最多同时 MAX_KEYS_PER_ACCOUNT 个；key 只在这个响应里出现一次
  *   DELETE /api/me/keys/<id>  吊销自己的 key，立即生效
- * 额度按账号算：吊销了再申请，24 小时内用过的照样算数
+ * 额度按账号算：几个 key 共用，吊销了再申请，24 小时内用过的照样算数
  */
 async function handleMyKeys(
   req: IncomingMessage,
@@ -1853,24 +1857,17 @@ async function handleMyKeys(
   const since = Date.now() - DAY_MS;
 
   if (req.method === 'GET' && url.pathname === '/api/me/keys') {
-    const keys = db.userApiKeys(session.user_id);
-    const used = keys[0] ? db.apiUsedSince(since, keys[0]) : 0;
     json(res, 200, {
-      keys: keys.map((key) => ({
-        id: key.id,
-        createdAt: new Date(key.created_at).toISOString(),
-        revokedAt: key.revoked_at ? new Date(key.revoked_at).toISOString() : null,
-        dailyLimit: key.daily_limit,
-      })),
-      used,
-      dailyLimit: SELF_SERVE_DAILY_LIMIT,
+      keys: db.userApiKeys(session.user_id).map((key) => ({ id: key.id, createdAt: new Date(key.created_at).toISOString() })),
+      used: db.apiUsedSince(since, { id: '', user_id: session.user_id }),
+      dailyLimit: db.isAdmin(session.user_id) ? null : SELF_SERVE_DAILY_LIMIT,
     });
     return;
   }
 
   if (req.method === 'POST' && url.pathname === '/api/me/keys') {
-    if (db.userApiKeys(session.user_id).some((key) => key.revoked_at === null)) {
-      fail(res, 409, 'key_exists', '已经有一个能用的 key 了，要换先吊销旧的');
+    if (db.userApiKeys(session.user_id).length >= MAX_KEYS_PER_ACCOUNT) {
+      fail(res, 409, 'too_many_keys', `最多同时有 ${MAX_KEYS_PER_ACCOUNT} 个 key，先吊销不用的`, { limit: MAX_KEYS_PER_ACCOUNT });
       return;
     }
     const key = newApiKey();
@@ -1885,7 +1882,7 @@ async function handleMyKeys(
     };
     db.insertApiKey(row);
     console.log(`[keys] 账号 ${session.user_id} 申请了 key ${row.id}`);
-    json(res, 201, { id: row.id, key, dailyLimit: row.daily_limit });
+    json(res, 201, { id: row.id, key });
     return;
   }
 
