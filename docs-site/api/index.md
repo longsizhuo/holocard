@@ -32,9 +32,9 @@ curl -O https://holocard.longsizhuo.com/v1/cards/3f1c…/files/layer-0.webp -H "
 
 1. 访问 [HoloCard](https://holocard.longsizhuo.com/)，点击右上角「登录」，使用 involutionhell 账号登录（可通过 GitHub 注册）。
 2. 点击右上角头像进入个人中心，在「对外接口（API）」中点击「申请 API key」。
-3. API Key 以 `hc_` 开头，仅在创建时显示一次，请妥善保存；如遗失，请吊销后重新申请。
+3. API Key 以 `hc_` 开头，仅在创建时显示一次，请妥善保存；如遗失，可直接再申请一个，并吊销不再使用的。
 
-每个账号同一时间仅可持有一个有效的 API Key，吊销后立即失效。请求时在请求头中携带：
+每个账号同一时间最多持有 10 个有效的 API Key，共用同一份额度；吊销后立即失效。请求时在请求头中携带：
 
 ```http
 Authorization: Bearer hc_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
@@ -97,7 +97,7 @@ API Key 代表账号身份，请仅在服务端使用，切勿写入前端代码
 | 404 | `card_not_found` / `file_not_found` | 卡片不存在、不属于当前 Key，或已删除、已过期 |
 | 413 | `too_large` | 图片超过 16 MB |
 | 415 | `unsupported_image` | 无法识别的图片格式 |
-| 429 | `quota_exceeded` | 超出 24 小时配额：个人申请的 Key 每个账号 20 张（吊销后重新申请不重置） |
+| 429 | `quota_exceeded` | 超出 24 小时配额：个人申请的 Key 每个账号 20 张，账号下所有 Key 合计（吊销后重新申请不重置） |
 | 429 | `too_many_in_flight` | 单个 Key 同时处于上传、排队或处理中的任务不超过 3 个 |
 | 429 | `rate_limited` | 10 分钟内提交次数超过 30 次 |
 | 503 | `api_daily_limit` / `queue_full` / `busy` | API 当日总量已用尽，或当前排队任务过多，请稍后重试 |

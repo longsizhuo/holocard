@@ -125,13 +125,13 @@ The card's reference orientation slowly follows how the phone is held: when the 
 
 ### My album
 
-"My album" in the page header shows the cards you have made in a grid, newest first; nothing needs to be added by hand. Click a thumbnail to open that card's page, where it can be shared, exported or deleted. Expired or deleted cards show "Expired".
+The album shows the cards you have made in a grid, newest first; nothing needs to be added by hand. It is opened from the account panel: click "Sign in" at the top right of the header (your avatar and name once signed in), then "Open album". On deployments without sign-in, the header button is "My album" and opens the album directly. Click a thumbnail to open that card's page, where it can be shared, exported or deleted. Expired or deleted cards show "Expired".
 
 Without signing in, the album is a local record: it is built from the delete keys stored in this device's browser and is visible only on this device.
 
 ### Signing in
 
-HoloCard supports signing in with an [involutionhell](https://involutionhell.com) account. Signing in is optional; everything works without it. Sign in with the "Sign in" button at the top right of the page header, or with "Sign in with involutionhell" at the top of the album. HoloCard receives only the account's id, name and avatar, not the email address.
+HoloCard supports signing in with an [involutionhell](https://involutionhell.com) account. Signing in is optional; everything works without it. Sign in from the account panel (the "Sign in" button at the top right of the header) or with "Sign in with involutionhell" at the top of the album. HoloCard receives only the account's id, name and avatar, not the email address.
 
 After signing in:
 
@@ -147,11 +147,15 @@ Added cards belong to the account and no longer expire; the delete keys previous
 
 ### Account page
 
-When signed in, the top right of the header shows your avatar and name; click it to open "Account":
+The button at the top right of the header opens "Account". The header also has "Docs", which opens this documentation site in the page's current language.
+
+When not signed in, the panel contains the sign-in entry and "My album" (the number of cards on this device and "Open album").
+
+When signed in, the header button shows your avatar and name, and the panel contains:
 
 - Account details and "Sign out".
-- "My album": the number of cards in the account and on this device not yet added; "Open album" opens the album.
-- "Public API": "Request an API key" issues a key for the HTTP API. The key is shown only once; click "Revoke" when it is no longer needed. See the [API docs](/en/api/) for usage and the [player](/en/player/) for showing API-generated cards on a web page.
+- "My online album": the number of cards in the account; "Open album" opens the album.
+- "Public API": a link to the API docs, usage over the last 24 hours, and the account's keys. "Request an API key" issues a new key, shown only once. An account can hold up to 10 keys at a time, all sharing one quota; if you lose track of a key, simply request another, and click "Revoke" on keys no longer in use. See the [API docs](/en/api/) for usage and the [player](/en/player/) for showing API-generated cards on a web page.
 
 ## Retention
 

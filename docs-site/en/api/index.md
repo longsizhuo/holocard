@@ -32,9 +32,9 @@ Processing typically takes 30–60 seconds per image and longer when jobs are qu
 
 1. Go to [HoloCard](https://holocard.longsizhuo.com/?lang=en), select **Sign in** in the top-right corner and sign in with an involutionhell account (registration via GitHub is available).
 2. Open the account panel from your avatar and select **Request an API key** under **Public API**.
-3. The key starts with `hc_` and is displayed only once. Store it securely; if it is lost, revoke it and request a new one.
+3. The key starts with `hc_` and is displayed only once. Store it securely; if it is lost, simply request another and revoke the ones no longer in use.
 
-Each account can hold one active API key at a time. Revocation takes effect immediately. Send the key in the request header:
+Each account can hold up to 10 active API keys at a time, all sharing one quota. Revocation takes effect immediately. Send the key in the request header:
 
 ```http
 Authorization: Bearer hc_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
@@ -97,7 +97,7 @@ Deletes all files of the card immediately and returns `{"deleted": true}`. Queue
 | 404 | `card_not_found` / `file_not_found` | The card does not exist, belongs to another key, or has been deleted or expired |
 | 413 | `too_large` | The image exceeds 16 MB |
 | 415 | `unsupported_image` | Unrecognized image format |
-| 429 | `quota_exceeded` | 24-hour quota exceeded: 20 cards per account for self-service keys (requesting a new key does not reset it) |
+| 429 | `quota_exceeded` | 24-hour quota exceeded: 20 cards per account for self-service keys, counted across all of the account's keys (requesting a new key does not reset it) |
 | 429 | `too_many_in_flight` | At most 3 jobs per key may be uploading, queued or processing at the same time |
 | 429 | `rate_limited` | More than 30 submissions within 10 minutes |
 | 503 | `api_daily_limit` / `queue_full` / `busy` | The daily API capacity is exhausted or the queue is full; retry later |

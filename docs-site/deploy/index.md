@@ -436,15 +436,19 @@ node scripts/takedown.mjs restore <id>  # 恢复
 node scripts/apikey.mjs create <调用方名称> [每 24 小时上限，默认 50]   # 创建并打印 key（hc_ 开头）
 node scripts/apikey.mjs list                                       # 所有 key 及 24 小时内用量
 node scripts/apikey.mjs revoke <id>                                # 吊销，立即生效
+node scripts/apikey.mjs admin <IH 账号 id>                          # 设为管理员：不受额度限制
+node scripts/apikey.mjs unadmin <IH 账号 id>                        # 取消管理员
 ```
 
-开启登录后，登录用户还可以在个人中心自助申请 key，额度为 `HOLOCARD_SELF_SERVE_DAILY_LIMIT`。`list` 会标出自助申请的 key 所属的账号。
+开启登录后，登录用户还可以在个人中心自助申请 key：每个账号最多同时 10 个，共用一份额度 `HOLOCARD_SELF_SERVE_DAILY_LIMIT`。`list` 会标出自助申请的 key 所属的账号，并列出管理员账号。
+
+管理员账号（`admins` 表）名下的 key 不受账号额度和全站每日总量限制；同一 key 同时处理的数量、排队上限仍然有效。管理员账号的用量仍计入全站每日总量，可能挤占其他账号。
 
 ### 额度与排队
 
 | 限制 | 值 |
 |---|---|
-| 单个 key 每 24 小时 | 创建时指定（默认 50）；自助申请的为 `HOLOCARD_SELF_SERVE_DAILY_LIMIT` |
+| 单个 key 每 24 小时 | 创建时指定（默认 50）；自助申请的为 `HOLOCARD_SELF_SERVE_DAILY_LIMIT`，按账号合计 |
 | 单个 key 同时在上传或处理中 | 3 张（固定） |
 | 所有 key 合计每 24 小时 | `HOLOCARD_API_DAILY_LIMIT` |
 | 接口任务在队列中 | `HOLOCARD_MAX_API_QUEUE`；网页任务总是排在接口任务之前 |

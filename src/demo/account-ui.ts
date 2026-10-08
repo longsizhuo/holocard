@@ -6,7 +6,7 @@
  * 退出直接刷新页面：卡算不算「我的」、卡册、页头都跟着登录状态变，重来一遍最不容易漏。
  */
 
-import { account, loginHref, logout, myKeys, ownedCards, requestKey, revokeKey, unclaimedCards, type MyKey } from './api';
+import { account, loginHref, logout, myKeys, ownedCards, requestKey, revokeKey, unclaimedCards, type MyKeys } from './api';
 import { lang, onLangChange, t } from '../i18n';
 import { openAlbums } from './albums-ui';
 import { track } from './track';
@@ -40,7 +40,7 @@ function docsUrl(): string {
 /**
  * 页头按钮跟着登录状态变。loadMe 回来之后调一次。
  * 卡册的入口在个人中心里，没登录（甚至没开登录）的人也要能打开，所以按钮一直在：
- * 没登录写「登录」，没开登录的部署写「我的卡册」，点开都是个人中心
+ * 没登录写「登录」，点开是个人中心；没开登录的部署写「我的卡册」，点开直接是卡册
  */
 export function refreshAccountButton(): void {
   if (!button) return;
@@ -58,12 +58,21 @@ export function refreshAccountButton(): void {
   button.setAttribute('aria-label', t('account.title'));
 }
 
-function keyBox(state: { keys: MyKey[]; used: number; dailyLimit: number }): HTMLElement {
+/** 额度是账号的，几个 key 共用；忘了手上是哪个就再申请一个，不用的吊销 */
+function keyBox(state: MyKeys): HTMLElement {
   const box = el('div', { className: 'api' });
   const note = el('p', { className: 'api__note', role: 'status' });
-  const active = state.keys.find((key) => key.revokedAt === null);
+  box.append(
+    el('p', {
+      className: 'api__info',
+      textContent:
+        state.dailyLimit === null
+          ? t('api.usageUnlimited', { used: state.used })
+          : t('api.usage', { used: state.used, limit: state.dailyLimit }),
+    }),
+  );
 
-  if (fresh && active?.id === fresh.id) {
+  if (fresh && state.keys.some((key) => key.id === fresh?.id)) {
     const field = el('input', { className: 'api__key', readOnly: true, value: fresh.key, spellcheck: false });
     const copy = el('button', { type: 'button', className: 'api__button', textContent: t('api.copy') });
     copy.addEventListener('click', () => {
@@ -76,15 +85,15 @@ function keyBox(state: { keys: MyKey[]; used: number; dailyLimit: number }): HTM
     );
   }
 
-  if (active) {
+  for (const key of state.keys) {
     const revoke = el('button', { type: 'button', className: 'api__button', textContent: t('api.revoke') });
     revoke.addEventListener('click', () => {
       if (!confirm(t('api.revokeConfirm'))) return;
       revoke.disabled = true;
-      revokeKey(active.id).then(
+      revokeKey(key.id).then(
         () => {
           track('api-key-revoke');
-          fresh = null;
+          if (fresh?.id === key.id) fresh = null;
           void render();
         },
         (error: unknown) => {
@@ -100,36 +109,33 @@ function keyBox(state: { keys: MyKey[]; used: number; dailyLimit: number }): HTM
         el('span', {
           className: 'api__info',
           textContent: t('api.keyInfo', {
-            id: active.id,
-            date: new Date(active.createdAt).toLocaleDateString(document.documentElement.lang || undefined),
-            used: state.used,
-            limit: active.dailyLimit,
+            id: key.id,
+            date: new Date(key.createdAt).toLocaleDateString(document.documentElement.lang || undefined),
           }),
         }),
         revoke,
       ),
     );
-  } else {
-    const ask = el('button', { type: 'button', className: 'api__button api__button--primary', textContent: t('api.request') });
-    ask.addEventListener('click', () => {
-      ask.disabled = true;
-      ask.textContent = t('api.requesting');
-      requestKey().then(
-        (created) => {
-          track('api-key');
-          fresh = { id: created.id, key: created.key };
-          void render();
-        },
-        (error: unknown) => {
-          ask.disabled = false;
-          ask.textContent = t('api.request');
-          note.textContent = t('api.failed', { message: describe(error) });
-        },
-      );
-    });
-    box.append(ask);
   }
-  box.append(note);
+
+  const ask = el('button', { type: 'button', className: 'api__button api__button--primary', textContent: t('api.request') });
+  ask.addEventListener('click', () => {
+    ask.disabled = true;
+    ask.textContent = t('api.requesting');
+    requestKey().then(
+      (created) => {
+        track('api-key');
+        fresh = created;
+        void render();
+      },
+      (error: unknown) => {
+        ask.disabled = false;
+        ask.textContent = t('api.request');
+        note.textContent = t('api.failed', { message: describe(error) });
+      },
+    );
+  });
+  box.append(ask, note);
   return box;
 }
 
@@ -229,6 +235,11 @@ export function initAccount(
 }
 
 export function openAccount(): void {
+  // 没开登录的部署，个人中心里只剩「打开卡册」，直接开卡册省一步
+  if (!account().login) {
+    openAlbums();
+    return;
+  }
   void render();
   dialog?.showModal();
 }

@@ -435,20 +435,25 @@ export async function claimCards(ids: string[]): Promise<string[]> {
 export interface MyKey {
   id: string;
   createdAt: string;
-  revokedAt: string | null;
-  dailyLimit: number;
 }
 
-export async function myKeys(): Promise<{ keys: MyKey[]; used: number; dailyLimit: number }> {
+/** 还能用的 key 和账号的额度：几个 key 共用，dailyLimit 为 null 是不限（管理员） */
+export interface MyKeys {
+  keys: MyKey[];
+  used: number;
+  dailyLimit: number | null;
+}
+
+export async function myKeys(): Promise<MyKeys> {
   const res = await fetch(`${import.meta.env.BASE_URL}api/me/keys`, { headers: apiHeaders() });
   if (!res.ok) throw await apiError(res, `HTTP ${res.status}`);
-  return (await res.json()) as { keys: MyKey[]; used: number; dailyLimit: number };
+  return (await res.json()) as MyKeys;
 }
 
-export async function requestKey(): Promise<{ id: string; key: string; dailyLimit: number }> {
+export async function requestKey(): Promise<{ id: string; key: string }> {
   const res = await fetch(`${import.meta.env.BASE_URL}api/me/keys`, { method: 'POST', headers: apiHeaders() });
   if (!res.ok) throw await apiError(res, `HTTP ${res.status}`);
-  return (await res.json()) as { id: string; key: string; dailyLimit: number };
+  return (await res.json()) as { id: string; key: string };
 }
 
 export async function revokeKey(id: string): Promise<void> {

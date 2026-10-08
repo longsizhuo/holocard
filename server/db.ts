@@ -145,6 +145,12 @@ CREATE TABLE IF NOT EXISTS api_keys (
   revoked_at  INTEGER,
   daily_limit INTEGER NOT NULL
 );
+
+-- 不受对外接口额度限制的 IH 账号（站长自己这类）。用 scripts/apikey.mjs admin 加减
+CREATE TABLE IF NOT EXISTS admins (
+  user_id    TEXT PRIMARY KEY,
+  created_at INTEGER NOT NULL
+);
 `;
 
 /** 可以被更新的列。白名单，避免把任意键名拼进 SQL */
@@ -319,7 +325,7 @@ export class CardDb {
    * 这个 key 的额度用了多少：账号申请的 key 数这个账号所有 key 的，免得吊销了再申请一个重新计数；
    * 站长发的 key 只数它自己
    */
-  apiUsedSince(since: number, key: ApiKeyRow): number {
+  apiUsedSince(since: number, key: Pick<ApiKeyRow, 'id' | 'user_id'>): number {
     const row = key.user_id
       ? this.#db
           .prepare(
@@ -336,11 +342,16 @@ export class CardDb {
     return (row as ApiKeyRow | undefined) ?? null;
   }
 
-  /** 这个账号申请过的 key（含吊销的），最新的在前 */
+  /** 这个账号还能用的 key，最新的在前 */
   userApiKeys(userId: string): ApiKeyRow[] {
     return this.#db
-      .prepare('SELECT * FROM api_keys WHERE user_id = ? ORDER BY created_at DESC LIMIT 20')
+      .prepare('SELECT * FROM api_keys WHERE user_id = ? AND revoked_at IS NULL ORDER BY created_at DESC')
       .all(userId) as unknown as ApiKeyRow[];
+  }
+
+  /** 管理员账号：对外接口不限额度 */
+  isAdmin(userId: string | null): boolean {
+    return userId !== null && this.#db.prepare('SELECT 1 FROM admins WHERE user_id = ?').get(userId) !== undefined;
   }
 
   insertApiKey(row: ApiKeyRow): void {

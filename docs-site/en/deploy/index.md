@@ -436,15 +436,19 @@ The database stores only the SHA-256 of each key; the key itself is shown once, 
 node scripts/apikey.mjs create <caller name> [limit per 24 hours, default 50]   # create and print a key (starts with hc_)
 node scripts/apikey.mjs list                                               # all keys with 24-hour usage
 node scripts/apikey.mjs revoke <id>                                        # revoke, effective immediately
+node scripts/apikey.mjs admin <IH account id>                              # make an admin: no quota
+node scripts/apikey.mjs unadmin <IH account id>                            # remove admin
 ```
 
-With login enabled, signed-in users can also create keys themselves on the account page, with the `HOLOCARD_SELF_SERVE_DAILY_LIMIT` quota. `list` marks self-service keys with the owning account.
+With login enabled, signed-in users can also create keys themselves on the account page: up to 10 per account at a time, sharing one `HOLOCARD_SELF_SERVE_DAILY_LIMIT` quota. `list` marks self-service keys with the owning account and lists admin accounts.
+
+Keys of admin accounts (the `admins` table) are exempt from the account quota and the site-wide daily total; the per-key in-flight limit and the queue limit still apply. Admin usage still counts toward the site-wide daily total and can crowd out other accounts.
 
 ### Quotas and queueing
 
 | Limit | Value |
 |---|---|
-| Per key, per 24 hours | Set at creation (default 50); `HOLOCARD_SELF_SERVE_DAILY_LIMIT` for self-service keys |
+| Per key, per 24 hours | Set at creation (default 50); `HOLOCARD_SELF_SERVE_DAILY_LIMIT` for self-service keys, counted per account |
 | Per key, uploading or processing at once | 3 (fixed) |
 | All keys combined, per 24 hours | `HOLOCARD_API_DAILY_LIMIT` |
 | API jobs in the queue | `HOLOCARD_MAX_API_QUEUE`; web jobs are always queued ahead of API jobs |
