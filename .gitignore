@@ -30,3 +30,7 @@ dist-lab/
 
 # 分享图预览工具的缓存（分层结果、打包出的脚本）
 .og-cache/
+
+# npm 包 holocard 的构建产物（pnpm build:player）
+packages/player/dist/
+packages/player/LICENSE

@@ -1,0 +1,25 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>holocard player demo</title>
+  <style>
+    body { font: 15px/1.5 system-ui, sans-serif; margin: 2rem auto; max-width: 52rem; padding: 0 1rem; }
+    .row { display: flex; gap: 2rem; flex-wrap: wrap; align-items: flex-start; }
+    holo-card { width: 280px; }
+    /* 宿主页面的样式碰不到卡片内部：这条规则对 <holo-card> 里的 .hc 不起作用 */
+    .hc { display: none !important; }
+  </style>
+</head>
+<body>
+  <h1>&lt;holo-card&gt;</h1>
+  <p>Move the pointer over the card, or tilt your phone. Start a local server in <code>packages/player</code> after <code>pnpm build:player</code> and copy a <code>.layers</code> folder (for example <code>public/samples/demo</code>) to <code>demo/sample</code>.</p>
+  <div class="row">
+    <holo-card id="dir" src="./sample"></holo-card>
+    <holo-card id="manifest" src="./sample/manifest.json" gyro="off" style="width: 200px"></holo-card>
+    <holo-card id="broken" src="./missing"></holo-card>
+  </div>
+  <script type="module" src="../dist/holocard.js"></script>
+</body>
+</html>

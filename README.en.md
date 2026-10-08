@@ -266,6 +266,20 @@ Limits: 50 cards per key per 24 hours by default (set when the key is issued), a
 Over the limit you get 429 (`quota_exceeded`, `too_many_in_flight`, `rate_limited`) or 503 (`api_daily_limit`, `queue_full`, `busy`). A revoked key stops working at once, and its queued cards are not processed.
 A failed card has `error.code` set to `nsfw_rejected`, `moderation_unavailable` (detection unavailable, so the card is refused) or `processing_failed`.
 
+## Embedding in your page (npm package `holocard`)
+
+The API delivers files (`manifest.json` plus layer images); to make them move on a web page you need a player.
+`packages/player` is that: a custom element `<holo-card>`, one snippet to paste, usable as-is in React or Vue.
+
+```html
+<script type="module" src="https://cdn.jsdelivr.net/npm/holocard@0.1/dist/holocard.js"></script>
+<holo-card src="https://your-site.example/cards/my-card"></holo-card>
+```
+
+Download the card's `manifest.json` and layer files to your own server (keep the file names) and point `src` at the folder.
+The author's foils, glare and parallax are kept; styles live in a shadow root, isolated from the host page. See [packages/player/README.md](packages/player/README.md).
+Build with `pnpm build:player`, self-check with `node scripts/verify-player.mjs`; pushing a `player-v<version>` tag publishes to npm from CI (`.github/workflows/publish-player.yml`).
+
 ## The `.layers` format
 
 This format decouples the algorithm from the renderer. Anything that produces it can feed the renderer, and the renderer can be used on its own:

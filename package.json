@@ -14,7 +14,8 @@
     "build:server": "tsc --noEmit && vite build --config vite.server.config.ts",
     "start:server": "node dist-server/holocard-server.mjs",
     "dev:server": "vite build --config vite.server.config.ts && node --env-file=server/dev.env dist-server/holocard-server.mjs",
-    "og": "vite build --config vite.og.config.ts --logLevel error && node .og-cache/bin/og-preview.mjs"
+    "og": "vite build --config vite.og.config.ts --logLevel error && node .og-cache/bin/og-preview.mjs",
+    "build:player": "vite build --config vite.player.config.ts && cp LICENSE packages/player/LICENSE"
   },
   "dependencies": {
     "@huggingface/transformers": "^4.3.0",
