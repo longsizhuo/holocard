@@ -9,6 +9,7 @@
  *   - 指针划过时卡片会转
  *
  * 用法：node scripts/verify-player.mjs [截图输出目录]
+ * 发版后核对 CDN 上的那份：PLAYER_URL=https://cdn.jsdelivr.net/npm/@holocard/player@<版本>/dist/holocard.js node scripts/verify-player.mjs
  */
 
 import assert from 'node:assert/strict';
@@ -40,6 +41,10 @@ const browser = await chromium.launch({
   args: ['--use-angle=swiftshader', '--enable-unsafe-swiftshader'],
 });
 const page = await browser.newPage({ viewport: { width: 900, height: 700 } });
+// 示例页引用的是本地 dist；给了 PLAYER_URL 就换成那份（发版后核对 CDN）
+if (process.env.PLAYER_URL) {
+  await page.route('**/dist/holocard.js', async (route) => route.fulfill({ response: await route.fetch({ url: process.env.PLAYER_URL }) }));
+}
 const errors = [];
 page.on('pageerror', (e) => errors.push(String(e)));
 // 在组件脚本跑之前就挂好监听，不漏掉 load / error
