@@ -7,7 +7,7 @@
   "license": "GPL-3.0-only",
   "scripts": {
     "dev": "vite",
-    "build": "node scripts/pearl-keyframes.mjs --check && tsc --noEmit && vite build",
+    "build": "node scripts/pearl-keyframes.mjs --check && tsc --noEmit && vite build && vitepress build docs-site",
     "preview": "vite preview",
     "typecheck": "tsc --noEmit",
     "capture": "node scripts/capture.mjs",
@@ -15,7 +15,8 @@
     "start:server": "node dist-server/holocard-server.mjs",
     "dev:server": "vite build --config vite.server.config.ts && node --env-file=server/dev.env dist-server/holocard-server.mjs",
     "og": "vite build --config vite.og.config.ts --logLevel error && node .og-cache/bin/og-preview.mjs",
-    "build:player": "vite build --config vite.player.config.ts && cp LICENSE packages/player/LICENSE"
+    "build:player": "vite build --config vite.player.config.ts && cp LICENSE packages/player/LICENSE",
+    "docs:dev": "vitepress dev docs-site"
   },
   "dependencies": {
     "@huggingface/transformers": "^4.3.0",
@@ -28,7 +29,8 @@
   "devDependencies": {
     "@types/upng-js": "^2.1.5",
     "typescript": "^7.0.2",
-    "vite": "^8.3.0"
+    "vite": "^8.3.0",
+    "vitepress": "^1"
   },
   "packageManager": "pnpm@10.7.0"
 }

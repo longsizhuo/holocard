@@ -34,3 +34,6 @@ dist-lab/
 # npm 包 holocard 的构建产物（pnpm build:player）
 packages/player/dist/
 packages/player/LICENSE
+
+# VitePress 的缓存（docs-site/，产物在 dist/docs）
+docs-site/.vitepress/cache/
