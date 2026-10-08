@@ -84,21 +84,28 @@ HoloCard 没配 secret 时正式站不出登录入口，staging 自动换成测�
 会话 cookie 是 `__Host-hc_session`（30 天），库里只存它的哈希（`sessions` 表）；认会话改东西的请求只收 `Sec-Fetch-Site: same-origin` 的，
 挡住同站的兄弟子域（holocard-staging 跑着没合并的代码）借访客的会话。
 
-配 staging 的真实登录（IH 后端带 SSO 的版本上线之后；以 ubuntu 跑，secret 不落屏幕）：
+**secret 的唯一真源是 Infisical**（https://secrets.involutionhell.com ，IH 后端项目的 `prod` 环境，
+secret 名就是 `SSO_HOLOCARD_SECRET`、`SSO_HOLOCARD_STAGING_SECRET`）。别处都从那里抄，不要临时生成一个直接写进哪台机器。
+`/home/ubuntu/involution-hell` 是 IH 的**生产**部署目录，它的 `.env` 按 IH 自己的规矩维护（见 IH 前端仓 CONTRIBUTING「.env 文件规则」），不在这里写命令去改。
+
+打开真实登录的步骤：
+
+1. 在 Infisical 的 prod 环境建这两个 secret（值可以用 `openssl rand -hex 32` 生成后粘进去）。
+2. IH 维护者按 IH 的流程把它们同步进生产 `.env`，`docker compose up -d backend`，日志里出现 `[SSO] client holocard 已启用`（staging 的是 `holocard-staging`）。
+3. HoloCard 这边配同一个值。以 ubuntu 跑，值从 Infisical 复制后粘贴（不回显、不进 shell 历史）：
 
 ```bash
-S=$(openssl rand -hex 32)
-printf '\nSSO_HOLOCARD_STAGING_SECRET=%s\n' "$S" >> ~/involution-hell/.env
+read -rsp 'holocard-staging 的 secret: ' S; echo
 sudo install -d -m 755 /etc/holocard-staging /etc/systemd/system/holocard-staging.service.d
 printf 'HOLOCARD_SSO_CLIENT_ID=holocard-staging\nHOLOCARD_SSO_SECRET=%s\nHOLOCARD_SSO_TOKEN_URL=https://api.involutionhell.com/internal/sso/token\n' "$S" \
   | sudo install -m 600 /dev/stdin /etc/holocard-staging/sso.env
 printf '[Service]\nEnvironmentFile=/etc/holocard-staging/sso.env\n' | sudo install -m 644 /dev/stdin /etc/systemd/system/holocard-staging.service.d/sso.conf
 unset S
-cd ~/involution-hell && docker compose up -d backend       # IH 读新的 .env；日志里出现 [SSO] client holocard-staging 已启用
 sudo systemctl daemon-reload && sudo systemctl restart holocard-staging
 ```
 
-正式站同理：`SSO_HOLOCARD_SECRET`、`/etc/holocard/sso.env`（`HOLOCARD_SSO_SECRET=…`，client id 和换码地址用默认值），drop-in 挂在 `holocard.service.d/`。
+正式站同理：粘 `SSO_HOLOCARD_SECRET` 的值，写 `/etc/holocard/sso.env`（只要 `HOLOCARD_SSO_SECRET=…` 一行，client id 和换码地址用默认值），
+drop-in 挂在 `holocard.service.d/`，最后重启 `holocard`。值要换（泄露了、人员变动）也是先改 Infisical，再按 2、3 同步。
 
 ## 服务器上的布局
 
