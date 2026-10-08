@@ -1334,9 +1334,13 @@ async function serveStatic(
   const safe = target === root || target.startsWith(root + sep);
 
   // 先找真实文件；落不到文件的回 index.html，不是前端路由的话状态码给 404
+  const isFile = (path: string): Promise<boolean> => stat(path).then((s) => s.isFile(), () => false);
   let candidate = target;
   let status = 200;
-  if (!safe || !(await stat(target).then((s) => s.isFile()).catch(() => false))) {
+  // 文档站（VitePress cleanUrls）的地址不带 .html：/docs/api/x 对应 docs/api/x.html
+  if (safe && pathname.startsWith('/docs/') && !(await isFile(target)) && (await isFile(`${target}.html`))) {
+    candidate = `${target}.html`;
+  } else if (!safe || !(await isFile(target))) {
     candidate = join(root, 'index.html');
     if (!SPA_ROUTES.some((route) => route.test(pathname))) status = 404;
   }

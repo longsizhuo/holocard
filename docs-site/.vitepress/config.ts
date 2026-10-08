@@ -47,6 +47,8 @@ const sidebar = (
 
 export default defineConfig({
   base: '/docs/',
+  // 地址不带 .html（服务端在 /docs/ 下找不到文件时补上 .html，见 server/index.ts 的 serveStatic）
+  cleanUrls: true,
   outDir: '../dist/docs',
   title: 'HoloCard',
   head: [['link', { rel: 'icon', href: '/favicon.svg', type: 'image/svg+xml' }]],
