@@ -32,11 +32,9 @@ function el<K extends keyof HTMLElementTagNameMap>(
   return node;
 }
 
-/** 接口文档：README 里「对外接口」那一节，英文看英文版 */
+/** 接口文档在站内（docs-site/，VitePress），按当前语言进对应的那份 */
 function docsUrl(): string {
-  return lang() === 'en'
-    ? 'https://github.com/longsizhuo/holocard/blob/main/README.en.md#public-api'
-    : 'https://github.com/longsizhuo/holocard/blob/main/README.md#%E5%AF%B9%E5%A4%96%E6%8E%A5%E5%8F%A3';
+  return `${import.meta.env.BASE_URL}docs/${lang() === 'zh' ? '' : `${lang()}/`}`;
 }
 
 /** 页头按钮跟着登录状态变。loadMe 回来之后调一次 */

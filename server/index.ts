@@ -1366,7 +1366,8 @@ async function serveStatic(
     candidate.startsWith(join(root, 'samples') + sep) ||
     (dirname(candidate) === root && /^og(?:-[a-z]{2})?\.jpg$/.test(basename(candidate)));
   const isHtml = ext === '.html';
-  if (isHtml) body = Buffer.from(localizeHtml(body.toString('utf8'), lang), 'utf8');
+  // /docs/ 是 VitePress 生成的文档，自带三种语言的页面，不套首页的标题、描述
+  if (isHtml && !pathname.startsWith('/docs/')) body = Buffer.from(localizeHtml(body.toString('utf8'), lang), 'utf8');
 
   // 404 只是个兜底页：不注入分享标签、不计访问
   if (status === 200 && cardPath?.[1] && isHtml && !privateCard) {
@@ -1942,6 +1943,11 @@ const server = createServer((req, res) => {
     }
 
     // 这两个要写完整域名，所以按 PUBLIC_ORIGIN 现生成，不放静态文件——别人自托管时地址自然就对
+    // 文档在 /docs/ 下（VitePress 生成的静态页）；手打 /docs 时补上斜杠
+    if ((req.method === 'GET' || req.method === 'HEAD') && url.pathname === '/docs') {
+      res.writeHead(301, { location: `/docs/${url.search}` }).end();
+      return;
+    }
     if ((req.method === 'GET' || req.method === 'HEAD') && url.pathname === '/robots.txt') {
       text(res, 'text/plain; charset=utf-8', robotsTxt(), req.method);
       return;
