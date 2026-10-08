@@ -2,7 +2,9 @@
 
 中文 | [English](README.en.md)
 
-[![HoloCard](public/og.jpg)]([https://holocard.longsizhuo.com](https://raw.githubusercontent.com/longsizhuo/holocard/main/public/og-en.jpg))
+[![npm @holocard/player](https://img.shields.io/npm/v/@holocard/player?label=npm%20%40holocard%2Fplayer)](https://www.npmjs.com/package/@holocard/player)
+
+[![HoloCard](public/og.jpg)](https://holocard.longsizhuo.com)
 
 https://github.com/longsizhuo/holocard ｜ 线上 https://holocard.longsizhuo.com
 

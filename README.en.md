@@ -2,6 +2,8 @@
 
 [中文](README.md) | English
 
+[![npm @holocard/player](https://img.shields.io/npm/v/@holocard/player?label=npm%20%40holocard%2Fplayer)](https://www.npmjs.com/package/@holocard/player)
+
 [![HoloCard](public/og-en.jpg)](https://holocard.longsizhuo.com/?lang=en)
 
 https://github.com/longsizhuo/holocard ｜ Live: https://holocard.longsizhuo.com
