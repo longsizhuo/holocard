@@ -176,7 +176,7 @@ env.allowRemoteModels = false;
  */
 const MATTE_MIN_MEMORY = 8 * 2 ** 30;
 /**
- * 抠图模型，默认 lite。换型号、做盲评对比时用环境变量指定，不用改代码（流程见 scripts/blind/README.md）：
+ * 抠图模型，默认 lite。换型号、做盲评对比时用环境变量指定，不用改代码（流程见 docs-site/develop/index.md「双盲对比」）：
  *   HOLOCARD_MATTE_MODEL  模型名，比如 onnx-community/BiRefNet_512x512-ONNX
  *   HOLOCARD_MATTE_SIZE   输入边长，要和这份 ONNX 导出时的尺寸一致
  *   HOLOCARD_MATTE_DTYPE  fp32 / fp16 / q8
@@ -1334,9 +1334,13 @@ async function serveStatic(
   const safe = target === root || target.startsWith(root + sep);
 
   // 先找真实文件；落不到文件的回 index.html，不是前端路由的话状态码给 404
+  const isFile = (path: string): Promise<boolean> => stat(path).then((s) => s.isFile(), () => false);
   let candidate = target;
   let status = 200;
-  if (!safe || !(await stat(target).then((s) => s.isFile()).catch(() => false))) {
+  // 文档站（VitePress cleanUrls）的地址不带 .html：/docs/api/x 对应 docs/api/x.html
+  if (safe && pathname.startsWith('/docs/') && !(await isFile(target)) && (await isFile(`${target}.html`))) {
+    candidate = `${target}.html`;
+  } else if (!safe || !(await isFile(target))) {
     candidate = join(root, 'index.html');
     if (!SPA_ROUTES.some((route) => route.test(pathname))) status = 404;
   }
@@ -1440,7 +1444,7 @@ async function sweep(): Promise<void> {
 }
 
 /*
- * 对外接口 /v1：给白名单里的少数调用方（key 由站长用 scripts/apikey.mjs 发）。用法见 README 的「对外接口」。
+ * 对外接口 /v1：给白名单里的少数调用方（key 由站长用 scripts/apikey.mjs 发）。用法见 docs-site/api/index.md。
  *
  * 和网页的区别：
  *   - 鉴权：Authorization: Bearer <key>，每张卡只有提交它的 key 能看、能下、能删
@@ -1830,7 +1834,7 @@ async function handleMe(req: IncomingMessage, res: ServerResponse, url: URL): Pr
 }
 
 /*
- * 个人中心里的对外接口 key（用法见 README「对外接口」）。登录了就能自己申请，不用找站长：
+ * 个人中心里的对外接口 key（用法见 docs-site/api/index.md）。登录了就能自己申请，不用找站长：
  *   GET    /api/me/keys       申请过的 key（不含 key 本身，只有编号）和 24 小时内用了几张
  *   POST   /api/me/keys       申请一个。同时只能有一个没吊销的；key 只在这个响应里出现一次
  *   DELETE /api/me/keys/<id>  吊销自己的 key，立即生效

@@ -24,7 +24,7 @@ It is a standard custom element, so it works in plain HTML, React, Vue, Svelteâ€
 ## The files
 
 A card is a `.layers` folder: `manifest.json` plus one image per layer (`layer-0.webp`, `layer-1.webp`, â€¦).
-You get one from the [HoloCard API](https://holocard.longsizhuo.com/docs/en/): when a card is done,
+You get one from the [HoloCard API](https://holocard.longsizhuo.com/docs/en/api/): when a card is done,
 download `manifest.json` and every layer file into a folder on your own server (keep the file names), and point `src` at it.
 
 `src` can be the folder (`/cards/my-card`) or the manifest itself (`/cards/my-card/manifest.json`).

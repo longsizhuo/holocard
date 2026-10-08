@@ -34,7 +34,7 @@ let configured = false;
  *
  * 但 huggingface.co 在中国大陆访问困难，所以留了构建期覆盖：
  *   VITE_MODEL_HOST=https://hf-mirror.com/
- * 也可以指向自己的 R2 / OSS / jsDelivr 镜像，见 README 的部署一节。
+ * 也可以指向自己的 R2 / OSS / jsDelivr 镜像，见 docs-site/deploy/index.md「模型权重」。
  */
 export function configureModelSource(): void {
   if (configured) return;
