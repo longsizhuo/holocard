@@ -139,7 +139,7 @@ pnpm og --export gif       # 导出动图：gif / motion / apng，写到 out/exp
 
 - `verify-pack`、`verify-pearl`、`verify-fallback` 在 macOS 上默认使用本机 Chrome，在 Windows 上使用 Edge，其他系统使用 Playwright 自带的 Chromium；可通过 `HOLOCARD_BROWSER_CHANNEL`（`chrome` / `msedge`，留空则使用自带版本）更换。
 - `film-pack`、`render-sfx`、`verify-perf` 只使用 Playwright 自带的浏览器，首次使用前执行 `pnpm exec playwright-core install chromium`；`verify-pearl --browser webkit` 需安装 `webkit`，`verify-perf --browser firefox` 需安装 `firefox`。
-- `verify-player` 通过 `CHROMIUM_PATH` 指定浏览器可执行文件；未设置时使用脚本内写死的路径，在其他机器上需显式设置。
+- `verify-player`、`verify-account` 默认使用 Playwright 自带的 Chromium，可通过 `HOLOCARD_BROWSER_CHANNEL` 改用本机浏览器。
 - `verify-pack`、`film-pack` 在浏览器内拦截全部 `/api` 请求，不访问后端。`verify-api`、`verify-perf` 会向目标服务的数据库写入测试数据，不得对线上运行。
 
 ## 其他脚本

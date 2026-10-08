@@ -864,10 +864,10 @@ select {
 .danger__btn:hover { background: rgba(190, 70, 90, 0.08); border-color: rgba(190, 70, 90, 0.5); }
 .danger__btn:disabled { opacity: 0.5; cursor: default; }
 
-/* ---------- 卡册 ---------- */
+/* ---------- 页头按钮（文档、个人中心） ---------- */
 
-/* 页头入口：和语言切换同一套小胶囊，不和珠光的 GitHub 按钮抢 */
-.albums-open {
+/* 和语言切换同一套小胶囊，不和珠光的 GitHub 按钮抢 */
+.head-btn {
   flex: none;
   padding: 6px 12px;
   border-radius: 999px;
@@ -880,11 +880,13 @@ select {
   white-space: nowrap;
   cursor: pointer;
 }
-.albums-open:hover { border-color: rgba(123, 95, 208, 0.45); }
+.head-btn:hover { border-color: rgba(123, 95, 208, 0.45); }
+
+/* ---------- 卡册、个人中心的窗口 ---------- */
 
 /*
  * 原生 dialog：遮罩、Esc、焦点都归浏览器管。body 不滚，窗口自己滚。
- * 顶部对齐而不是居中：打开时先是卡包、开了换成网格，高度会变，居中的话标题会跟着跳
+ * 顶部对齐而不是居中：内容是打开后才读回来的，高度会变，居中的话标题会跟着跳
  */
 .albums {
   margin-block: 7vh auto;
@@ -1007,7 +1009,7 @@ select {
 .acard a:hover .athumb { box-shadow: 0 8px 20px -10px rgba(60, 50, 90, 0.7); }
 
 @media (max-width: 900px) {
-  .albums-open { font-size: 12px; padding: 5px 10px; }
+  .head-btn { font-size: 12px; padding: 5px 10px; }
   .albums__body { padding: 16px 14px 18px; }
   .albums__grid { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
 }

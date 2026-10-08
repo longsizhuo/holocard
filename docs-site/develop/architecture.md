@@ -238,7 +238,7 @@ onnxruntime-node 的推理同步运行在调用线程上，切层与补全是纯
 | `POST /auth/logout` | 注销会话 |
 | `GET /api/me` | 是否启用登录、当前账号、账号名下仍有效的卡 |
 | `POST /api/me/claim` | 凭口令把本设备上的卡认领到账号下，认领后原口令作废 |
-| `GET` / `POST /api/me/keys`、`DELETE /api/me/keys/<id>` | 个人中心的对外接口 key：查看用量、申请（同时只能有一个）、吊销 |
+| `GET` / `POST /api/me/keys`、`DELETE /api/me/keys/<id>` | 个人中心的对外接口 key：查看用量、申请（每个账号最多 10 个，共用额度）、吊销 |
 
 - 会话 cookie `__Host-hc_session` 与 state cookie `__Host-hc_state` 使用 `__Host-` 前缀，防止兄弟子域覆盖。会话有效期 30 天，库中只存会话口令的 SHA-256。
 - HoloCard 只获取账号的 id、名字与头像，不接触 IH 的登录状态。

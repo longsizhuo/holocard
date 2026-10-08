@@ -649,7 +649,7 @@ export class GlPack implements PackView {
       try {
         void this.#build().catch(() => undefined);
       } catch {
-        // 重建不了就停在那儿；卡在「我做过的」里一直都有
+        // 重建不了就停在那儿；卡在卡册里都有
       }
     });
 

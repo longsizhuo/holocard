@@ -139,7 +139,7 @@ What each script checks:
 
 - `verify-pack`, `verify-pearl` and `verify-fallback` use the system Chrome on macOS, Edge on Windows and Playwright's bundled Chromium elsewhere; override with `HOLOCARD_BROWSER_CHANNEL` (`chrome` / `msedge`, empty for the bundled build).
 - `film-pack`, `render-sfx` and `verify-perf` only use Playwright's bundled browsers. Install once with `pnpm exec playwright-core install chromium`; `verify-pearl --browser webkit` needs `webkit`, `verify-perf --browser firefox` needs `firefox`.
-- `verify-player` takes the browser executable from `CHROMIUM_PATH`. The fallback is a path hard-coded in the script, so set it explicitly on other machines.
+- `verify-player` and `verify-account` use Playwright's bundled Chromium by default; set `HOLOCARD_BROWSER_CHANNEL` to use an installed browser instead.
 - `verify-pack` and `film-pack` intercept every `/api` request inside the browser and never reach a backend. `verify-api` and `verify-perf` write test data into the target server's database; never run them against production.
 
 ## Other scripts
