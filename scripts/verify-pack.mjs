@@ -1,7 +1,7 @@
 /**
  * 走一遍卡带和开包：上传 → 最右边出现（WebGL）卡包 → 按「<」回去玩上一张 → 做好后「>」亮小点 →
  * 回到卡包划开撕 → 新卡转一圈摆上来；再传一张点一下炸开；「减少动态效果」下按回车立刻开出来。
- * 还有：别人分享的卡第一次打开先出卡包、开过就不出；自己的卡不出；卡册每次打开先开一包再发牌。
+ * 还有：别人分享的卡第一次打开先出卡包、开过就不出；自己的卡不出；卡册打开直接是网格。
  * 状态栏：卡包在做时是处理进度，停在卡包上（切回来、分享链接首屏）是空的，出错时照常显示错误。
  * 上传区：读屏认得出是「上传照片」按钮，键盘回车、空格能打开选文件。
  * 动效本身逐帧看用 scripts/film-pack.mjs。
@@ -185,29 +185,14 @@ const browser = await chromium.launch({
   await page.waitForTimeout(800);
   check(await visible(page, '.deck__card .hc'), '恢复出来的上一张点到时才加载，加载得出来');
 
-  // 卡册：每次打开先开一包，点开后卡一张张发进网格
+  // 卡册：打开直接是网格，不出卡包、不发牌
   await page.click('#albums-open');
-  await page.waitForSelector('.albums__pack .pack__gl', { timeout: 5000 });
-  check(await page.locator('.albums__grid').isHidden(), '卡册打开先是卡包，网格藏着');
-  await page.waitForTimeout(600);
-  await page.screenshot({ path: `${out}/8-album-pack.png` });
-  const albumPack = await page.locator('.albums__pack .pack__gl').boundingBox();
-  await page.mouse.click(albumPack.x + albumPack.width / 2, albumPack.y + albumPack.height * 0.6);
-  await page.waitForSelector('.albums__grid:not([hidden])', { timeout: 5000 });
-  await page.screenshot({ path: `${out}/9-album-dealing.png` });
-  check(!(await page.locator('.albums__pack').count()), '点开后卡包拆掉、网格露出来');
-  check((await page.locator('.albums__grid .acard').count()) === 2, '两张卡都发进网格');
-  await page.waitForTimeout(2500);
-  await page.screenshot({ path: `${out}/10-album-dealt.png` });
+  await page.waitForSelector('.albums__grid', { timeout: 5000 });
+  check(await page.locator('.albums__grid').isVisible(), '卡册打开直接是网格');
+  check(!(await page.locator('#albums .pack__gl').count()), '卡册里不出卡包');
+  check((await page.locator('.albums__grid .acard').count()) === 2, '两张卡都在网格里');
+  await page.screenshot({ path: `${out}/8-album.png` });
   await page.keyboard.press('Escape');
-  await page.click('#albums-open');
-  check(await page.locator('.albums__pack').isVisible(), '再打开卡册又是一包');
-  await page.keyboard.press('Escape');
-  // dialog 的 close 事件是异步派发的
-  const cleaned = await page
-    .waitForFunction(() => !document.querySelector('.albums__pack'), null, { timeout: 2000 })
-    .then(() => true, () => false);
-  check(cleaned, '关掉窗口时卡包收干净');
   await page.close();
 }
 
