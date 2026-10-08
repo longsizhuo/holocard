@@ -37,13 +37,17 @@ function docsUrl(): string {
   return `${import.meta.env.BASE_URL}docs/${lang() === 'zh' ? '' : `${lang()}/`}api/`;
 }
 
-/** 页头按钮跟着登录状态变。loadMe 回来之后调一次 */
+/**
+ * 页头按钮跟着登录状态变。loadMe 回来之后调一次。
+ * 卡册的入口在个人中心里，没登录（甚至没开登录）的人也要能打开，所以按钮一直在：
+ * 没登录写「登录」，没开登录的部署写「我的卡册」，点开都是个人中心
+ */
 export function refreshAccountButton(): void {
   if (!button) return;
   const { login, user } = account();
-  button.hidden = !login;
+  button.hidden = false;
   if (!user) {
-    button.replaceChildren(t('account.signIn'));
+    button.replaceChildren(t(login ? 'account.signIn' : 'albums.open'));
     button.removeAttribute('aria-label');
     return;
   }
@@ -66,21 +70,9 @@ function keyBox(state: { keys: MyKey[]; used: number; dailyLimit: number }): HTM
       field.select();
       void navigator.clipboard?.writeText(field.value).then(() => (copy.textContent = t('api.copied')), () => undefined);
     });
-    const auth = `-H "Authorization: Bearer ${fresh.key}"`;
-    const curl = [
-      `# ${t('api.curlSubmit')}`,
-      `curl -X POST ${location.origin}/v1/cards \\`,
-      `  ${auth} \\`,
-      `  -H "Content-Type: image/jpeg" --data-binary @photo.jpg`,
-      '',
-      `# ${t('api.curlPoll')}`,
-      `curl ${location.origin}/v1/cards/<id> ${auth}`,
-    ].join('\n');
     box.append(
       el('p', { className: 'api__fresh', textContent: t('api.fresh') }),
       el('div', { className: 'api__row' }, field, copy),
-      el('p', { className: 'api__hint', textContent: t('api.example') }),
-      el('pre', { className: 'api__curl', textContent: curl }),
     );
   }
 
@@ -141,13 +133,40 @@ function keyBox(state: { keys: MyKey[]; used: number; dailyLimit: number }): HTM
   return box;
 }
 
+/** 卡册入口：几张卡 + 「打开卡册」。登录前后都有 */
+function albumSection(signedIn: boolean): HTMLElement {
+  const albums = el('button', { type: 'button', className: 'api__button', textContent: t('account.openAlbums') });
+  albums.addEventListener('click', () => {
+    dialog?.close();
+    openAlbums();
+  });
+  const unclaimed = unclaimedCards().length;
+  const summary = signedIn
+    ? t(unclaimed ? 'account.cardsUnclaimed' : 'account.cards', { n: ownedCards().length - unclaimed, m: unclaimed })
+    : t('account.localCards', { n: ownedCards().length });
+  return el(
+    'section',
+    { className: 'account__section' },
+    el('h3', { textContent: t(signedIn ? 'albums.titleOnline' : 'albums.title') }),
+    el('div', { className: 'api__row' }, el('span', { className: 'api__info', textContent: summary }), albums),
+  );
+}
+
 async function render(): Promise<void> {
   if (!body) return;
-  const { user } = account();
+  const { login, user } = account();
   if (!user) {
     body.replaceChildren(
       el('h2', { id: TITLE_ID, textContent: t('account.title') }),
-      el('a', { className: 'account__login', href: loginHref(`${location.pathname}${location.search}#account`), textContent: t('account.login') }),
+      login
+        ? el(
+            'div',
+            { className: 'account' },
+            el('p', { className: 'account__hint', textContent: t('account.loginHint') }),
+            el('a', { className: 'account__login', href: loginHref(`${location.pathname}${location.search}#account`), textContent: t('account.login') }),
+          )
+        : '',
+      albumSection(false),
     );
     return;
   }
@@ -157,12 +176,6 @@ async function render(): Promise<void> {
     out.disabled = true;
     void logout().then(() => location.reload());
   });
-  const albums = el('button', { type: 'button', className: 'api__button', textContent: t('account.openAlbums') });
-  albums.addEventListener('click', () => {
-    dialog?.close();
-    openAlbums();
-  });
-  const unclaimed = unclaimedCards().length;
   // 额度、key 的状态要现问，先占个位
   const apiBody = el('div', {}, el('p', { className: 'account__hint', textContent: t('api.loading') }));
   body.replaceChildren(
@@ -174,51 +187,15 @@ async function render(): Promise<void> {
       el('span', { textContent: user.name }),
       out,
     ),
-    el(
-      'section',
-      { className: 'account__section' },
-      el('h3', { textContent: t('albums.title') }),
-      el(
-        'div',
-        { className: 'api__row' },
-        el('span', {
-          className: 'api__info',
-          textContent: t(unclaimed ? 'account.cardsUnclaimed' : 'account.cards', {
-            n: ownedCards().length - unclaimed,
-            m: unclaimed,
-          }),
-        }),
-        albums,
-      ),
-    ),
+    albumSection(true),
     el('section', { className: 'account__section' }, el('h3', { textContent: t('api.title') }), apiBody),
   );
 
   try {
     const state = await myKeys();
+    // 用法都在接口文档里，这里只给入口和 key 本身
     apiBody.replaceChildren(
-      el(
-        'p',
-        { className: 'account__hint' },
-        t('api.intro', { limit: state.dailyLimit }),
-        ' ',
-        el('a', { href: docsUrl(), target: '_blank', rel: 'noreferrer', textContent: t('api.docs') }),
-      ),
-      // 四步：拿 key → 交图 → 取文件 → 放进网页。只给 curl 不说流程，第一次用的人卡在「photo.jpg 是什么」
-      el(
-        'ol',
-        { className: 'api__steps' },
-        el('li', { textContent: t('api.step1') }),
-        el('li', { textContent: t('api.step2') }),
-        el('li', { textContent: t('api.step3') }),
-        el(
-          'li',
-          {},
-          t('api.step4'),
-          ' ',
-          el('a', { href: 'https://www.npmjs.com/package/@holocard/player', target: '_blank', rel: 'noreferrer', textContent: '@holocard/player' }),
-        ),
-      ),
+      el('p', { className: 'account__hint' }, el('a', { href: docsUrl(), target: '_blank', rel: 'noreferrer', textContent: t('api.docs') })),
       keyBox(state),
     );
   } catch (error) {
@@ -244,10 +221,7 @@ export function initAccount(
   });
   // 刚申请的 key 只显示这一次：关了窗口就忘掉
   dialogEl.addEventListener('close', () => (fresh = null));
-  openButton.addEventListener('click', () => {
-    if (account().user) openAccount();
-    else location.href = loginHref(`${location.pathname}${location.search}#account`);
-  });
+  openButton.addEventListener('click', openAccount);
   onLangChange(() => {
     refreshAccountButton();
     if (dialogEl.open) void render();

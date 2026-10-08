@@ -1,6 +1,6 @@
 /**
- * 开包动效逐帧定格：撕开（封条翘起 → 甩出 → 卡升出 → 袋子掉落 → 闪卡接手转一圈）、点开（抖 → 炸 → 弹出转圈）、
- * 卡册发牌（10 张卡从卡包飞进网格），按时间点各截一张，再拼成胶片。改了 pack-gl.ts / deck.ts 的动效之后跑一遍，从头到尾看完再交。
+ * 开包动效逐帧定格：撕开（封条翘起 → 甩出 → 卡升出 → 袋子掉落 → 闪卡接手转一圈）、点开（抖 → 炸 → 弹出转圈），
+ * 按时间点各截一张，再拼成胶片。改了 pack-gl.ts / deck.ts 的动效之后跑一遍，从头到尾看完再交。
  *
  * 用 Playwright 的虚拟时钟（page.clock）推时间、开包前停住：无头浏览器的真实帧率只有几帧，
  * 靠真实时间截图抓不到中间过程。卡带淡出这类 CSS / Web Animations 动画不归它管，照真实时间走。服务端和 verify-pack.mjs 一样在浏览器里拦下来，第一次轮询就做好。
@@ -71,7 +71,7 @@ async function shootAt(page, name, frames) {
     await page.clock.runFor(at - now);
     now = at;
     await page.waitForTimeout(120);
-    await (name.startsWith('album') ? page : page.locator('.stage')).screenshot({ path: join(out, `${name}-${String(at).padStart(4, '0')}.png`) });
+    await page.locator('.stage').screenshot({ path: join(out, `${name}-${String(at).padStart(4, '0')}.png`) });
   }
 }
 
@@ -107,47 +107,9 @@ async function shootAt(page, name, frames) {
   await page.close();
 }
 
-// ---------- 卡册发牌 ----------
-{
-  const page = await browser.newPage({ viewport: { width: 1100, height: 820 }, reducedMotion: 'no-preference' });
-  // 假装这台设备上做过 10 张卡，缩略图都用站点的分享图
-  await page.addInitScript(() => {
-    const owned = {};
-    for (let i = 1; i <= 10; i++) owned[`00000000-0000-4000-8000-${String(i).padStart(12, '0')}`] = 't';
-    localStorage.setItem('holocard:owned', JSON.stringify(owned));
-  });
-  await page.route('**/api/**', (route) =>
-    route.request().url().endsWith('/thumb.jpg')
-      ? route.fulfill({ path: fileURLToPath(new URL('../public/og.jpg', import.meta.url)) })
-      : route.fulfill({ status: 200, json: {} }),
-  );
-  await page.clock.install();
-  await page.goto(url);
-  await page.clock.runFor(500);
-  await page.waitForSelector('.deck__card .hc');
-  await page.click('#albums-open');
-  await page.waitForSelector('.albums__pack .pack__gl');
-  await page.clock.runFor(600);
-  await page.waitForTimeout(300);
-  await page.clock.pauseAt((await page.evaluate(() => Date.now())) + 5000);
-  const box = await page.locator('.albums__pack .pack__gl').boundingBox();
-  await page.mouse.click(box.x + box.width / 2, box.y + box.height * 0.6);
-  await shootAt(page, 'album-a', [200, 450, 600]);
-  // 发牌用的是 Web Animations，不归虚拟时钟管：一开始就全部停住，再按时间点摆
-  await page.clock.runFor(100);
-  await page.waitForSelector('.albums__grid:not([hidden])');
-  await page.evaluate(() => document.getAnimations().forEach((a) => a.pause()));
-  for (const at of [0, 150, 300, 450, 600, 800, 1100, 1600]) {
-    await page.evaluate((ms) => document.getAnimations().forEach((a) => (a.currentTime = ms)), at);
-    await page.waitForTimeout(150);
-    await page.screenshot({ path: join(out, `album-b-${String(at).padStart(4, '0')}.png`) });
-  }
-  await page.close();
-}
-
 await browser.close();
 try {
-  for (const [name, tile] of [['tear-a', '3x1'], ['tear-b', '6x2'], ['burst', '9x1'], ['album-a', '3x1'], ['album-b', '4x2']]) {
+  for (const [name, tile] of [['tear-a', '3x1'], ['tear-b', '6x2'], ['burst', '9x1']]) {
     execFileSync('sh', ['-c', `montage ${out}/${name}*.png -tile ${tile} -geometry 330x250+3+3 ${out}/sheet-${name}.jpg`]);
   }
   console.log(`胶片在 ${out}/sheet-*.jpg`);

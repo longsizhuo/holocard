@@ -790,7 +790,12 @@ async function doShare(auto = false, id: string | null = currentId): Promise<voi
  */
 initAlbums(need<HTMLDialogElement>('#albums'), describeError);
 initAccount(need<HTMLDialogElement>('#account'), need<HTMLButtonElement>('#account-open'), describeError);
-need<HTMLButtonElement>('#albums-open').addEventListener('click', openAlbums);
+// 页头的「文档」按当前语言进对应的那份
+const docsLink = need<HTMLAnchorElement>('#docs-link');
+function syncDocsLink(l: Lang): void {
+  docsLink.href = `${import.meta.env.BASE_URL}docs/${l === 'zh' ? '' : `${l}/`}`;
+}
+syncDocsLink(lang());
 
 async function doDelete(): Promise<void> {
   if (!currentId) return;
@@ -927,6 +932,7 @@ for (const button of langButtons) {
 
 onLangChange((next) => {
   markLangButtons(next);
+  syncDocsLink(next);
   for (const [el, { key, params }] of liveTexts) el.textContent = t(key, params);
   if (current) buildFoilControls(current);
   // 已经生成的分享链接也换成新语言的地址
