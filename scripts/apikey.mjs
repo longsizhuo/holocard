@@ -1,10 +1,10 @@
 /**
  * 发、查、吊销对外接口（/v1）的 key
  *
- * 登录用户可以在个人中心自己申请（每个账号最多 10 个，共用每天 20 张，见 server/index.ts 的 handleMyKeys）；
+ * 登录用户可以在个人中心自己申请（每个账号最多 10 个，共用每天 20 张，见 server/routes/account.ts 的 handleMyKeys）；
  * 要更高额度的，由站长在服务器上用这个脚本发。库里只存 SHA-256，
  * key 本身只在 create 时打印这一次，丢了就吊销重发。list 能看到所有 key，包括自己申请的，revoke 也都能吊销。
- * 生成和哈希的规则和 server/apikeys.ts 一致，两处要一起改。
+ * 生成和哈希的规则和 server/account/apikeys.ts 一致，两处要一起改。
  *
  * 用法：
  *   node scripts/apikey.mjs create <名字> [每天上限，默认 50]   发一个新 key，打印出来
@@ -16,7 +16,7 @@
  *
  * 数据库位置取 HOLOCARD_DB，默认 /srv/holocard-data/holocard.db。线上：
  *   cd /opt/holocard && node22/bin/node apikey.mjs list
- * 表由服务启动时建（server/db.ts）。还没升级到带对外接口的版本时，这里会提示先发版。
+ * 表由服务启动时建（server/store/db.ts）。还没升级到带对外接口的版本时，这里会提示先发版。
  */
 
 import { createHash, randomBytes, randomUUID } from 'node:crypto';

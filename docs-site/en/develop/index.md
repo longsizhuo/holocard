@@ -113,9 +113,9 @@ Run `pnpm typecheck` first and `pnpm build` before committing. Then run the scri
 | When to fall back to in-browser layering (`src/demo/api.ts`) | `pnpm build && node scripts/verify-fallback.mjs` | None; the script runs its own fake server |
 | Gyroscope (`src/renderer/gyro.ts`) | `node scripts/verify-gyro.mjs` | None |
 | Author config validation (`src/format/config.ts`) | `node scripts/verify-config.mjs` | None |
-| Performance beacon (`src/demo/perf.ts`, `server/perf.ts`) | `node scripts/verify-perf.mjs [--url …] [--browser chromium\|webkit\|firefox]` | `pnpm dev` and `pnpm dev:server` |
-| Public API `/v1` (`handleV1` in `server/index.ts`, `server/apikeys.ts`) | `HOLOCARD_DB=out/data/holocard.db HOLOCARD_OUT_DIR=out/layers node scripts/verify-api.mjs http://127.0.0.1:8791` | `pnpm dev:server`, with NudeNet weights in `.models/` |
-| Sign-in, card ownership and claiming, API keys in the account panel (`server/auth.ts` and related routes) | `pnpm build:server && HOLOCARD_MODEL_DIR=.models node scripts/verify-auth.mjs` | Depth model weights. The script starts its own fake IH and a temporary server; no dev servers needed |
+| Performance beacon (`src/demo/perf.ts`, `server/store/perf.ts`) | `node scripts/verify-perf.mjs [--url …] [--browser chromium\|webkit\|firefox]` | `pnpm dev` and `pnpm dev:server` |
+| Public API `/v1` (`server/routes/v1.ts`, `server/account/apikeys.ts`) | `HOLOCARD_DB=out/data/holocard.db HOLOCARD_OUT_DIR=out/layers node scripts/verify-api.mjs http://127.0.0.1:8791` | `pnpm dev:server`, with NudeNet weights in `.models/` |
+| Sign-in, card ownership and claiming, API keys in the account panel (`server/account/auth.ts` and related routes) | `pnpm build:server && HOLOCARD_MODEL_DIR=.models node scripts/verify-auth.mjs` | Depth model weights. The script starts its own fake IH and a temporary server; no dev servers needed |
 | Header and account panel UI (`account-ui.ts`) | `pnpm build && pnpm build:server && node scripts/verify-account.mjs` | None. The script starts a temporary server with fake sign-in |
 | Player `<holo-card>` (`src/player/`, `packages/player/`) | `pnpm build:player && node scripts/verify-player.mjs [screenshot dir]` | Chromium, see below |
 | Pack sound effects (`src/demo/sfx.ts`) | `node scripts/render-sfx.mjs`, then listen to `/tmp/sfx/reel.wav` | `pnpm dev` |
@@ -180,7 +180,7 @@ node scripts/blind/score.mjs /tmp/exp/pack/key.json "1A 2= 3B 4X ..." --candidat
 
 | Script | Purpose |
 |---|---|
-| `run-variant.mjs` | Starts a temporary layering service at the lowest priority (`nice 19`), submits images one by one, and writes `layers/`, `ids.tsv` (source name → card id) and `timing.json`. The configuration under test is passed as environment variables; see `server/index.ts` for what the server reads (matting uses `HOLOCARD_MATTE_*`) |
+| `run-variant.mjs` | Starts a temporary layering service at the lowest priority (`nice 19`), submits images one by one, and writes `layers/`, `ids.tsv` (source name → card id) and `timing.json`. The configuration under test is passed as environment variables; see `server/config.ts` for what the server reads (matting uses `HOLOCARD_MATTE_*`) |
 | `pack.mjs` | Pairs cards, filters by `--min-iou`, randomises A/B, and writes the page `page/` and the answer key `key.json`. The manifest `generator` field (which names the model) is removed from page data |
 | `score.mjs` | In the result string `A` / `B` means that side is better, `=` similar, `X` both have problems, `A!` / `B!` the other side has an obvious defect. Preferences and defect rates are counted separately; the calibration group is reported on its own |
 

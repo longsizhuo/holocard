@@ -22,7 +22,7 @@ import { configureModelSource, cpuSessionOptions, pickDevice, type LoadProgress 
 
 export const MATTE_MODEL_ID = 'onnx-community/BiRefNet_lite-ONNX';
 
-/** 服务端用哪个抠图模型。默认 lite；做对比实验、换型号时由服务端按环境变量改（见 server/index.ts 的 MATTE_MODEL） */
+/** 服务端用哪个抠图模型。默认 lite；做对比实验、换型号时由服务端按环境变量改（见 server/config.ts 的 MATTE_MODEL） */
 export interface MatteModelConfig {
   /** Hugging Face 上的模型名，权重放在模型目录的同名子目录里 */
   id: string;

@@ -69,7 +69,7 @@ ssh oracle 'cd /opt/holocard && node22/bin/node apikey.mjs revoke <id>'    # 立
 
 ## 登录（IH 通行证）
 
-用 involutionhell 账号登录，协议见 `server/auth.ts`。HoloCard 在 IH 后端登记了两个 client（IH 的 SECURITY.md INV-010）：
+用 involutionhell 账号登录，协议见 `server/account/auth.ts`。HoloCard 在 IH 后端登记了两个 client（IH 的 SECURITY.md INV-010）：
 
 | client | 回跳地址 | IH 的 `.env` | HoloCard 这边 |
 |---|---|---|---|
@@ -335,7 +335,7 @@ iPhone 起初给的是实况照片（JPEG + MOV 一对），真机实测走不�
 
 `POST /api/cards/{id}/export/{gif|motion|apng}` 排队生成，`GET` 同一地址轮询状态。
 文件随卡片过期、删除一起清掉；manifest 改过之后会重新生成。
-文件名里的 `v2` 是 `server/export.ts` 的 `EXPORT_VERSION`：改了画面或封装参数就加一，存量自动作废。
+文件名里的 `v2` 是 `server/render/export.ts` 的 `EXPORT_VERSION`：改了画面或封装参数就加一，存量自动作废。
 
 依赖服务器上的 `ffmpeg`（要带 libx264，路径可用 `HOLOCARD_FFMPEG` 指定）。
 单并发，排队上限 `HOLOCARD_MAX_EXPORT_QUEUE`（默认 6），

@@ -34,9 +34,9 @@ import { env } from '@huggingface/transformers';
 import { segmentToLayerSet } from '../src/segmenter';
 import { MATTE_MODEL_ID, estimateMatte } from '../src/segmenter/matte';
 import { SERVER_REFINE_OPTIONS } from '../src/segmenter/refine';
-import { sharpImages } from '../server/images';
-import { renderPreview, closeBrowser } from '../server/preview';
-import { EXPORT_FORMATS, exportFiles, runExport, type ExportFormat } from '../server/export';
+import { sharpImages } from '../server/pipeline/images';
+import { renderPreview, closeBrowser } from '../server/render/preview';
+import { EXPORT_FORMATS, exportFiles, runExport, type ExportFormat } from '../server/render/export';
 
 /**
  * 仓库根目录：从脚本所在位置往上找 package.json。

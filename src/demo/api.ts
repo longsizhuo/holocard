@@ -364,7 +364,7 @@ export async function shareCard(id: string): Promise<void> {
 }
 
 /*
- * 用 involutionhell 账号登录（见 server/auth.ts）。登录是可选的，不登录照常用。
+ * 用 involutionhell 账号登录（见 server/account/auth.ts）。登录是可选的，不登录照常用。
  * 登录着做的卡直接归到账号下（服务端不再给口令），换设备登录也能看到、管理；
  * 这台设备上以前做的卡，要用户自己勾选认领进来——公用电脑上留着别人的卡，不能一登录就收走。
  */

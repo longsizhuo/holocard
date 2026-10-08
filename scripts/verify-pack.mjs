@@ -110,7 +110,7 @@ const browser = await chromium.launch({
     '--no-sandbox',
     '--disable-gpu',
     '--use-gl=swiftshader',
-    // 自带的 headless shell 不加它截不了图（见 server/preview.ts）；正式版 Chrome 加了它，
+    // 自带的 headless shell 不加它截不了图（见 server/render/preview.ts）；正式版 Chrome 加了它，
     // 一画 WebGL 卡包 GPU 进程就崩（macOS 上实测），所以只给自带的
     ...(channel ? [] : ['--in-process-gpu']),
   ],

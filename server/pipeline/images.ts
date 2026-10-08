@@ -9,7 +9,7 @@ import { rename } from 'node:fs/promises';
 import sharp from 'sharp';
 // HEIC 用现成的库解（libheif 的 WASM 版，自带 HEVC 解码器），见 normalizeOriginal
 import decodeHeic from 'heic-decode';
-import { fitWithin, type ImageBackend, type RgbaImage } from '../src/segmenter/image-io';
+import { fitWithin, type ImageBackend, type RgbaImage } from '../../src/segmenter/image-io';
 
 /** 超过这个像素数就拒绝，挡住解压炸弹（一张小 PNG 可以解出几十亿像素） */
 const MAX_SOURCE_PIXELS = 60_000_000;

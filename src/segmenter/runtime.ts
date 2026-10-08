@@ -99,7 +99,7 @@ export function pickDevice(): Promise<Device> {
 let cpuThreads: number | null = null;
 
 /**
- * Node 里 onnxruntime 每次推理开几个线程。服务端按自己分到的核数设（见 server/index.ts 的 cpuShare）：
+ * Node 里 onnxruntime 每次推理开几个线程。服务端按自己分到的核数设（见 server/pipeline/jobs.ts 的 cpuShare）：
  * 它默认按机器的物理核数开（4 个），而服务被 CPUQuota 限在 2 核，4 个线程抢 2 核的额度反而慢——
  * 线上条件实测抠主体 27.3 → 23.0 秒、估深度 6.3 → 4.2 秒。不设就是 onnxruntime 的默认
  */

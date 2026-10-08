@@ -12,12 +12,17 @@
 
 import { parentPort, workerData } from 'node:worker_threads';
 import { env } from '@huggingface/transformers';
-import type { LayerManifest } from '../src/format/types';
-import { segmentToLayerSet } from '../src/segmenter';
-import { loadDepthModel } from '../src/segmenter/depth';
-import { estimateMatte, loadMatteModel, setMatteModel, type MatteModelConfig } from '../src/segmenter/matte';
-import { setCpuThreads } from '../src/segmenter/runtime';
-import { SERVER_REFINE_OPTIONS } from '../src/segmenter/refine';
+import type { LayerManifest } from '../../src/format/types';
+import { segmentToLayerSet } from '../../src/segmenter';
+import { loadDepthModel } from '../../src/segmenter/depth';
+import {
+  estimateMatte,
+  loadMatteModel,
+  setMatteModel,
+  type MatteModelConfig,
+} from '../../src/segmenter/matte';
+import { setCpuThreads } from '../../src/segmenter/runtime';
+import { SERVER_REFINE_OPTIONS } from '../../src/segmenter/refine';
 import { sharpImages } from './images';
 
 /** 起线程时一次性给的配置 */
@@ -27,7 +32,7 @@ export interface SegmenterConfig {
   matte: boolean;
   /** onnxruntime 每次推理开几个线程，按服务分到的核数，见 src/segmenter/runtime.ts 的 setCpuThreads */
   threads: number;
-  /** 抠图用哪个模型，见 server/index.ts 的 MATTE_MODEL */
+  /** 抠图用哪个模型，见 server/config.ts 的 MATTE_MODEL */
   matteModel: MatteModelConfig;
 }
 
@@ -54,7 +59,7 @@ setCpuThreads(config.threads);
 setMatteModel(config.matteModel);
 
 // 能走到这里，说明这个线程要用的模块（transformers、onnxruntime-node、sharp……）都加载好了。
-// 主线程据此判断健康检查过不过，见 server/index.ts 的 spawnSegmenter
+// 主线程据此判断健康检查过不过，见 server/pipeline/jobs.ts 的 spawnSegmenter
 port.postMessage({ type: 'ready' } satisfies SegmentReply);
 
 /*
