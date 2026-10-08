@@ -238,7 +238,7 @@ Sign-in is optional and is enabled when an IH client secret (`HOLOCARD_SSO_SECRE
 | `POST /auth/logout` | Ends the session |
 | `GET /api/me` | Whether sign-in is enabled, the current account, and the account's live cards |
 | `POST /api/me/claim` | Claims cards on this device into the account by their tokens; the old tokens stop working |
-| `GET` / `POST /api/me/keys`, `DELETE /api/me/keys/<id>` | Public API keys in the account panel: usage, request (one active key at a time), revoke |
+| `GET` / `POST /api/me/keys`, `DELETE /api/me/keys/<id>` | Public API keys in the account panel: usage, request (up to 10 per account, sharing one quota), revoke |
 
 - The session cookie `__Host-hc_session` and state cookie `__Host-hc_state` use the `__Host-` prefix so sibling subdomains cannot overwrite them. Sessions last 30 days; only the SHA-256 of the session secret is stored.
 - HoloCard receives only the account id, name and avatar, and never touches the IH sign-in state.

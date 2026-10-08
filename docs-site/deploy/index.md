@@ -87,8 +87,9 @@ PLAYWRIGHT_BROWSERS_PATH=/opt/holocard/browsers pnpm exec playwright-core instal
 | 变量 | 作用 |
 |---|---|
 | `VITE_UMAMI_ID` | umami 统计的站点 id，可选。未设置时前端不加载任何统计脚本，服务端也不上报对外接口的事件 |
+| `VITE_UMAMI_URL` | umami 实例地址，不带末尾斜杠，可选。默认 `https://umami.involutionhell.com` |
 
-构建时变量写在仓库根目录的 `.env.production`（该文件不进仓库）或构建命令的环境中，`pnpm build` 和 `pnpm build:server` 都会读取。统计的上报地址固定在代码中（`src/demo/track.ts` 的 `SCRIPT_URL` 与 `server/umami.ts` 的 `ENDPOINT`），使用自建的 umami 实例时须同时修改这两处。本机和局域网地址（`localhost`、`127.x`、`10.x`、`192.168.x` 等）上不加载统计。
+构建时变量写在仓库根目录的 `.env.production`（该文件不进仓库）或构建命令的环境中，`pnpm build` 和 `pnpm build:server` 都会读取。使用自建的 umami 实例时设置 `VITE_UMAMI_URL`，前端脚本与服务端上报都会改用该地址。本机和局域网地址（`localhost`、`127.x`、`10.x`、`192.168.x` 等）上不加载统计。
 
 ## 模型权重
 

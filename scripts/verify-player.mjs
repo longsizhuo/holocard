@@ -36,8 +36,10 @@ const server = createServer((req, res) => {
 await new Promise((r) => server.listen(0, '127.0.0.1', r));
 const BASE = `http://127.0.0.1:${server.address().port}`;
 
+// 浏览器同 verify-pack：默认 Playwright 自带的 Chromium（PLAYWRIGHT_BROWSERS_PATH），HOLOCARD_BROWSER_CHANNEL 可换成本机 chrome / msedge
+const channel = process.env.HOLOCARD_BROWSER_CHANNEL ?? '';
 const browser = await chromium.launch({
-  executablePath: process.env.CHROMIUM_PATH ?? '/home/ubuntu/.cache/ms-playwright/chromium_headless_shell-1228/chrome-linux/headless_shell',
+  ...(channel ? { channel } : {}),
   args: ['--use-angle=swiftshader', '--enable-unsafe-swiftshader'],
 });
 const page = await browser.newPage({ viewport: { width: 900, height: 700 } });

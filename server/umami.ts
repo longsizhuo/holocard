@@ -10,14 +10,14 @@
  * 访客属性（名字、账号、key 怎么来的），会话详情里看得到。
  * UA 得像浏览器：umami 会把 node、curl 这类当爬虫直接丢掉（它用 isbot 判断）。
  *
- * 站点 id 和前端一样，构建时从 .env.production 的 VITE_UMAMI_ID 注入，没配就不发。
+ * 站点 id、umami 地址和前端一样，构建时从 .env.production 的 VITE_UMAMI_ID、VITE_UMAMI_URL 注入，没配 id 就不发。
  * 本机地址（开发、自检脚本）不发，规则和前端 track.ts 一样，免得测试数据进线上统计。
  * 发不出去就算了：统计不能影响接口本身。
  */
 
 import type { ApiKeyRow } from './db';
 
-const ENDPOINT = 'https://umami.involutionhell.com/api/send';
+const ENDPOINT = `${import.meta.env.VITE_UMAMI_URL ?? 'https://umami.involutionhell.com'}/api/send`;
 const WEBSITE_ID: string = import.meta.env.VITE_UMAMI_ID ?? '';
 const USER_AGENT = 'Mozilla/5.0 (X11; Linux x86_64) HoloCardAPI';
 

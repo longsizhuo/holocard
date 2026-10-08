@@ -22,6 +22,9 @@ interface ImportMetaEnv {
    * 自托管这个项目的人不会被动连到我们的统计服务。
    */
   readonly VITE_UMAMI_ID?: string;
+
+  /** umami 实例地址，不带末尾斜杠。默认 https://umami.involutionhell.com（本站自建的那台） */
+  readonly VITE_UMAMI_URL?: string;
 }
 
 interface ImportMeta {

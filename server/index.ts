@@ -119,9 +119,9 @@ const MIN_FREE_BYTES = Number(process.env.HOLOCARD_MIN_FREE_GB ?? 5) * 1024 ** 3
  *   访问 4-7 次 → 28 天
  *   ……每翻一番加一档，封顶 112 天（7 × 2^4，KEEP_DOUBLINGS_CAP = 5 档）
  *
- * 「从最后一次访问算起」是关键：一直有人看的卡窗口不断续期，等于永久保留；
+ * 「从最后一次访问算起」是关键：一直有人看的卡窗口不断续期，一直留着；
  * 彻底没人看了才开始倒计时。这样热门内容留得久、冷内容自然退场，
- * 磁盘占用有上界，不需要人工清理。
+ * 磁盘占用有上界，不需要人工清理。放进账号的卡、对外接口的卡另有规则，见 cards.ts 的 expiresAt。
  */
 const TTL_MS = Number(process.env.HOLOCARD_TTL_MS ?? 7 * 24 * 60 * 60 * 1000);
 /** 分享过的卡每翻一番访问量多留一档，最多翻几番 */
@@ -1944,10 +1944,14 @@ const server = createServer((req, res) => {
     }
 
     // 这两个要写完整域名，所以按 PUBLIC_ORIGIN 现生成，不放静态文件——别人自托管时地址自然就对
-    // 文档在 /docs/ 下（VitePress 生成的静态页）；手打 /docs 时补上斜杠
-    if ((req.method === 'GET' || req.method === 'HEAD') && url.pathname === '/docs') {
-      res.writeHead(301, { location: `/docs/${url.search}` }).end();
-      return;
+    // 文档在 /docs/ 下（VitePress 生成的静态页）。目录地址手打漏了末尾斜杠（/docs、/docs/deploy）时补上，
+    // 不然按文件找不到就落到首页的 404；带斜杠的才会去找目录下的 index.html
+    if ((req.method === 'GET' || req.method === 'HEAD') && /^\/docs(\/[\w./-]*[^/])?$/.test(url.pathname)) {
+      const dir = resolve(WEB_DIR, `.${url.pathname}`);
+      if (dir.startsWith(resolve(WEB_DIR) + sep) && (await stat(join(dir, 'index.html')).then((s) => s.isFile(), () => false))) {
+        res.writeHead(301, { location: `${url.pathname}/${url.search}` }).end();
+        return;
+      }
     }
     if ((req.method === 'GET' || req.method === 'HEAD') && url.pathname === '/robots.txt') {
       text(res, 'text/plain; charset=utf-8', robotsTxt(), req.method);
@@ -2030,7 +2034,7 @@ const server = createServer((req, res) => {
       return;
     }
 
-    // 转永久保留，并在后台渲染一张 OG 预览图
+    // 转为分享状态（保留期改按访问续期），并在后台渲染一张 OG 预览图
     const shareMatch = /^\/api\/cards\/([0-9a-f-]{36})\/share$/.exec(url.pathname);
     if (req.method === 'POST' && shareMatch) {
       const id = shareMatch[1] ?? '';

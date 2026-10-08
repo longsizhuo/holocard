@@ -87,8 +87,9 @@ The service must run with the same `PLAYWRIGHT_BROWSERS_PATH`. If system librari
 | Variable | Purpose |
 |---|---|
 | `VITE_UMAMI_ID` | Optional umami website id. When unset, the frontend loads no analytics script and the server sends no public API events |
+| `VITE_UMAMI_URL` | Optional umami instance URL, without a trailing slash. Defaults to `https://umami.involutionhell.com` |
 
-Build-time variables go in `.env.production` at the repository root (not committed) or in the environment of the build commands; both `pnpm build` and `pnpm build:server` read them. The analytics endpoint is fixed in the code (`SCRIPT_URL` in `src/demo/track.ts` and `ENDPOINT` in `server/umami.ts`); to use a self-hosted umami instance, change both. Analytics is not loaded on local and LAN addresses (`localhost`, `127.x`, `10.x`, `192.168.x`, etc.).
+Build-time variables go in `.env.production` at the repository root (not committed) or in the environment of the build commands; both `pnpm build` and `pnpm build:server` read them. To use your own umami instance, set `VITE_UMAMI_URL`; both the frontend script and the server events use it. Analytics is not loaded on local and LAN addresses (`localhost`, `127.x`, `10.x`, `192.168.x`, etc.).
 
 ## Model weights
 

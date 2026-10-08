@@ -1,7 +1,7 @@
 /**
  * 埋点
  *
- * 用自建的 umami（umami.involutionhell.com），不是第三方 SaaS——数据留在自己机器上，
+ * 用自建的 umami（默认 umami.involutionhell.com，VITE_UMAMI_URL 可换），不是第三方 SaaS——数据留在自己机器上，
  * 也不用给用户塞第三方 cookie。umami 本身不用 cookie、不存 IP，所以不需要同意横幅。
  *
  * 脚本是按需注入的，不写死在 index.html 里：
@@ -11,7 +11,7 @@
  * 统计脚本连不上时静默失败：它不该影响这个页面的任何功能。
  */
 
-const SCRIPT_URL = 'https://umami.involutionhell.com/script.js';
+const SCRIPT_URL = `${import.meta.env.VITE_UMAMI_URL ?? 'https://umami.involutionhell.com'}/script.js`;
 
 /** umami 的站点 id，构建时注入。留空表示不启用统计 */
 const WEBSITE_ID = import.meta.env.VITE_UMAMI_ID ?? '';
