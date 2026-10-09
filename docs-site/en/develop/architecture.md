@@ -110,6 +110,10 @@ The site frontend, i.e. holocard.longsizhuo.com.
 
 Static text in `index.html` is marked with `data-i18n`, `data-i18n-html`, `data-i18n-title` and `data-i18n-aria`. The server replaces it per language when serving the page, and the frontend rewrites it in place on a language switch without reloading.
 
+### `src/cardmask`
+
+Card masks (experimental, not yet wired into the site): splitting a finished flat card image into three foil masks — frame and text, character, effects. `frame.ts` finds the art window on the card without a model: it looks for long straight edges spanning most of the card's width, then picks the window among candidate rectangles by edge support and the share of artwork-like blocks. See `cardmask-eval` in [Local development](/en/develop/) for evaluation.
+
 ### `src/lab`
 
 `blind.ts` is the script of the blind comparison page; `scripts/blind/pack.mjs` builds it together with `lab/blind/index.html`. See [Local development](/en/develop/#blind-comparison-scripts-blind).

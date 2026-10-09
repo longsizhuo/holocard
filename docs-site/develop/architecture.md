@@ -110,6 +110,10 @@ holocard/
 
 `index.html` 中的静态文字用 `data-i18n`、`data-i18n-html`、`data-i18n-title`、`data-i18n-aria` 标记。服务端发送页面时按语言替换，前端切换语言时原地重写，不刷新页面。
 
+### `src/cardmask`
+
+卡面遮罩（试验中，尚未接入站点）：从已经做好的平面卡图中分出边框与文字、主角、特效三张箔面遮罩。`frame.ts` 找卡面上的画框，不依赖模型：先找贯穿大半个卡宽的长直边，再在候选矩形中按「边的支持率」与「像插画的小块占比」选出画框。评测见[本地开发](/develop/)中的 `cardmask-eval`。
+
 ### `src/lab`
 
 `blind.ts` 是双盲对比页的脚本，与 `lab/blind/index.html` 一起由 `scripts/blind/pack.mjs` 构建。用法见[本地开发](/develop/#双盲对比-scripts-blind)。

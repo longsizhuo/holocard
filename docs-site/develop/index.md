@@ -116,6 +116,7 @@ pnpm og --export gif       # 导出动图：gif / motion / apng，写到 out/exp
 | 性能埋点（`src/demo/perf.ts`、`server/store/perf.ts`） | `node scripts/verify-perf.mjs [--url …] [--browser chromium\|webkit\|firefox]` | `pnpm dev` 与 `pnpm dev:server` |
 | 对外接口 `/v1`（`server/routes/v1.ts`、`server/account/apikeys.ts`） | `HOLOCARD_DB=out/data/holocard.db HOLOCARD_OUT_DIR=out/layers node scripts/verify-api.mjs http://127.0.0.1:8791` | `pnpm dev:server`，且 `.models/` 下有 NudeNet 权重 |
 | 登录、卡片归属与认领、个人中心的 API key（`server/account/auth.ts` 及相关路由） | `pnpm build:server && HOLOCARD_MODEL_DIR=.models node scripts/verify-auth.mjs` | 深度模型权重。脚本自行启动模拟 IH 与临时服务端，不需要开发服务 |
+| 卡面遮罩：画框检测、主角抠图（`src/cardmask/`） | `node scripts/cardmask-fetch.mjs` 下载评测集，再 `pnpm cardmask:eval [--matte] [--only <前缀>] [--debug]` | 评测集下载到 `.cardmask/data/`（卡图版权归各家，不进仓库）；`--matte` 需要抠图权重，`HOLOCARD_MODEL_DIR` 指定模型目录 |
 | 页头与个人中心界面（`account-ui.ts`） | `pnpm build && pnpm build:server && node scripts/verify-account.mjs` | 无。脚本以假登录启动临时服务端 |
 | 播放器 `<holo-card>`（`src/player/`、`packages/player/`） | `pnpm build:player && node scripts/verify-player.mjs [截图目录]` | Chromium，见下方说明 |
 | 开包音效（`src/demo/sfx.ts`） | `node scripts/render-sfx.mjs`，试听 `/tmp/sfx/reel.wav` | `pnpm dev` |
@@ -130,6 +131,7 @@ pnpm og --export gif       # 导出动图：gif / motion / apng，写到 out/exp
 - `verify-config`：合法配置原样合并、其余字段不变；层数不符、未知箔面类型、数值越界、试图修改文件名等一律拒收或忽略。
 - `verify-perf`：页面静置后上报一条埋点、服务端收到；畸形数据被拒。
 - `verify-api`：鉴权、私有性（接口卡在 `/api`、分享、导出、删除路由上视同不存在）、交付与缓存头、配额、吊销、处理途中删除、网页任务优先、畸形请求行与超限请求的处理。每张卡实际分层，耗时 30–60 秒。
+- `cardmask-eval`：在三类卡上评测画框检测与主角抠图，指标为 IoU。标准答案：宝可梦普通闪卡（swholo、cosmos）的官方箔面遮罩（画框 = 遮罩白色区域的外接框，主角 = 画框内遮罩未覆盖的部分）；万智牌、游戏王以单独的插画在全卡中的位置为画框（多尺度模板匹配，匹配代价过高的不评）。每张卡输出对照图到 `.cardmask/out/`，汇总写入 `report.json`；`--debug` 另存每张卡的全部候选矩形及特征，用于离线比较挑选规则。
 - `verify-account`：页头「文档」链接随界面语言切换；未登录时个人中心的登录入口与本机卡册；登录后申请多个 key、新 key 只显示一次、吊销其中一个。
 - `verify-auth`：登录流程（state cookie、换码、PKCE、一次性授权码、`next` 只认本站路径）；登录状态下的卡片归属；凭口令认领；其他账号无权操作；退出后会话失效；账号名下的卡不过期；个人中心 API key 的申请（每个账号最多 10 个）、吊销、按账号合计的额度与管理员不限额度；正式地址下开启假登录时拒绝启动。
 - `verify-player`：目录地址与 `manifest.json` 地址两种写法均可加载并触发 `load`；地址错误时触发 `error`；宿主页面 CSS 无法影响卡片内部、组件不向宿主注入样式；指针划过时卡片转动。设置 `PLAYER_URL=https://cdn.jsdelivr.net/npm/@holocard/player@<版本>/dist/holocard.js` 可核对已发布到 CDN 的版本。
