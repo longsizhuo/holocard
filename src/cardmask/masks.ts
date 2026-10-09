@@ -1,7 +1,7 @@
 /**
  * 把一张做好的平面卡拆成三张箔面遮罩（pokemon-cards-css 的 --mask 用的那种：白色是箔面露出来的地方）：
  *
- *   frame      边框与文字：画框以外的卡面，加上检测到的文字（画框里压的字也算）
+ *   frame      边框与文字：画框以外的卡面，加上检测到的文字（画框里压的字也算）；全图卡没有画框，取最外圈的卡边
  *   character  主角：抠图模型在画框里（全图卡就是整张）抠出来的主体
  *   effects    特效：贴着主角的火焰、光弹这类又亮又艳的东西，加上主角轮廓内侧一圈（头发、身体的边）
  *
@@ -29,6 +29,11 @@ export interface CardMasks {
   /** 文字单独一张：frame 已经包含它，组合「− 文字」时要用 */
   text: Uint8Array;
 }
+
+/** 卡边：从图片四边往里，颜色和卡边一致的部分，最深到这么多（占卡宽） */
+const BORDER_DEPTH = 0.06;
+/** 和卡边颜色差多少以内算同一种颜色（RGB 欧氏距离） */
+const BORDER_TOLERANCE = 48;
 
 /** 文字概率超过这个算字。DB 检测器默认 0.3 */
 const TEXT_THRESHOLD = 0.3;
@@ -125,6 +130,34 @@ function grow(seed: Uint8Array, allowed: Uint8Array, width: number): Uint8Array 
   return out;
 }
 
+/**
+ * 最外圈的卡边（宝可梦的黄边、全图卡的黑边）：取图片一圈像素颜色的中位数当卡边色，
+ * 从四边往里泛洪，颜色接近、离边不太远的都算。有画框的卡，卡边本来就在画框外，这一步只对全图卡有用
+ */
+function cardBorder(rgba: Uint8Array | Uint8ClampedArray, width: number, height: number): Uint8Array {
+  const n = width * height;
+  const perimeter: number[] = [];
+  for (let x = 0; x < width; x++) perimeter.push(x, (height - 1) * width + x);
+  for (let y = 1; y < height - 1; y++) perimeter.push(y * width, y * width + width - 1);
+  const median = [0, 1, 2].map((c) => {
+    const values = perimeter.map((p) => rgba[p * 4 + c] ?? 0).sort((a, b) => a - b);
+    return values[values.length >> 1] ?? 0;
+  });
+  const near = (p: number): boolean =>
+    Math.hypot((rgba[p * 4] ?? 0) - median[0]!, (rgba[p * 4 + 1] ?? 0) - median[1]!, (rgba[p * 4 + 2] ?? 0) - median[2]!) <= BORDER_TOLERANCE;
+  const depth = BORDER_DEPTH * width;
+  const inBand = (p: number): boolean => {
+    const x = p % width;
+    const y = (p - x) / width;
+    return Math.min(x, y, width - 1 - x, height - 1 - y) <= depth;
+  };
+  const allowed = new Uint8Array(n);
+  for (let p = 0; p < n; p++) allowed[p] = inBand(p) && near(p) ? 1 : 0;
+  const seed = new Uint8Array(n);
+  for (const p of perimeter) seed[p] = 1;
+  return grow(seed, allowed, width);
+}
+
 export function cardMasks(
   rgba: Uint8Array | Uint8ClampedArray,
   width: number,
@@ -154,9 +187,10 @@ export function cardMasks(
   const textMask = new Uint8Array(n);
   for (let i = 0; i < n; i++) textMask[i] = (textDist[i] ?? Infinity) <= textPad ? 255 : 0;
 
-  // 边框：画框以外，加文字。全图卡没有画框，只剩文字
+  // 边框：画框以外，加文字。全图卡没有画框，取最外圈的卡边加文字
+  const border = window ? null : cardBorder(rgba, width, height);
   const frame = new Uint8Array(n);
-  for (let i = 0; i < n; i++) frame[i] = (window && !inRegion(i)) || textMask[i] ? 255 : 0;
+  for (let i = 0; i < n; i++) frame[i] = (window && !inRegion(i)) || border?.[i] || textMask[i] ? 255 : 0;
 
   // 主角：抠图的 alpha，只认画框里的（抠图模型偶尔把画框外的标志也当主体）
   const alpha = resample(character, width, height);

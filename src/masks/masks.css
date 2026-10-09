@@ -37,6 +37,7 @@ body.masks-page { overflow: auto; }
 .masks__controls { display: grid; gap: 12px; align-content: start; }
 .masks__controls fieldset { display: grid; gap: 6px; margin: 0; padding: 10px 14px; border: 1px solid rgba(123, 95, 208, 0.25); border-radius: 12px; }
 .masks__foil { display: flex; gap: 8px; align-items: center; }
+.masks__foil span { flex: none; white-space: nowrap; }
 .masks__keep { margin: 0; font-size: 13px; color: var(--muted, #6b6577); }
 
 .masks__grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 16px; margin-top: 24px; }
