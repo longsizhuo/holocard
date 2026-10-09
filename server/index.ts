@@ -53,6 +53,8 @@ import { exportQueue, exporting } from './render/exports';
 import { backfillPreviews } from './render/previews';
 import { handleAuth, handleMe } from './routes/account';
 import { handleCards } from './routes/cards';
+import { handleCardmask } from './routes/cardmask';
+import { sweepCardmasks } from './pipeline/cardmask';
 import { robotsTxt, serveStatic, sitemapXml } from './routes/static';
 import { handleV1 } from './routes/v1';
 import { db } from './store';
@@ -79,6 +81,8 @@ async function sweep(): Promise<void> {
   flushHits(db);
   const removed = await sweepCards(db, OUT_DIR, TTL_MS, KEEP_DOUBLINGS_CAP);
   if (removed > 0) console.log(`[sweep] 清理了 ${removed} 张过期卡片`);
+  const masks = await sweepCardmasks();
+  if (masks > 0) console.log(`[sweep] 清理了 ${masks} 组过期的卡面遮罩`);
   try {
     db.prunePerf(90, 200_000);
     db.pruneSessions(Date.now());
@@ -182,6 +186,10 @@ const server = createServer((req, res) => {
       return;
     }
 
+    if (url.pathname === '/api/cardmask' || url.pathname.startsWith('/api/cardmask/')) {
+      await handleCardmask(req, res, url);
+      return;
+    }
     if (await handleCards(req, res, url)) return;
 
     if ((req.method === 'GET' || req.method === 'HEAD') && !url.pathname.startsWith('/api/')) {

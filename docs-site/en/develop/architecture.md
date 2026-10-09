@@ -112,7 +112,14 @@ Static text in `index.html` is marked with `data-i18n`, `data-i18n-html`, `data-
 
 ### `src/cardmask`
 
-Card masks (experimental, not yet wired into the site): splitting a finished flat card image into three foil masks — frame and text, character, effects. `frame.ts` finds the art window on the card without a model: it looks for long straight edges spanning most of the card's width, then picks the window among candidate rectangles by edge support and the share of artwork-like blocks. See `cardmask-eval` in [Local development](/en/develop/) for evaluation.
+The rule-based half of [card masks](/en/masks/), which runs no model:
+
+| File | Responsibility |
+|---|---|
+| `frame.ts` | Finds the art window: long straight edges form candidate rectangles, chosen by edge completeness and the probability that blocks inside are artwork (logistic regression `ART_MODEL`, trained with `cardmask-eval --train`) |
+| `masks.ts` | Builds the frame-and-text, character, effects and text masks from the window, the character probability map and the text probability map |
+
+The page is `masks.html` with `src/masks/main.ts`: upload, polling, and a two-layer LayerSet built from the selected regions for the renderer's preview. See `cardmask-eval` in [Local development](/en/develop/) for evaluation.
 
 ### `src/lab`
 
@@ -132,11 +139,14 @@ The layering service is one Node process that serves the frontend's static files
 | `routes/static.ts` | Frontend static files: pages in the request language, OG tags for the home and share pages, `robots.txt`, `sitemap.xml` |
 | `routes/account.ts` | `/auth/*` sign-in and sign-out; `/api/me/*` current account, claiming and API keys in the account panel |
 | `routes/v1.ts` | The public API `/v1` |
+| `routes/cardmask.ts` | Card masks `/api/cardmask`: upload, status, mask files |
 | `pipeline/jobs.ts` | Layering jobs: accepting uploads (`acceptUpload`), the queue, dispatching to the worker thread, nudity detection, thumbnails, resuming on startup |
 | `pipeline/segment-worker.ts` | Long-lived worker thread running the layering pipeline |
 | `pipeline/images.ts` | sharp image codecs: normalising originals (orientation, EXIF removal, HEIC decoding), converting layers to WebP, album thumbnails |
 | `pipeline/moderation.ts` | NudeNet nudity detection |
 | `pipeline/eta.ts` | Remaining-time estimate from exponentially averaged per-stage durations |
+| `pipeline/cardmask.ts` | Card mask jobs: normalise the card, find the window, have the worker thread matte the character and detect text, build and write the masks; results live in `.cardmasks/<id>/` and are deleted after 24 hours |
+| `pipeline/textdet.ts` | PP-OCRv4 text detection (onnxruntime-node), producing a text probability map only |
 | `render/preview.ts` | Captures share images by opening `/render/<id>` in headless Chromium, keeping the browser warm |
 | `render/previews.ts` | Share-image render queue and retries |
 | `render/export.ts` / `render/motionphoto.ts` | Exported animations (GIF, APNG, Android motion photo) |

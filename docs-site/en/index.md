@@ -157,6 +157,10 @@ When signed in, the header button shows your avatar and name, and the panel cont
 - "My online album": the number of cards in the account; "Open album" opens the album.
 - "Public API": a link to the API docs, usage over the last 24 hours, and the account's keys. "Request an API key" issues a new key, shown only once. An account can hold up to 10 keys at a time, all sharing one quota; if you lose track of a key, simply request another, and click "Revoke" on keys no longer in use. See the [API docs](/en/api/) for usage and the [player](/en/player/) for showing API-generated cards on a web page.
 
+## Card masks
+
+"Card masks" in the header is a separate tool: upload a finished flat card image to get three foil masks (frame and text, character, effects) and preview the foil for different combinations. See [Card masks](/en/masks/).
+
 ## Retention
 
 Card files are stored on the server and deleted when they expire. Defaults on the public site:

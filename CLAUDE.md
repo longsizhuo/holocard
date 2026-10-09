@@ -32,7 +32,7 @@ pnpm build          # 提交前跑：先核对生成的珠光动画没被手改�
 
 一个仓库两半，共用 `src/` 里的代码：
 
-- **前端**（`index.html` + `src/demo/`）就是线上站点。三种路由：`/` 首页卡带；`/c/<id>` 分享的卡（这台设备第一次打开先出卡包）；`/render/<id>` 无头渲染模式，页头藏起来，给服务端截图用
+- **前端**（`index.html` + `src/demo/`）就是线上站点。三种路由：`/` 首页卡带；`/c/<id>` 分享的卡（这台设备第一次打开先出卡包）；`/render/<id>` 无头渲染模式，页头藏起来，给服务端截图用。另有一个独立页面 `/masks`（`masks.html` + `src/masks/`）：卡面遮罩，把做好的平面卡拆成箔面遮罩，识别规则在 `src/cardmask/`，模型部分在服务端（`server/pipeline/cardmask.ts`）
 - **分层服务**（`server/`，`vite.server.config.ts` 打成 `dist-server/`）是一个 Node 进程：线上同时发前端静态文件；`/api` 管任务队列、层文件、分享、作者配置；`/v1` 是白名单 key 的对外接口；卡片存在 `node:sqlite`
 - **分层流水线**（`src/segmenter/`）两边都能跑。线上在服务端的工作线程里跑（`server/pipeline/segment-worker.ts`，注入 sharp 做图片编解码，另外用 BiRefNet 抠主体）；只有部署里根本没有后端（`/api/jobs` 回 404/405，开发时 Vite 代理回 502）时，浏览器才自己跑，判断在 `src/demo/api.ts`
 - **渲染器**（`src/renderer/`）只吃一个 LayerSet（`src/format/` 定义的 `.layers`：manifest + 每层 webp），不依赖分层算法。每层的 alpha 同时是这一层箔面的遮罩；画面和箔面包在同一个带 transform 的容器里，`color-dodge` 只和本层混合。箔面配方 `foils.css` 移植自 pokemon-cards-css（GPL-3.0）

@@ -28,7 +28,7 @@ import { trackApi } from '../umami';
 import { enterStage, finishJob, startJob } from './eta';
 import { ImageError, layerToWebp, makeThumb, normalizeOriginal } from './images';
 import { detectNudity } from './moderation';
-import type { SegmentReply, SegmentRequest, SegmenterConfig } from './segment-worker';
+import type { ProbabilityPlane, SegmentReply, SegmentRequest, SegmenterConfig } from './segment-worker';
 
 /**
  * 启动时还是 running 的卡：上个进程正在处理它的时候没了。可能是发版重启，也可能就是它把进程弄崩的，
@@ -89,14 +89,16 @@ function spawnSegmenter(): Worker {
   return worker;
 }
 
-function segmentInWorker(
-  bytes: Uint8Array<ArrayBuffer>,
-  matte: boolean,
-  onStage: (stage: string) => void,
-): Promise<{ manifest: LayerManifest; images: Uint8Array[] }> {
+type FinalReply = Extract<SegmentReply, { type: 'done' | 'cardmask' }>;
+
+/**
+ * 交给分层线程做一件事，等它的最终回复。分层和卡面遮罩排同一个队（segmentTail）：
+ * 线程一次只做一件，同一时刻最多一个大模型在推理，两件叠在一起内存就不够了
+ */
+function runInWorker(request: SegmentRequest, onStage: (stage: string) => void = () => undefined): Promise<FinalReply> {
   const run = segmentTail.then(
     () =>
-      new Promise<{ manifest: LayerManifest; images: Uint8Array[] }>((resolve, reject) => {
+      new Promise<FinalReply>((resolve, reject) => {
         // 这段打包进 holocard-server.mjs，和 segment-worker.mjs 在同一个目录，见 vite.server.config.ts
         const worker = (segmenter ??= spawnSegmenter());
         const finish = (): void => {
@@ -110,8 +112,8 @@ function segmentInWorker(
             return;
           }
           finish();
-          if (reply.type === 'done') resolve({ manifest: reply.manifest, images: reply.images });
-          else reject(new Error(reply.message));
+          if (reply.type === 'error') reject(new Error(reply.message));
+          else resolve(reply);
         };
         // 线程自己崩了（未捕获的异常）：这张算失败，下一张重新起一个
         const onExit = (code: number): void => {
@@ -121,12 +123,32 @@ function segmentInWorker(
         };
         worker.on('message', onMessage);
         worker.on('exit', onExit);
-        const request: SegmentRequest = { bytes, matte };
-        worker.postMessage(request, [bytes.buffer as ArrayBuffer]);
+        worker.postMessage(request, [request.bytes.buffer as ArrayBuffer]);
       }),
   );
   segmentTail = run.catch(() => null);
   return run;
+}
+
+async function segmentInWorker(
+  bytes: Uint8Array<ArrayBuffer>,
+  matte: boolean,
+  onStage: (stage: string) => void,
+): Promise<{ manifest: LayerManifest; images: Uint8Array[] }> {
+  const reply = await runInWorker({ type: 'segment', bytes, matte }, onStage);
+  if (reply.type !== 'done') throw new Error('分层线程回错了消息');
+  return reply;
+}
+
+/** 卡面遮罩要的模型输出（见 server/pipeline/cardmask.ts） */
+export async function cardmaskInWorker(
+  bytes: Uint8Array<ArrayBuffer>,
+  region: { x: number; y: number; w: number; h: number },
+  textModel: string,
+): Promise<{ matte: ProbabilityPlane | null; text: ProbabilityPlane }> {
+  const reply = await runInWorker({ type: 'cardmask', bytes, region, textModel });
+  if (reply.type !== 'cardmask') throw new Error('分层线程回错了消息');
+  return reply;
 }
 
 /**
@@ -221,7 +243,7 @@ export function originalFile(card: Pick<CardRow, 'id' | 'original_type'>): strin
  * 认图片的魔数而不是信 Content-Type。
  * 前端是我们自己写的，但这个接口在公网上，谁都能 POST。
  */
-function sniffImage(bytes: Buffer): string | null {
+export function sniffImage(bytes: Buffer): string | null {
   if (bytes.length < 12) return null;
   if (bytes[0] === 0xff && bytes[1] === 0xd8) return 'image/jpeg';
   if (bytes.subarray(0, 8).equals(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]))) {

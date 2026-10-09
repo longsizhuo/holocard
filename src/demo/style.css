@@ -878,6 +878,8 @@ select {
   font-size: 12.5px;
   font-weight: 600;
   white-space: nowrap;
+  /* 文档、卡面遮罩是 <a>，个人中心是 <button>，长得一样 */
+  text-decoration: none;
   cursor: pointer;
 }
 .head-btn:hover { border-color: rgba(123, 95, 208, 0.45); }

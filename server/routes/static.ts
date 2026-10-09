@@ -302,8 +302,8 @@ export async function serveStatic(
   const isFile = (path: string): Promise<boolean> => stat(path).then((s) => s.isFile(), () => false);
   let candidate = target;
   let status = 200;
-  // 文档站（VitePress cleanUrls）的地址不带 .html：/docs/api/x 对应 docs/api/x.html
-  if (safe && pathname.startsWith('/docs/') && !(await isFile(target)) && (await isFile(`${target}.html`))) {
+  // 地址不带 .html：/masks 对应 masks.html，文档站（VitePress cleanUrls）的 /docs/api/x 对应 docs/api/x.html
+  if (safe && !(await isFile(target)) && (await isFile(`${target}.html`))) {
     candidate = `${target}.html`;
   } else if (!safe || !(await isFile(target))) {
     candidate = join(root, 'index.html');

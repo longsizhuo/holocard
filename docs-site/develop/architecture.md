@@ -112,7 +112,14 @@ holocard/
 
 ### `src/cardmask`
 
-卡面遮罩（试验中，尚未接入站点）：从已经做好的平面卡图中分出边框与文字、主角、特效三张箔面遮罩。`frame.ts` 找卡面上的画框，不依赖模型：先找贯穿大半个卡宽的长直边，再在候选矩形中按「边的支持率」与「像插画的小块占比」选出画框。评测见[本地开发](/develop/)中的 `cardmask-eval`。
+[卡面遮罩](/masks/)的规则部分，前后端都不跑模型的那一半：
+
+| 文件 | 职责 |
+|---|---|
+| `frame.ts` | 找卡面上的画框：长直边组成候选矩形，按边的完整程度、框内小块是插画的概率（逻辑回归 `ART_MODEL`，由 `cardmask-eval --train` 训练）选出 |
+| `masks.ts` | 由画框、主角概率图、文字概率图拼出边框与文字、主角、特效、文字四张遮罩 |
+
+页面是 `masks.html` 与 `src/masks/main.ts`：上传、轮询、按勾选区域合成预览用的两层 LayerSet 交给渲染器。评测见[本地开发](/develop/)中的 `cardmask-eval`。
 
 ### `src/lab`
 
@@ -132,11 +139,14 @@ holocard/
 | `routes/static.ts` | 前端静态文件：按语言发页面、首页与分享页的 OG 标签、`robots.txt`、`sitemap.xml` |
 | `routes/account.ts` | `/auth/*` 登录与退出，`/api/me/*` 当前账号、认领与个人中心的 API key |
 | `routes/v1.ts` | 对外接口 `/v1` |
+| `routes/cardmask.ts` | 卡面遮罩 `/api/cardmask`：上传、状态、遮罩文件 |
 | `pipeline/jobs.ts` | 分层任务：收上传（`acceptUpload`）、队列、调度工作线程、裸露识别、缩略图、启动时续跑 |
 | `pipeline/segment-worker.ts` | 分层流水线的常驻工作线程 |
 | `pipeline/images.ts` | sharp 图片编解码：原图规范化（摆正方向、去除 EXIF、HEIC 解码）、层图转 WebP、卡册缩略图 |
 | `pipeline/moderation.ts` | NudeNet 裸露识别 |
 | `pipeline/eta.ts` | 剩余时间估计：按阶段的耗时指数平均 |
+| `pipeline/cardmask.ts` | 卡面遮罩任务：规范化卡图、找画框、交分层线程抠主角和找文字、拼遮罩写文件；结果在 `.cardmasks/<id>/`，24 小时后删除 |
+| `pipeline/textdet.ts` | PP-OCRv4 文字检测（onnxruntime-node），只出文字概率图 |
 | `render/preview.ts` | 用无头 Chromium 打开 `/render/<id>` 截分享图，浏览器常驻复用 |
 | `render/previews.ts` | 分享图的渲染队列与失败重试 |
 | `render/export.ts` / `render/motionphoto.ts` | 导出动图（GIF、APNG、安卓动态照片） |

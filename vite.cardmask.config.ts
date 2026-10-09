@@ -12,7 +12,7 @@ export default defineConfig({
     minify: false,
     target: 'node22',
     rollupOptions: {
-      external: ['sharp', '@huggingface/transformers', /^node:/],
+      external: ['sharp', '@huggingface/transformers', 'onnxruntime-node', /^node:/],
       output: { entryFileNames: 'cardmask-eval.mjs' },
     },
   },
