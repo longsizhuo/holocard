@@ -10,7 +10,9 @@
  * 用法：
  *   pnpm cardmask:eval [--matte] [--only <id 前缀>] [--debug] [--train]
  *   --train  训练 frame.ts 里小块「是插画」的逻辑回归，打印 ART_MODEL
- *   --masks  出三张遮罩，按稀有度组合后和宝可梦官方遮罩比（要抠图权重和 .models/RapidOCR 下的文字检测模型）
+ *   --masks  出六张遮罩，按稀有度组合后和宝可梦官方遮罩比（要抠图权重和 .models/RapidOCR 下的文字检测模型）
+ *   --model <名字>  配合 --masks，换主角的抠图模型来比：lite（默认）、birefnet、hrsod、toonout、matting，
+ *                   后四个的 ONNX 放在 .models/cmp/（下载地址见 scripts/cardmask-matte.py 的 MODELS，做法见 docs-site/develop/index.md「抠图模型对比」）
  *   --matte  连主角一起评（BiRefNet，一张二十几秒，峰值 7GB 内存）；模型目录取 HOLOCARD_MODEL_DIR，默认 .models
  * 每张卡画一张对照图到 .cardmask/out/（绿框是标准答案，红框是检测结果），汇总写 .cardmask/out/report.json
  */
@@ -19,10 +21,11 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import sharp from 'sharp';
 import { env } from '@huggingface/transformers';
-import { FEATURES, artWindowCandidates, blockFeatures, findArtWindow, workImage, type Box } from '../src/cardmask/frame';
+import { FEATURES, artWindowCandidates, blockFeatures, findArtWindow, findLayout, workImage, type Box } from '../src/cardmask/frame';
 import { estimateMatte } from '../src/segmenter/matte';
-import { cardMasks, type CardMasks, type Plane } from '../src/cardmask/masks';
+import { cardMasks, type CardMasks, type MaskClass, type Plane } from '../src/cardmask/masks';
 import { textProbability } from '../server/pipeline/textdet';
+import * as ort from 'onnxruntime-node';
 
 const ROOT = resolve(import.meta.dirname, '..', '..');
 const DATA = join(ROOT, '.cardmask', 'data');
@@ -32,6 +35,19 @@ const withMatte = argv.includes('--matte');
 const only = argv.includes('--only') ? (argv[argv.indexOf('--only') + 1] ?? '') : '';
 /** 打印每张卡的候选矩形（按和答案的 IoU 排），调画框检测用 */
 const debug = argv.includes('--debug');
+/**
+ * --model：主角用哪个抠图模型（只对 --masks 起作用），比较不同模型用。lite 是线上在用的 BiRefNet_lite，走 estimateMatte；
+ * 其余的是 .models/cmp/ 下的原始 ONNX，用 onnxruntime 直接跑，预处理和 lite 一样（拉伸到 1024、ImageNet 均值方差）
+ */
+const MODEL = argv.includes('--model') ? (argv[argv.indexOf('--model') + 1] ?? 'lite') : 'lite';
+const RAW_MODELS: Record<string, { file: string; input: string; logits: boolean }> = {
+  birefnet: { file: 'birefnet.onnx', input: 'input_image', logits: true },
+  hrsod: { file: 'hrsod.onnx', input: 'input_image', logits: true },
+  toonout: { file: 'toonout.onnx', input: 'image', logits: false },
+  matting: { file: 'matting.onnx', input: 'input_image', logits: true },
+};
+// 只在别的机器上算过的模型（.cardmask/out/remote/<名字>/ 有结果）也认
+if (MODEL !== 'lite' && !RAW_MODELS[MODEL] && !existsSync(join(OUT, 'remote', MODEL))) throw new Error(`不认识的模型 ${MODEL}，可选 lite、${Object.keys(RAW_MODELS).join('、')}`);
 
 interface Entry {
   id: string;
@@ -349,12 +365,83 @@ async function cachedPlane(file: string, make: () => Promise<Plane>): Promise<Pl
 
 /** 抠图结果，卡图尺寸；只在 box 里抠（全图卡是整张） */
 async function matteOf(entry: Entry, file: string, width: number, height: number, box: Box | null): Promise<Plane> {
-  // 只在 box 里抠，所以缓存要按 box 区分：画框检测改了，旧的抠图结果就不能用
+  // 只在 box 里抠，所以缓存要按 box 区分：画框检测改了，旧的抠图结果就不能用。lite 以外的模型文件名里带模型名
   const key = box ? [box.x, box.y, box.w, box.h].map((v) => v.toFixed(3)).join('_') : 'full';
-  return cachedPlane(join(CACHE, `${entry.id}-matte-${key}.png`), async () => {
-    const mask = await character(file, width, height, box, true);
+  const name = MODEL === 'lite' ? `${entry.id}-matte-${key}.png` : `${entry.id}-matte-${MODEL}-${key}.png`;
+  // 在别的机器上算好、传回来的（见 --crops 和 scripts/cardmask-matte.py）
+  const remote = join(OUT, 'remote', MODEL, `${entry.id}__${key}.png`);
+  return cachedPlane(join(CACHE, name), async () => {
+    const started = Date.now();
+    const mask = existsSync(remote)
+      ? await fromRemote(remote, width, height, box)
+      : MODEL === 'lite'
+        ? await character(file, width, height, box, true)
+        : await rawMatte(file, width, height, box);
+    timings.push(Date.now() - started);
     return { data: Float32Array.from(mask), width, height };
   });
+}
+
+/** 每张卡抠图花了多少毫秒（只记这次真算的，读缓存的不算） */
+const timings: number[] = [];
+let rawSession: ort.InferenceSession | null = null;
+
+/** 别的机器算好的遮罩（1024×1024 灰度，对应 box 里那块），铺回卡图尺寸 */
+async function fromRemote(file: string, width: number, height: number, box: Box | null): Promise<Float32Array> {
+  const { data, info } = await sharp(file).greyscale().raw().toBuffer({ resolveWithObject: true });
+  const region = box ?? { x: 0, y: 0, w: 1, h: 1 };
+  const left = Math.round(region.x * width);
+  const top = Math.round(region.y * height);
+  const w = Math.round(region.w * width);
+  const h = Math.round(region.h * height);
+  const out = new Float32Array(width * height);
+  for (let y = 0; y < h; y++) {
+    for (let x = 0; x < w; x++) {
+      const v = data[Math.min(info.height - 1, Math.floor((y / h) * info.height)) * info.width + Math.min(info.width - 1, Math.floor((x / w) * info.width))] ?? 0;
+      out[(top + y) * width + left + x] = v / 255;
+    }
+  }
+  return out;
+}
+
+/** 用原始 ONNX 抠 box 里的主角，返回卡图尺寸的 0..1 概率 */
+async function rawMatte(file: string, width: number, height: number, box: Box | null): Promise<Float32Array> {
+  const spec = RAW_MODELS[MODEL]!;
+  rawSession ??= await ort.InferenceSession.create(join(ROOT, '.models', 'cmp', spec.file), {
+    executionProviders: ['cpu'],
+    // 同 matte.ts：不关内存池的话推理完的峰值不还给系统
+    enableCpuMemArena: false,
+    enableMemPattern: false,
+  });
+  const region = box ?? { x: 0, y: 0, w: 1, h: 1 };
+  const left = Math.round(region.x * width);
+  const top = Math.round(region.y * height);
+  const w = Math.round(region.w * width);
+  const h = Math.round(region.h * height);
+  const SIZE = 1024;
+  const rgb = await sharp(file)
+    .extract({ left, top, width: w, height: h })
+    .removeAlpha()
+    .resize(SIZE, SIZE, { fit: 'fill', kernel: 'lanczos3' })
+    .raw()
+    .toBuffer();
+  const MEAN = [0.485, 0.456, 0.406];
+  const STD = [0.229, 0.224, 0.225];
+  const plane = SIZE * SIZE;
+  const input = new Float32Array(plane * 3);
+  for (let p = 0; p < plane; p++) {
+    for (let c = 0; c < 3; c++) input[c * plane + p] = ((rgb[p * 3 + c] ?? 0) / 255 - MEAN[c]!) / STD[c]!;
+  }
+  const output = await rawSession.run({ [spec.input]: new ort.Tensor('float32', input, [1, 3, SIZE, SIZE]) });
+  const data = output[rawSession.outputNames[0] ?? '']!.data as Float32Array;
+  const out = new Float32Array(width * height);
+  for (let y = 0; y < h; y++) {
+    for (let x = 0; x < w; x++) {
+      const v = data[Math.min(SIZE - 1, Math.floor((y / h) * SIZE)) * SIZE + Math.min(SIZE - 1, Math.floor((x / w) * SIZE))] ?? 0;
+      out[(top + y) * width + left + x] = spec.logits ? 1 / (1 + Math.exp(-v)) : v;
+    }
+  }
+  return out;
 }
 
 async function textOf(entry: Entry, image: { data: Uint8Array; width: number; height: number }): Promise<Plane> {
@@ -363,29 +450,61 @@ async function textOf(entry: Entry, image: { data: Uint8Array; width: number; he
   );
 }
 
-/** characterFoils：主角也闪（只对 sunpillar 有两种选法） */
-function foilOf(style: string, characterFoils: boolean, m: CardMasks, box: Box | null): Uint8Array | null {
+/**
+ * 各稀有度的箔面由哪几张遮罩相加。五张互不重叠，相加就是并集。有几种组合的都算、取和官方遮罩最像的那个：
+ * 同一种稀有度，主角闪不闪、卡边闪不闪是按每张卡的设计定的（百变怪 VMAX 主角闪、喷火龙 VSTAR 不闪；V、VMAX 卡边闪、VSTAR 只有内板闪；
+ * 画里的火焰、光效有的闪有的不闪），
+ * 稀有度推不出来。实际用的时候怎么组合由做卡的人选，这里量的是遮罩本身准不准
+ */
+const RECIPES: Record<string, MaskClass[][]> = {
+  swholo: [['background'], ['background', 'effects']],
+  cosmos: [['background'], ['background', 'effects']],
+  reverse: [['frame', 'text'], ['border', 'frame', 'text']],
+  sunpillar: ([['background'], ['frame', 'background'], ['border', 'frame', 'background']] as MaskClass[][]).flatMap((r) => [r, [...r, 'character', 'effects']]),
+  swsecret: [['frame', 'background', 'effects'], ['border', 'frame', 'background', 'effects']],
+  radiantholo: [['frame', 'text', 'character', 'effects'], ['border', 'frame', 'text', 'character', 'effects']],
+};
+
+function foilOf(recipe: MaskClass[], m: CardMasks): Uint8Array {
   const out = new Uint8Array(m.width * m.height);
-  const x0 = box ? box.x * m.width : 0;
-  const x1 = box ? (box.x + box.w) * m.width : m.width;
-  const y0 = box ? box.y * m.height : 0;
-  const y1 = box ? (box.y + box.h) * m.height : m.height;
   for (let i = 0; i < out.length; i++) {
-    const x = i % m.width;
-    const y = (i - x) / m.width;
-    // 全图卡没有画框，整张都算「画框里」
-    const window = x >= x0 && x < x1 && y >= y0 && y < y1;
-    const char = m.character[i]! > 127;
-    const fx = m.effects[i]! > 127;
-    const text = m.text[i]! > 127;
-    if (style === 'swholo' || style === 'cosmos') out[i] = window && !char && !fx ? 1 : 0;
-    else if (style === 'reverse') out[i] = !window ? 1 : 0;
-    else if (style === 'sunpillar') out[i] = (characterFoils || (!char && !fx)) && !text ? 1 : 0;
-    else if (style === 'swsecret') out[i] = !char && !text ? 1 : 0;
-    else if (style === 'radiantholo') out[i] = !window || char ? 1 : 0;
-    else return null;
+    let sum = 0;
+    for (const layer of recipe) sum += m[layer][i] ?? 0;
+    out[i] = sum > 127 ? 1 : 0;
   }
   return out;
+}
+
+/** labels 上色，顺序同 CLASSES：背景绿、框架蓝、文字橙、主角红、特效紫、卡边灰 */
+const LABEL_COLORS = [[34, 197, 94], [59, 130, 246], [245, 158, 11], [239, 68, 68], [168, 85, 247], [148, 163, 184]] as const;
+
+/*
+ * --crops：把每张宝可梦卡要抠主角的那块（画框，全图卡是整张）裁出来，放到 .cardmask/out/crops/。
+ * 拿去显卡机器上用 scripts/cardmask-matte.py 抠，结果放回 .cardmask/out/remote/<模型>/，--masks --model 会直接用。
+ * 这台 4 核 ARM 上大模型一张要一分钟、峰值七八 GB 内存，显卡上一张不到一秒
+ */
+if (argv.includes('--crops')) {
+  mkdirSync(join(OUT, 'crops'), { recursive: true });
+  let n = 0;
+  for (const entry of entries.filter((e) => e.source === 'pokemon' && e.mask && e.style)) {
+    const cardFile = join(DATA, entry.card);
+    const image = await rgba(cardFile);
+    const box = findArtWindow(image.data, image.width, image.height);
+    const key = box ? [box.x, box.y, box.w, box.h].map((v) => v.toFixed(3)).join('_') : 'full';
+    const region = box ?? { x: 0, y: 0, w: 1, h: 1 };
+    await sharp(cardFile)
+      .extract({
+        left: Math.round(region.x * image.width),
+        top: Math.round(region.y * image.height),
+        width: Math.round(region.w * image.width),
+        height: Math.round(region.h * image.height),
+      })
+      .png()
+      .toFile(join(OUT, 'crops', `${entry.id}__${key}.png`));
+    n++;
+  }
+  console.log(`裁了 ${n} 张到 ${join(OUT, 'crops')}`);
+  process.exit(0);
 }
 
 if (argv.includes('--masks')) {
@@ -394,17 +513,18 @@ if (argv.includes('--masks')) {
   for (const entry of entries.filter((e) => e.source === 'pokemon' && e.mask && e.style)) {
     const cardFile = join(DATA, entry.card);
     const image = await rgba(cardFile);
-    const window = findArtWindow(image.data, image.width, image.height);
+    const layout = findLayout(image.data, image.width, image.height);
+    const region = layout.window ?? layout.panel;
     const masks = cardMasks(
       image.data,
       image.width,
       image.height,
-      window,
-      await matteOf(entry, cardFile, image.width, image.height, window),
+      layout,
+      await matteOf(entry, cardFile, image.width, image.height, region),
       await textOf(entry, image),
     );
-    const options = [foilOf(entry.style!, false, masks, window), ...(entry.style === 'sunpillar' ? [foilOf(entry.style, true, masks, window)] : [])];
-    if (!options[0]) continue;
+    const recipes = RECIPES[entry.style!];
+    if (!recipes) continue;
     // 蚀刻类（etched）的官方遮罩是一层细密纹理，逐像素切黑白全是噪点。先模糊到看覆盖范围，有纹理的整片算闪
     const { data: blurred } = await sharp(join(DATA, entry.mask!))
       .ensureAlpha()
@@ -414,37 +534,57 @@ if (argv.includes('--masks')) {
       .raw()
       .toBuffer({ resolveWithObject: true });
     const truth = Uint8Array.from(blurred, (v) => (v >= 64 ? 1 : 0));
-    const scored = options.map((foil) => ({ foil: foil!, iou: maskIou(truth, foil!) })).sort((a, b) => b.iou - a.iou);
+    const scored = recipes
+      .map((recipe) => {
+        const foil = foilOf(recipe, masks);
+        return { recipe, foil, iou: maskIou(truth, foil) };
+      })
+      .sort((a, b) => b.iou - a.iou);
     const foil = scored[0]!.foil;
-    const row = { id: entry.id, split: entry.split ?? 'dev', style: entry.style, window: window !== null, foilIou: Number(scored[0]!.iou.toFixed(3)) };
+    const row = {
+      id: entry.id,
+      split: entry.split ?? 'dev',
+      style: entry.style,
+      layout: layout.window ? 'window' : layout.panel ? 'panel' : 'none',
+      recipe: scored[0]!.recipe.join('+'),
+      foilIou: Number(scored[0]!.iou.toFixed(3)),
+    };
     results.push(row);
     console.log(JSON.stringify(row));
-    // 对照图：卡图、官方遮罩、我们组合出来的、三张遮罩
+    // 对照图：卡图、官方遮罩、我们组合出来的、上色的 labels
     const H = 420;
     const W = Math.round((image.width / image.height) * H);
-    const gray = async (plane: Uint8Array, scale = 255): Promise<Buffer> =>
-      sharp(Buffer.from(plane.map((v) => Math.min(255, v * scale))), { raw: { width: image.width, height: image.height, channels: 1 } }).resize(W, H).png().toBuffer();
+    const gray = async (plane: Uint8Array): Promise<Buffer> =>
+      sharp(Buffer.from(plane.map((v) => v * 255)), { raw: { width: image.width, height: image.height, channels: 1 } }).resize(W, H).png().toBuffer();
+    const colored = Buffer.alloc(masks.labels.length * 3);
+    masks.labels.forEach((k, i) => colored.set(LABEL_COLORS[k] ?? [0, 0, 0], i * 3));
     const panels = [
       await sharp(cardFile).flatten({ background: '#fff' }).resize(W, H).png().toBuffer(),
       await gray(truth),
       await gray(foil),
-      await gray(masks.frame, 1),
-      await gray(masks.character, 1),
-      await gray(masks.effects, 1),
+      await sharp(colored, { raw: { width: image.width, height: image.height, channels: 3 } }).resize(W, H).png().toBuffer(),
     ];
     await sharp({ create: { width: panels.length * (W + 8), height: H, channels: 3, background: '#fff' } })
       .composite(panels.map((input, i) => ({ input, left: i * (W + 8), top: 0 })))
       .jpeg({ quality: 80 })
-      .toFile(join(OUT, `${entry.id}-masks.jpg`));
+      .toFile(join(OUT, MODEL === 'lite' ? `${entry.id}-masks.jpg` : `${entry.id}-masks-${MODEL}.jpg`));
   }
-  const byStyle: Record<string, unknown> = {};
-  for (const style of [...new Set(results.map((r) => r['style'] as string))]) {
-    const v = results.filter((r) => r['style'] === style).map((r) => r['foilIou'] as number);
-    byStyle[style] = { cards: v.length, foilIou: Number((v.reduce((a, b) => a + b, 0) / v.length).toFixed(3)) };
-  }
+  const mean = (v: number[]): number => Number((v.reduce((a, b) => a + b, 0) / v.length).toFixed(3));
+  const group = (key: string): Record<string, unknown> => {
+    const out: Record<string, unknown> = {};
+    for (const value of [...new Set(results.map((r) => r[key] as string))]) {
+      const v = results.filter((r) => r[key] === value).map((r) => r['foilIou'] as number);
+      out[value] = { cards: v.length, foilIou: mean(v) };
+    }
+    return out;
+  };
   const all = results.map((r) => r['foilIou'] as number);
-  const summary = { byStyle, all: Number((all.reduce((a, b) => a + b, 0) / all.length).toFixed(3)), cards: all.length };
-  writeFileSync(join(OUT, 'masks-report.json'), JSON.stringify({ summary, rows: results }, null, 2));
+  const summary = { bySplit: group('split'), byStyle: group('style'), byLayout: group('layout'), all: mean(all), cards: all.length };
+  const msPerCard = timings.length ? Math.round(timings.reduce((a, b) => a + b, 0) / timings.length) : null;
+  writeFileSync(
+    join(OUT, MODEL === 'lite' ? 'masks-report.json' : `masks-report-${MODEL}.json`),
+    JSON.stringify({ model: MODEL, msPerCard, summary, rows: results }, null, 2),
+  );
   console.log(JSON.stringify(summary, null, 2));
   process.exit(0);
 }

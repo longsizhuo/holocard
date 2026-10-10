@@ -1,6 +1,6 @@
 /**
- * 卡面遮罩页（masks.html）：上传做好的平面卡图 → 服务端出边框、主角、特效、文字四张遮罩（server/pipeline/cardmask.ts）
- * → 在这里勾选哪些区域上箔，用渲染器实时预览，遮罩可以单独下载，也可以下载当前组合。
+ * 卡面遮罩页（masks.html）：上传做好的平面卡图 → 服务端出边框、文字、主角、特效、背景六张互不重叠的遮罩和一张分区总览
+ * （server/pipeline/cardmask.ts）→ 在这里勾选哪些区域上箔，用渲染器实时预览，遮罩可以单独下载，也可以下载当前组合。
  *
  * 预览是两层的 LayerSet：底层是整张卡（不上箔），上层是同一张卡、alpha 取勾选区域的并集、上选中的箔面。
  * 视差关掉：实体卡是平的，这里要看的是箔面落在哪
@@ -16,11 +16,11 @@ import { applyTranslations, lang, onLangChange, setLang, t, type Lang, type Mess
 const BASE = import.meta.env.BASE_URL;
 const POLL_MS = 1500;
 
-/** 预览里能勾选的区域。frame 不含文字，文字单独一项 */
-const REGIONS = ['frame', 'text', 'background', 'character', 'effects'] as const;
+/** 预览里能勾选的区域，也就是服务端出的六张遮罩。六张互不重叠，勾选的几张相加就是组合 */
+const REGIONS = ['border', 'frame', 'text', 'background', 'character', 'effects'] as const;
 type Region = (typeof REGIONS)[number];
-/** 服务端给的文件 */
-const FILES = ['frame', 'character', 'effects', 'text'] as const;
+/** 列表里展示、可下载的文件：六张遮罩加分区总览 */
+const FILES = [...REGIONS, 'labels'] as const;
 type MaskFile = (typeof FILES)[number];
 
 function need<T extends Element>(selector: string): T {
@@ -40,7 +40,7 @@ const docsLink = need<HTMLAnchorElement>('#docs-link');
 
 let card: HoloCard | null = null;
 /** 当前这组的像素：卡图 RGBA，和各遮罩的灰度 */
-let current: { id: string; width: number; height: number; rgba: Uint8ClampedArray; masks: Record<MaskFile, Uint8ClampedArray> } | null = null;
+let current: { id: string; width: number; height: number; rgba: Uint8ClampedArray; masks: Record<Region, Uint8ClampedArray> } | null = null;
 
 // ---------- 语言 ----------
 
@@ -123,8 +123,8 @@ async function pixels(url: string): Promise<{ data: Uint8ClampedArray; width: nu
 async function show(id: string): Promise<void> {
   const base = `${BASE}api/cardmask/${id}`;
   const cardPixels = await pixels(`${base}/card.png`);
-  const masks = {} as Record<MaskFile, Uint8ClampedArray>;
-  for (const name of FILES) masks[name] = (await pixels(`${base}/${name}.png`)).data;
+  const masks = {} as Record<Region, Uint8ClampedArray>;
+  for (const name of REGIONS) masks[name] = (await pixels(`${base}/${name}.png`)).data;
   current = { id, width: cardPixels.width, height: cardPixels.height, rgba: cardPixels.data, masks };
   result.hidden = false;
   renderGrid(id);
@@ -136,10 +136,13 @@ async function show(id: string): Promise<void> {
 function renderGrid(id: string): void {
   const base = `${BASE}api/cardmask/${id}`;
   const caption: Record<MaskFile, MessageKey> = {
-    frame: 'masks.file.frame',
+    border: 'masks.region.border',
+    frame: 'masks.region.frame',
+    text: 'masks.region.text',
+    background: 'masks.region.background',
     character: 'masks.region.character',
     effects: 'masks.region.effects',
-    text: 'masks.region.text',
+    labels: 'masks.file.labels',
   };
   grid.replaceChildren(
     ...FILES.map((name) => {
@@ -159,24 +162,14 @@ function renderGrid(id: string): void {
 
 // ---------- 预览 ----------
 
-/** 每个像素属于哪几个区域：文字优先于边框；主角、特效哪儿都可能有；剩下的是背景 */
+/** 勾选的几张遮罩相加：六张互不重叠，加起来就是并集，边缘的半透明也照样保留 */
 function combined(selected: Set<Region>): Uint8ClampedArray {
   const { masks, width, height } = current!;
   const out = new Uint8ClampedArray(width * height);
   for (let i = 0; i < out.length; i++) {
-    const p = i * 4;
-    const text = (masks.text[p] ?? 0) > 127;
-    const frame = (masks.frame[p] ?? 0) > 127 && !text;
-    const character = (masks.character[p] ?? 0) > 127;
-    const effects = (masks.effects[p] ?? 0) > 127 && !character;
-    const background = !text && !frame && !character && !effects;
-    const on =
-      (text && selected.has('text')) ||
-      (frame && selected.has('frame')) ||
-      (character && !text && selected.has('character')) ||
-      (effects && !text && selected.has('effects')) ||
-      (background && selected.has('background'));
-    out[i] = on ? 255 : 0;
+    let sum = 0;
+    for (const region of selected) sum += masks[region][i * 4] ?? 0;
+    out[i] = sum;
   }
   return out;
 }

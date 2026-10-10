@@ -116,10 +116,13 @@ holocard/
 
 | 文件 | 职责 |
 |---|---|
-| `frame.ts` | 找卡面上的画框：长直边组成候选矩形，按边的完整程度、框内小块是插画的概率（逻辑回归 `ART_MODEL`，由 `cardmask-eval --train` 训练）选出 |
-| `masks.ts` | 由画框、主角概率图、文字概率图拼出边框与文字、主角、特效、文字四张遮罩 |
+| `frame.ts` | 找卡面的版式：长直边组成候选矩形，按边的完整程度、框内小块是插画的概率（逻辑回归 `ART_MODEL`，由 `cardmask-eval --train` 训练）选出画框；没有画框的全图卡找内板（卡边、名字栏、底栏以内） |
+| `layout.ts` | 版式先验：文字按位置分成名字、HP、说明、底栏、画内文字；给出说明区的上沿，主角在全图卡上从这里淡出 |
+| `masks.ts` | 由版式、主角概率图、文字概率图拼出卡边、边框、文字、主角、特效、背景六张互不重叠的遮罩和分区总览 |
 
 页面是 `masks.html` 与 `src/masks/main.ts`：上传、轮询、按勾选区域合成预览用的两层 LayerSet 交给渲染器。评测见[本地开发](/develop/)中的 `cardmask-eval`。
+
+卡面遮罩只面向游戏卡，和主流程（照片 → 分层 → 闪卡）是分开的：`src/cardmask/` 不被 `src/segmenter/`、`src/demo/` 引用，页面是独立的入口，首页不放链接；服务端只共用分层线程和抠图模型（抠图模型常驻内存，不另加载一份），任务排同一个队。要整体去掉卡面遮罩：删除 `src/cardmask/`、`src/masks/`、`masks.html`、`server/routes/cardmask.ts`、`server/pipeline/cardmask.ts`、`server/pipeline/textdet.ts`，再去掉 `server/index.ts` 里的路由与定时清理、`jobs.ts` 的 `cardmaskInWorker`、分层线程里的 `cardmask` 消息、`vite.config.ts` 里的 `masks` 入口。
 
 ### `src/lab`
 
@@ -145,7 +148,7 @@ holocard/
 | `pipeline/images.ts` | sharp 图片编解码：原图规范化（摆正方向、去除 EXIF、HEIC 解码）、层图转 WebP、卡册缩略图 |
 | `pipeline/moderation.ts` | NudeNet 裸露识别 |
 | `pipeline/eta.ts` | 剩余时间估计：按阶段的耗时指数平均 |
-| `pipeline/cardmask.ts` | 卡面遮罩任务：规范化卡图、找画框、交分层线程抠主角和找文字、拼遮罩写文件；结果在 `.cardmasks/<id>/`，24 小时后删除 |
+| `pipeline/cardmask.ts` | 卡面遮罩任务：规范化卡图、找版式（画框或内板）、交分层线程抠主角和找文字、拼遮罩写文件；结果在 `.cardmasks/<id>/`，24 小时后删除 |
 | `pipeline/textdet.ts` | PP-OCRv4 文字检测（onnxruntime-node），只出文字概率图 |
 | `render/preview.ts` | 用无头 Chromium 打开 `/render/<id>` 截分享图，浏览器常驻复用 |
 | `render/previews.ts` | 分享图的渲染队列与失败重试 |

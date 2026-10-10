@@ -12,7 +12,7 @@
   <body class="masks-page">
     <div class="pearl" aria-hidden="true"></div>
 
-    <!-- 卡面遮罩：上传做好的平面卡图，出三张箔面遮罩，并用渲染器预览组合效果。逻辑见 src/masks/main.ts -->
+    <!-- 卡面遮罩：上传做好的平面卡图，出六张互不重叠的箔面遮罩，并用渲染器预览组合效果。逻辑见 src/masks/main.ts -->
     <main class="page masks">
       <header class="page__head">
         <h1><a class="masks__home" href="/">HoloCard</a></h1>
@@ -28,7 +28,7 @@
 
       <section class="masks__intro">
         <h2 data-i18n="masks.heading">卡面遮罩</h2>
-        <p data-i18n="masks.intro">上传一张做好的卡图，得到边框与文字、主角、特效三张箔面遮罩。</p>
+        <p data-i18n="masks.intro">上传一张做好的卡图，得到卡边、边框、文字、主角、特效、背景六张互不重叠的箔面遮罩，和一张分区总览。</p>
         <label class="masks__upload">
           <input type="file" id="masks-file" accept="image/*" />
           <span data-i18n="masks.choose">选择卡图</span>
@@ -42,6 +42,7 @@
           <div class="masks__controls">
             <fieldset>
               <legend data-i18n="masks.shine">哪里闪</legend>
+              <label><input type="checkbox" name="region" value="border" /> <span data-i18n="masks.region.border">卡边</span></label>
               <label><input type="checkbox" name="region" value="frame" /> <span data-i18n="masks.region.frame">边框</span></label>
               <label><input type="checkbox" name="region" value="text" /> <span data-i18n="masks.region.text">文字</span></label>
               <label><input type="checkbox" name="region" value="background" checked /> <span data-i18n="masks.region.background">背景</span></label>

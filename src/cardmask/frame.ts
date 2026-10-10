@@ -16,7 +16,8 @@
  *      组内先取边最强的那个
  *   5. 往里收：选中的框里如果还嵌着一个边也够强、面积不少于一半、紧贴边内侧一圈更像插画的框，就换成它，
  *      直到收不动。卡框套画框、画框连着标题栏时，外面那个的边往往更强，但内侧一圈是名字栏、标题，不是画
- *   6. 最好的也不够好（全图卡、无框卡）就返回 null，调用方当整张都是画
+ *   6. 最好的也不够好（全图卡、无框卡），或者是左右贴满卡边的高矩形（全图卡的外框线，见 FULL_WIDTH_MARGIN），
+ *      就返回 null，调用方当整张都是画
  *
  * 前提：画框在卡的上半部分（框的中心在卡高 55% 以上），高度不超过卡高的 62%。宝可梦、万智牌、游戏王都是上图下文；
  * 不加这两条的话，底纹花哨的说明框（光辉宝可梦）、插画连说明框的大框会被当成画框
@@ -58,6 +59,18 @@ const MAX_CENTER_Y = 0.55;
  * 全图卡外圈的卡框都在 70% 以上，靠这条挡掉
  */
 const MAX_HEIGHT = 0.62;
+/**
+ * 左右都贴着卡的外框（离图片边不到这么多）、又高过卡高 FULL_WIDTH_MAX_HEIGHT 的矩形，不是画框：
+ * 是全图卡（宝可梦 V、VMAX）外圈的细框线和招式框的上沿凑出来的，框外的招式区照样是画。
+ * 真画框贴满全宽的只有矮的（宝可梦全宽画框约 39%），高过一半的游戏王画框左右都留着一成的卡框
+ */
+const FULL_WIDTH_MARGIN = 0.05;
+const FULL_WIDTH_MAX_HEIGHT = 0.5;
+/** 内板（见 pickPanel）的上沿范围和高度范围，都按卡高算。上沿太靠上的是连名字栏一起圈进去的外框 */
+const PANEL_MIN_TOP = 0.06;
+const PANEL_MAX_TOP = 0.15;
+const PANEL_MIN_HEIGHT = 0.65;
+const PANEL_MAX_HEIGHT = 0.85;
 
 /** 缩到工作尺寸的图：RGB 和亮度。最近邻就够，要的是边的位置和块的统计量，不要画质 */
 export interface WorkImage {
@@ -226,10 +239,44 @@ export interface Candidate extends Box {
 }
 
 export function findArtWindow(rgba: Uint8Array | Uint8ClampedArray, width: number, height: number): (Box & { score: number }) | null {
-  return pickWindow(artWindowCandidates(rgba, width, height));
+  return findLayout(rgba, width, height).window;
 }
 
-export function artWindowCandidates(rgba: Uint8Array | Uint8ClampedArray, width: number, height: number): Candidate[] {
+/** 卡面的版式：有画框的卡给 window；没有画框的（全图卡）看有没有内板 */
+export interface Layout {
+  window: (Box & { score: number }) | null;
+  panel: Box | null;
+}
+
+export function findLayout(rgba: Uint8Array | Uint8ClampedArray, width: number, height: number): Layout {
+  // 一次把高的矩形也找出来：画框只从矮的里挑，内板从全宽的高矩形里挑
+  const all = artWindowCandidates(rgba, width, height, { maxHeight: PANEL_MAX_HEIGHT, maxCenterY: 1 });
+  const window = pickWindow(all.filter((c) => c.h <= MAX_HEIGHT && c.y + c.h / 2 <= MAX_CENTER_Y));
+  return { window, panel: window ? null : pickPanel(all) };
+}
+
+/**
+ * 全图卡的内板：卡边以内、名字栏以下、底下弱点栏以上那一大块，招式文字压在画上。
+ * 宝可梦的卡（有画框的也一样）都有这圈框线：左右离卡边约 4%，上沿约在卡高 9.5%（名字栏下面），高约 77%～80%。
+ * 实体卡里有的稀有度只有内板闪（VSTAR），有的连卡边一起闪（V、VMAX），所以内板以外单独算作框架，组合交给用的人。
+ * 从左右贴着卡边、上沿在名字栏下面、够高的矩形里，取边的得分最高的
+ */
+function pickPanel(candidates: Candidate[]): Box | null {
+  let best: Candidate | null = null;
+  for (const c of candidates) {
+    if (c.x >= FULL_WIDTH_MARGIN || 1 - c.x - c.w >= FULL_WIDTH_MARGIN) continue;
+    if (c.y < PANEL_MIN_TOP || c.y > PANEL_MAX_TOP || c.h < PANEL_MIN_HEIGHT) continue;
+    if (!best || c.score > best.score) best = c;
+  }
+  return best ? { x: best.x, y: best.y, w: best.w, h: best.h } : null;
+}
+
+export function artWindowCandidates(
+  rgba: Uint8Array | Uint8ClampedArray,
+  width: number,
+  height: number,
+  limits: { maxHeight: number; maxCenterY: number } = { maxHeight: MAX_HEIGHT, maxCenterY: MAX_CENTER_Y },
+): Candidate[] {
   const img = workImage(rgba, width, height);
   const { luma: L, w, h } = img;
 
@@ -330,7 +377,7 @@ export function artWindowCandidates(rgba: Uint8Array | Uint8ClampedArray, width:
   for (const top of tops) {
     for (const bottom of bottoms) {
       const bh = bottom - top;
-      if (bh < h * 0.2 || bh > h * MAX_HEIGHT) continue;
+      if (bh < h * 0.2 || bh > h * limits.maxHeight) continue;
       for (const left of lefts) {
         for (const right of rights) {
           const bw = right - left;
@@ -344,7 +391,7 @@ export function artWindowCandidates(rgba: Uint8Array | Uint8ClampedArray, width:
           const mean = (sides[0]! + sides[1]! + sides[2]! + sides[3]!) / 4;
           // 最弱的一条边也得站得住，不然是三条真边配一条凑数的
           const score = Math.min(mean, Math.min(...sides) * 1.4);
-          if (score < MIN_SCORE || (top + bottom) / 2 > h * MAX_CENTER_Y) continue;
+          if (score < MIN_SCORE || (top + bottom) / 2 > h * limits.maxCenterY) continue;
           candidates.push({
             x: left / w,
             y: top / h,
@@ -393,6 +440,7 @@ function pickWindow(candidates: Candidate[]): (Box & { score: number }) | null {
     if (next) best = next;
     outer = next;
   }
+  if (best && best.x < FULL_WIDTH_MARGIN && 1 - best.x - best.w < FULL_WIDTH_MARGIN && best.h > FULL_WIDTH_MAX_HEIGHT) return null;
   return best ? { x: best.x, y: best.y, w: best.w, h: best.h, score: best.score } : null;
 }
 

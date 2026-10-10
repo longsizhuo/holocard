@@ -159,7 +159,7 @@ When signed in, the header button shows your avatar and name, and the panel cont
 
 ## Card masks
 
-"Card masks" in the header is a separate tool: upload a finished flat card image to get three foil masks (frame and text, character, effects) and preview the foil for different combinations. See [Card masks](/en/masks/).
+Card masks is a separate tool for trading cards at `/masks`, with no link on the home page: upload a finished flat card image to get six non-overlapping foil masks (border, frame, text, character, effects, background) and preview the foil for different combinations. See [Card masks](/en/masks/).
 
 ## Retention
 

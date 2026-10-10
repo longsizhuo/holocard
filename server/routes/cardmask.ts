@@ -1,7 +1,7 @@
 /**
  * 卡面遮罩的接口（任务本身见 server/pipeline/cardmask.ts）：
  *   POST /api/cardmask                 请求体是卡图字节 → 202 { id }
- *   GET  /api/cardmask/<id>            → { state, error?, width, height, window, files }
+ *   GET  /api/cardmask/<id>            → { state, error?, width, height, window, panel, lines, files }
  *   GET  /api/cardmask/<id>/<名字>.png  遮罩和规范化后的卡图；?download=1 时按附件发
  * 不要登录、不进数据库；地址是随机 UUID，不公开，24 小时后删
  */

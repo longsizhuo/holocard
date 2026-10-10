@@ -116,10 +116,13 @@ The rule-based half of [card masks](/en/masks/), which runs no model:
 
 | File | Responsibility |
 |---|---|
-| `frame.ts` | Finds the art window: long straight edges form candidate rectangles, chosen by edge completeness and the probability that blocks inside are artwork (logistic regression `ART_MODEL`, trained with `cardmask-eval --train`) |
-| `masks.ts` | Builds the frame-and-text, character, effects and text masks from the window, the character probability map and the text probability map |
+| `frame.ts` | Finds the card layout: long straight edges form candidate rectangles, and the art window is chosen by edge completeness and the probability that blocks inside are artwork (logistic regression `ART_MODEL`, trained with `cardmask-eval --train`); for full-art cards without a window, finds the inner panel (inside the border, name bar and bottom bar) |
+| `layout.ts` | Layout prior: assigns detected text lines a role by position (name, HP, text box, bottom bar, text in the artwork) and gives the top of the text box, from which the character fades out on full-art cards |
+| `masks.ts` | Builds six non-overlapping masks (border, frame, text, character, effects, background) and the region overview from the layout, the character probability map and the text probability map |
 
 The page is `masks.html` with `src/masks/main.ts`: upload, polling, and a two-layer LayerSet built from the selected regions for the renderer's preview. See `cardmask-eval` in [Local development](/en/develop/) for evaluation.
+
+Card masks are for trading cards only and kept apart from the main flow (photo → layers → holo card): nothing in `src/segmenter/` or `src/demo/` imports `src/cardmask/`, the page is a separate entry with no link on the home page, and the server shares only the segmentation worker thread and the matting model (the model stays resident in memory and is not loaded twice), with jobs in the same queue. To remove card masks entirely, delete `src/cardmask/`, `src/masks/`, `masks.html`, `server/routes/cardmask.ts`, `server/pipeline/cardmask.ts` and `server/pipeline/textdet.ts`, then remove the route and the periodic cleanup in `server/index.ts`, `cardmaskInWorker` in `jobs.ts`, the `cardmask` message in the worker thread and the `masks` entry in `vite.config.ts`.
 
 ### `src/lab`
 
@@ -145,7 +148,7 @@ The layering service is one Node process that serves the frontend's static files
 | `pipeline/images.ts` | sharp image codecs: normalising originals (orientation, EXIF removal, HEIC decoding), converting layers to WebP, album thumbnails |
 | `pipeline/moderation.ts` | NudeNet nudity detection |
 | `pipeline/eta.ts` | Remaining-time estimate from exponentially averaged per-stage durations |
-| `pipeline/cardmask.ts` | Card mask jobs: normalise the card, find the window, have the worker thread matte the character and detect text, build and write the masks; results live in `.cardmasks/<id>/` and are deleted after 24 hours |
+| `pipeline/cardmask.ts` | Card mask jobs: normalise the card, find the layout (window or panel), have the worker thread matte the character and detect text, build and write the masks; results live in `.cardmasks/<id>/` and are deleted after 24 hours |
 | `pipeline/textdet.ts` | PP-OCRv4 text detection (onnxruntime-node), producing a text probability map only |
 | `render/preview.ts` | Captures share images by opening `/render/<id>` in headless Chromium, keeping the browser warm |
 | `render/previews.ts` | Share-image render queue and retries |

@@ -3,9 +3,10 @@
  *
  * 自己用临时目录起一个服务端，核对：
  *   - 接口：方法不对 405、不是图片 415、不存在的 id / 文件 404；上传 → 202 → 轮询到 done
- *   - 产物：card / frame / character / effects / text 五张 PNG 尺寸一致、遮罩是灰度 + alpha 两个通道；?download=1 按附件发；
+ *   - 产物：card、六张遮罩（border / frame / text / character / effects / background）、labels 尺寸一致；遮罩是灰度 + alpha 两个通道，
+ *     六张互不重叠、每个像素加起来正好 255；labels 是 RGB；masks.json 带版式和每行字的角色；?download=1 按附件发；
  *     放在产物目录的 .cardmasks/<id>/ 下
- *   - 页面：/masks 发 masks.html，?lang=en 时标题是英文；浏览器里上传一张图 → 出预览卡片和四张遮罩，
+ *   - 页面：/masks 发 masks.html，?lang=en 时标题是英文；浏览器里上传一张图 → 出预览卡片、六张遮罩和分区总览，
  *     勾选「主角」后预览重新渲染，全程没有页面报错
  *
  * 用法（要 Node 22）：先 pnpm build && pnpm build:server，再
@@ -80,7 +81,11 @@ for (let i = 0; ; i++) {
   await sleep(1000);
 }
 assert.ok(job.width > 0 && job.height > 0);
-assert.deepEqual(Object.keys(job.files).sort(), ['card', 'character', 'effects', 'frame', 'text']);
+assert.deepEqual(Object.keys(job.files).sort(), ['background', 'border', 'card', 'character', 'effects', 'frame', 'labels', 'text']);
+assert.ok('panel' in job && Array.isArray(job.lines), '带版式和每行字');
+for (const line of job.lines) assert.ok(['name', 'hp', 'body', 'footer', 'art'].includes(line.role), `字的角色 ${line.role}`);
+const MASKS = ['border', 'frame', 'text', 'character', 'effects', 'background'];
+const sum = new Uint16Array(job.width * job.height);
 for (const [name, url] of Object.entries(job.files)) {
   const res = await fetch(`${BASE}${url}`);
   assert.equal(res.status, 200, name);
@@ -89,8 +94,14 @@ for (const [name, url] of Object.entries(job.files)) {
   const meta = await sharp(Buffer.from(await res.arrayBuffer())).metadata();
   assert.equal(meta.width, job.width, `${name} 宽`);
   assert.equal(meta.height, job.height, `${name} 高`);
-  if (name !== 'card') assert.equal(meta.channels, 2, `${name} 是灰度 + alpha`);
+  if (MASKS.includes(name)) {
+    assert.equal(meta.channels, 2, `${name} 是灰度 + alpha`);
+    const { data } = await sharp(Buffer.from(await (await fetch(`${BASE}${url}`)).arrayBuffer())).extractChannel(0).raw().toBuffer({ resolveWithObject: true });
+    for (let i = 0; i < sum.length; i++) sum[i] += data[i];
+  }
+  if (name === 'labels') assert.equal(meta.channels, 3, 'labels 是 RGB');
 }
+assert.ok(sum.every((v) => v === 255), '六张遮罩互不重叠，每个像素加起来正好 255');
 assert.ok(existsSync(join(outDir, '.cardmasks', id, 'masks.json')), '结果放在 .cardmasks/<id>/');
 const download = await fetch(`${BASE}/api/cardmask/${id}/frame.png?download=1`);
 assert.match(download.headers.get('content-disposition') ?? '', /attachment; filename="holocard-[0-9a-f]{8}-frame\.png"/);
@@ -110,7 +121,7 @@ page.on('pageerror', (e) => errors.push(String(e)));
 await page.goto(`${BASE}/masks`);
 await page.setInputFiles('#masks-file', join(ROOT, 'scripts', 'fixtures', 'og-test.jpg'));
 await page.waitForSelector('#masks-result:not([hidden]) .hc', { timeout: 300_000 });
-assert.equal(await page.locator('#masks-grid figure').count(), 4, '四张遮罩');
+assert.equal(await page.locator('#masks-grid figure').count(), 7, '六张遮罩和分区总览');
 await page.check('input[name="region"][value="character"]');
 await sleep(500);
 assert.ok(await page.locator('#masks-card .hc').isVisible(), '预览卡片还在');
