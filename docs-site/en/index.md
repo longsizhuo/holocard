@@ -79,7 +79,7 @@ The panel next to the card adjusts the current card:
 | One row per layer: drop-down | Foil type of that layer | See the foil table above |
 | One row per layer: slider ("Foil strength for this layer") | Foil strength; disabled for matte layers | 0–1 |
 | "Parallax" switch | Turns parallax on or off | On / off |
-| "Depth and halo" → "Parallax" | Parallax amplitude, as a fraction of card width | 0–16%, default 10% |
+| "Depth and halo" → "Parallax" | Parallax amplitude, as a fraction of card width | 0–16%, default 2% |
 | "Depth and halo" → "Halo intensity" | Card-wide halo strength; 0 turns it off | 0–1, default 0.35 |
 | "Depth and halo" → "Angle sharpness" | Tilt range in which the halo appears; higher is narrower | 10–400, default 120 |
 | "Depth and halo" → "Current halo" | Read-only; how bright the halo is right now | — |
