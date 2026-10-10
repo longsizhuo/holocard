@@ -37,3 +37,6 @@ packages/player/LICENSE
 
 # VitePress 的缓存（docs-site/，产物在 dist/docs）
 docs-site/.vitepress/cache/
+
+# 卡面遮罩评测集（scripts/cardmask-fetch.mjs 下载，卡图版权归各家，不进仓库）和评测结果
+.cardmask/

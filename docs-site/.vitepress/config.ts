@@ -17,7 +17,7 @@ const nav = (prefix: string, t: { guide: string; api: string; player: string; de
 /** 侧边栏：使用者看的在前，开发、部署在后（日文版只有前一组） */
 const sidebar = (
   prefix: string,
-  t: { use: string; guide: string; player: string; format: string },
+  t: { use: string; guide: string; player: string; masks: string; format: string },
   dev?: { title: string; local: string; arch: string; pipeline: string; renderer: string; deploy: string },
 ) => [
   {
@@ -26,6 +26,7 @@ const sidebar = (
       { text: t.guide, link: `${prefix}/` },
       { text: 'API', link: `${prefix}/api/` },
       { text: t.player, link: `${prefix}/player/` },
+      { text: t.masks, link: `${prefix}/masks/` },
       { text: t.format, link: `${prefix}/format/` },
     ],
   },
@@ -71,7 +72,7 @@ export default defineConfig({
       description: '用 HTTP 接口把照片做成分层闪卡，再用 @holocard/player 放进你的网页',
       themeConfig: {
         nav: nav('', { guide: '指南', api: 'API', player: '播放器', develop: '开发' }),
-        sidebar: sidebar('', { use: '使用', guide: '介绍与使用', player: '播放器', format: '文件格式' }, { title: '开发与部署', local: '本地开发', arch: '架构与模块', pipeline: '分层流水线', renderer: '渲染器', deploy: '自托管部署' }),
+        sidebar: sidebar('', { use: '使用', guide: '介绍与使用', player: '播放器', masks: '卡面遮罩', format: '文件格式' }, { title: '开发与部署', local: '本地开发', arch: '架构与模块', pipeline: '分层流水线', renderer: '渲染器', deploy: '自托管部署' }),
         outline: { level: [2, 3], label: '本页目录' },
         docFooter: { prev: '上一页', next: '下一页' },
         darkModeSwitchLabel: '外观',
@@ -85,7 +86,7 @@ export default defineConfig({
       description: 'Turn photos into layered holographic cards over HTTP and play them on your page with @holocard/player',
       themeConfig: {
         nav: nav('/en', { guide: 'Guide', api: 'API', player: 'Player', develop: 'Development' }),
-        sidebar: sidebar('/en', { use: 'Using HoloCard', guide: 'Guide', player: 'Player', format: 'File format' }, { title: 'Development', local: 'Local development', arch: 'Architecture', pipeline: 'Layering pipeline', renderer: 'Renderer', deploy: 'Self-hosting' }),
+        sidebar: sidebar('/en', { use: 'Using HoloCard', guide: 'Guide', player: 'Player', masks: 'Card masks', format: 'File format' }, { title: 'Development', local: 'Local development', arch: 'Architecture', pipeline: 'Layering pipeline', renderer: 'Renderer', deploy: 'Self-hosting' }),
       },
     },
     ja: {
@@ -94,7 +95,7 @@ export default defineConfig({
       description: 'HTTP で写真をレイヤーカードにして、@holocard/player でページに載せる',
       themeConfig: {
         nav: nav('/ja', { guide: 'ガイド', api: 'API', player: 'プレーヤー' }),
-        sidebar: sidebar('/ja', { use: '使い方', guide: 'ガイド', player: 'プレーヤー', format: 'ファイル形式' }),
+        sidebar: sidebar('/ja', { use: '使い方', guide: 'ガイド', player: 'プレーヤー', masks: 'カードマスク', format: 'ファイル形式' }),
         outline: { level: [2, 3], label: '目次' },
         docFooter: { prev: '前へ', next: '次へ' },
       },

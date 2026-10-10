@@ -33,13 +33,13 @@ The structure mirrors how real holographic cards are printed: the base is foil, 
 import { HoloCard } from './renderer/card';
 import { loadLayerSet } from './format/io';
 
-const card = new HoloCard(document.querySelector('#card')!, { amplitude: 0.1 });
+const card = new HoloCard(document.querySelector('#card')!, { amplitude: 0.02 });
 card.setLayerSet(await loadLayerSet('/api/layers/<id>'));
 ```
 
 | Option / method | Description |
 |---|---|
-| `amplitude` | Parallax amplitude: the maximum offset between the nearest and farthest layers as a fraction of card width, default 0.1; 0 disables parallax. Author configs are capped at 0.16 (`PARALLAX_MAX`) |
+| `amplitude` | Parallax amplitude: the maximum offset between the nearest and farthest layers as a fraction of card width, default 0.02; 0 disables parallax. Author configs are capped at 0.16 (`PARALLAX_MAX`) |
 | `tiltScale` | Tilt multiplier, default 1 (maximum rotation about 14.3°) |
 | `setLayerSet(set)` | Mounts or replaces a set of layers. Checks that layer and image counts match before tearing down the old card |
 | `setLayerFoil(index, foil)` / `setHalo(halo)` / `setOptions(patch)` | Change foil, halo or amplitude at runtime without rebuilding the DOM |

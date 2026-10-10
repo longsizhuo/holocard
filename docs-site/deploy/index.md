@@ -100,6 +100,7 @@ PLAYWRIGHT_BROWSERS_PATH=/opt/holocard/browsers pnpm exec playwright-core instal
 | Depth Anything V2 Small（q8） | 深度估计 | `onnx-community/depth-anything-v2-small/` 下的 `config.json`、`preprocessor_config.json`、`onnx/model_quantized.onnx` | 必需 |
 | BiRefNet_lite（fp32） | 抠主体 | `onnx-community/BiRefNet_lite-ONNX/` 下的 `config.json`、`onnx/model.onnx` | 可选。不放时只按深度分层 |
 | NudeNet v3.4 `320n` | 裸露识别 | `nudenet/320n.onnx` | 网页可选；启用对外接口时必需，见[内容审核](#内容审核) |
+| PaddleOCR PP-OCRv4 文字检测（RapidOCR 转换的 ONNX，Apache-2.0） | [卡面遮罩](/masks/)的文字 | `RapidOCR/ch_PP-OCRv4_det_infer.onnx` | 可选。卡面遮罩需要它和 BiRefNet，缺一个时 `/api/cardmask` 返回 `cardmask_unavailable` |
 
 以下命令中 `M` 为模型目录：
 
@@ -128,6 +129,12 @@ mkdir -p $M/nudenet
 gh release download v3.4-weights -R notAI-tech/NudeNet -p 320n.onnx -D $M/nudenet
 sha256sum $M/nudenet/320n.onnx
 # c15d8273adad2d0a92f014cc69ab2d6c311a06777a55545f2c4eb46f51911f0f，12150158 字节
+
+# 卡面遮罩的文字检测（可选，4.7MB）
+mkdir -p $M/RapidOCR
+curl -sL https://huggingface.co/SWHL/RapidOCR/resolve/main/PP-OCRv4/ch_PP-OCRv4_det_infer.onnx -o $M/RapidOCR/ch_PP-OCRv4_det_infer.onnx
+sha256sum $M/RapidOCR/ch_PP-OCRv4_det_infer.onnx
+# d2a7720d45a54257208b1e13e36a8479894cb74155a5efe29462512d42f49da9，4745517 字节
 ```
 
 抠主体模型可以通过 `HOLOCARD_MATTE_MODEL`、`HOLOCARD_MATTE_SIZE`、`HOLOCARD_MATTE_DTYPE` 更换。权重文件名由精度决定：`fp32` 读 `onnx/model.onnx`，`fp16` 读 `onnx/model_fp16.onnx`，`q8` 读 `onnx/model_quantized.onnx`。
