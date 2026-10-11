@@ -57,7 +57,7 @@ interface Entry {
   mask?: string;
   art?: string;
   /** dev 是调参用的，holdout 是留出来检验的（见 cardmask-fetch.mjs 的 --split） */
-  split?: 'dev' | 'holdout';
+  split?: 'dev' | 'holdout' | 'extra';
   rarity?: string;
 }
 
@@ -461,7 +461,10 @@ const RECIPES: Record<string, MaskClass[][]> = {
   cosmos: [['background'], ['background', 'effects']],
   reverse: [['frame', 'text'], ['border', 'frame', 'text']],
   sunpillar: ([['background'], ['frame', 'background'], ['border', 'frame', 'background']] as MaskClass[][]).flatMap((r) => [r, [...r, 'character', 'effects']]),
-  swsecret: [['frame', 'background', 'effects'], ['border', 'frame', 'background', 'effects']],
+  // 彩虹稀有、金卡整张都闪，主角闪不闪看卡（彩虹皮卡丘 VMAX 主角也闪）
+  swsecret: ([['frame', 'background', 'effects'], ['border', 'frame', 'background', 'effects']] as MaskClass[][]).flatMap((r) => [r, [...r, 'character']]),
+  // Amazing Rare：原作者归在 swsecret 下，但只有画框里的彩色漩涡闪，卡框不闪
+  amazing: [['background'], ['background', 'effects']],
   radiantholo: [['frame', 'text', 'character', 'effects'], ['border', 'frame', 'text', 'character', 'effects']],
 };
 
@@ -523,7 +526,8 @@ if (argv.includes('--masks')) {
       await matteOf(entry, cardFile, image.width, image.height, region),
       await textOf(entry, image),
     );
-    const recipes = RECIPES[entry.style!];
+    const kind = entry.rarity === 'Amazing Rare' ? 'amazing' : entry.style!;
+    const recipes = RECIPES[kind];
     if (!recipes) continue;
     // 蚀刻类（etched）的官方遮罩是一层细密纹理，逐像素切黑白全是噪点。先模糊到看覆盖范围，有纹理的整片算闪
     const { data: blurred } = await sharp(join(DATA, entry.mask!))
@@ -544,7 +548,7 @@ if (argv.includes('--masks')) {
     const row = {
       id: entry.id,
       split: entry.split ?? 'dev',
-      style: entry.style,
+      style: kind,
       layout: layout.window ? 'window' : layout.panel ? 'panel' : 'none',
       recipe: scored[0]!.recipe.join('+'),
       foilIou: Number(scored[0]!.iou.toFixed(3)),

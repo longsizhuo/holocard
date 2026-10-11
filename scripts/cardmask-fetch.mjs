@@ -8,9 +8,10 @@
  *   mtg      Scryfall：全卡 png 和单独的画（art_crop），画在全卡里的位置就是画框
  *   ygo      YGOPRODeck：全卡和裁好的画（image_url_cropped），同上
  *
- * 用法：node scripts/cardmask-fetch.mjs [--per-source 20] [--split dev|holdout]
+ * 用法：node scripts/cardmask-fetch.mjs [--per-source 20] [--split dev|holdout|extra]
  *   --split holdout  另下一批没用来调参数的卡（宝可梦取卡单后面的、游戏王换一段、万智牌照旧随机），
  *                    评测时单独报分，检查规则是不是只适合调参的那批
+ *   --split extra    只补宝可梦：卡单里前两批没下的、有官方遮罩的全下（不限张数），也不参与调参
  * 已经下过的文件跳过，可以反复跑。写 .cardmask/data/index.json，评测脚本（cardmask-eval.ts）读它
  */
 
@@ -24,6 +25,7 @@ const argv = process.argv.slice(2);
 const PER_SOURCE = Number(argv[argv.indexOf('--per-source') + 1] || 20);
 const SPLIT = argv.includes('--split') ? argv[argv.indexOf('--split') + 1] : 'dev';
 const HOLDOUT = SPLIT === 'holdout';
+const EXTRA = SPLIT === 'extra';
 const UA = 'HoloCard-cardmask-eval/0.1 (+https://github.com/longsizhuo/holocard)';
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
@@ -69,11 +71,11 @@ const index = [];
   const cards = await getJson('https://raw.githubusercontent.com/simeydotme/pokemon-cards-css/main/public/data/cards.json');
   let taken = 0;
   for (const card of cards) {
-    if (taken >= PER_SOURCE) break;
+    if (!EXTRA && taken >= PER_SOURCE) break;
     // 闪图（rare shiny）、训练家画廊（tg/gg）、编号带 sv 的走别的遮罩规则
     if (/shiny/i.test(card.rarity) || /(tg|gg)/i.test(card.set) || /^sv/i.test(card.number)) continue;
     // 留出集跳过调参用过的卡
-    if (HOLDOUT && existing.has(`pokemon-${card.id}`)) continue;
+    if ((HOLDOUT || EXTRA) && existing.has(`pokemon-${card.id}`)) continue;
     const { url, style } = pokemonMaskUrl(card);
     const id = `pokemon-${card.id}`;
     const cardFile = join(DATA, `${id}-card.png`);
@@ -87,7 +89,7 @@ const index = [];
 }
 
 // ---------- 万智牌 ----------
-{
+if (!EXTRA) {
   // 几种常见的边框都要有：老框、现代框、新框
   const queries = ['frame:1997 is:hires', 'frame:2003 is:hires', 'frame:2015 is:hires -is:fullart -is:borderless'];
   let taken = 0;
@@ -108,7 +110,7 @@ const index = [];
 }
 
 // ---------- 游戏王 ----------
-{
+if (!EXTRA) {
   const types = ['Normal Monster', 'Effect Monster', 'Spell Card', 'Trap Card', 'Fusion Monster', 'Synchro Monster'];
   let taken = 0;
   for (const type of types) {
