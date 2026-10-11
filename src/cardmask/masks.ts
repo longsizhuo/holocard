@@ -6,7 +6,7 @@
  *   effects     特效：贴着主角的火焰、光弹这类又亮又艳的东西，加上主角轮廓内侧一圈（头发、身体的边）
  *   character   主角：抠图模型在画框里（全图卡是内板里，再没有就是整张）抠出来的主体，减去上面两样
  *   border      卡边：最外圈和卡边颜色一样的那一条（宝可梦的黄边、银边）
- *   frame       框架：画框（或内板）以外、卡边以内的卡面：名字栏、说明区、底栏
+ *   frame       框架：画框（或内板）以外、卡边以内的卡面：名字栏、说明区、底栏。都没有的全图卡是压在画上的底板（textPlates）
  *   background  背景：剩下的，就是画里主角、特效以外的部分
  *
  * 重叠的地方按 text > effects > character > border > frame 的顺序归前面的。另出一张 labels：每个像素归哪一类（取值最大的那张），
@@ -20,7 +20,7 @@
  * 输入输出都是卡图原尺寸，取值 0..255
  */
 
-import type { Layout } from './frame';
+import { textPlates, type Layout } from './frame';
 import { bodyTop, textLines, type TextLine } from './layout';
 
 export interface Plane {
@@ -213,10 +213,18 @@ export function cardMasks(
   for (let i = 0; i < n; i++) textMask[i] = (textDist[i] ?? Infinity) <= textPad ? 255 : 0;
   const lines = textLines(textMask, width, height, layout);
 
-  // 卡边，和画框（内板）以外的框架。都没找到的卡（全图卡）只有卡边，其余都算画
+  // 卡边，和画框（内板）以外的框架。都没找到的卡（全图卡），框架是压在画上的底板（名字栏、说明框），其余都算画
   const border = cardBorder(rgba, width, height);
   const frameHit = new Uint8Array(n);
-  if (window || panel) for (let i = 0; i < n; i++) frameHit[i] = inRegion(i) ? 0 : 1;
+  if (window || panel) {
+    for (let i = 0; i < n; i++) frameHit[i] = inRegion(i) ? 0 : 1;
+  } else {
+    for (const p of textPlates(rgba, width, height, lines)) {
+      const x0 = Math.round(p.x * width);
+      const x1 = Math.round((p.x + p.w) * width);
+      for (let y = Math.round(p.y * height); y < Math.round((p.y + p.h) * height); y++) frameHit.fill(1, y * width + x0, y * width + x1);
+    }
+  }
 
   // 主角：抠图的 alpha，只认画里的（抠图模型偶尔把画框外的标志也当主体）；全图卡上到招式说明区淡出
   const top = window ? null : bodyTop(lines);

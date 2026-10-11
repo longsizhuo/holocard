@@ -116,7 +116,7 @@ The rule-based half of [card masks](/en/masks/), which runs no model:
 
 | File | Responsibility |
 |---|---|
-| `frame.ts` | Finds the card layout: long straight edges form candidate rectangles, and the art window is chosen by edge completeness and the probability that blocks inside are artwork (logistic regression `ART_MODEL`, trained with `cardmask-eval --train`); for full-art cards without a window, finds the inner panel (inside the border, name bar and bottom bar) |
+| `frame.ts` | Finds the card layout: long straight edges form candidate rectangles, and the art window is chosen by edge completeness and the probability that blocks inside are artwork (logistic regression `ART_MODEL`, trained with `cardmask-eval --train`); for full-art cards without a window, finds the inner panel (inside the border, name bar and bottom bar); with neither, finds the plates printed over the artwork (name bar, text box), which go into the frame |
 | `layout.ts` | Layout prior: assigns detected text lines a role by position (name, HP, text box, bottom bar, text in the artwork) and gives the top of the text box, from which the character fades out on full-art cards |
 | `masks.ts` | Builds six non-overlapping masks (border, frame, text, character, effects, background) and the region overview from the layout, the character probability map and the text probability map |
 
