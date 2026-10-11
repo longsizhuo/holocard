@@ -27,7 +27,7 @@ import { ensureTextures } from './textures';
 export interface HoloCardOptions {
   /**
    * 视差振幅：最近层和最远层之间最大的相对位移，占卡片宽度的比例。
-   * 0.1 表示卡片转到头时，主体和背景错开 10% 卡宽（各朝相反方向挪一半，见 setLayerSet）。
+   * 0.02 表示卡片转到头时，主体和背景错开 2% 卡宽（各朝相反方向挪一半，见 setLayerSet）。
    * 0 即关闭视差，卡面完全平。
    */
   amplitude: number;
@@ -36,8 +36,9 @@ export interface HoloCardOptions {
 }
 
 const DEFAULT_OPTIONS: HoloCardOptions = {
-  // 以前是 0.06、而且只有主体在动，用户反馈分层感太弱（issue #3 第 3 条）
-  amplitude: 0.1,
+  // 默认只留一点立体感，接近平的实体卡；要更强的由作者往上调（上限 PARALLAX_MAX）。
+  // 历史：0.06 时只有主体在动，分层感太弱（issue #3 第 3 条），改成各层都动、0.1；2026-10 默认降到 0.02
+  amplitude: 0.02,
   tiltScale: 1,
 };
 

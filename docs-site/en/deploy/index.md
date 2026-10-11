@@ -100,6 +100,7 @@ All inference runs on the server. Weights are stored under `HOLOCARD_MODEL_DIR` 
 | Depth Anything V2 Small (q8) | Depth estimation | `config.json`, `preprocessor_config.json`, `onnx/model_quantized.onnx` under `onnx-community/depth-anything-v2-small/` | Yes |
 | BiRefNet_lite (fp32) | Subject matting | `config.json`, `onnx/model.onnx` under `onnx-community/BiRefNet_lite-ONNX/` | Optional. Without it, layering uses depth only |
 | NudeNet v3.4 `320n` | Nudity detection | `nudenet/320n.onnx` | Optional for the web app; required when the public API is enabled, see [Content moderation](#content-moderation) |
+| PaddleOCR PP-OCRv4 text detection (ONNX converted by RapidOCR, Apache-2.0) | Text in [card masks](/en/masks/) | `RapidOCR/ch_PP-OCRv4_det_infer.onnx` | Optional. Card masks need it and BiRefNet; if either is missing, `/api/cardmask` returns `cardmask_unavailable` |
 
 In the commands below, `M` is the model directory:
 
@@ -128,6 +129,12 @@ mkdir -p $M/nudenet
 gh release download v3.4-weights -R notAI-tech/NudeNet -p 320n.onnx -D $M/nudenet
 sha256sum $M/nudenet/320n.onnx
 # c15d8273adad2d0a92f014cc69ab2d6c311a06777a55545f2c4eb46f51911f0f, 12150158 bytes
+
+# Text detection for card masks (optional, 4.7 MB)
+mkdir -p $M/RapidOCR
+curl -sL https://huggingface.co/SWHL/RapidOCR/resolve/main/PP-OCRv4/ch_PP-OCRv4_det_infer.onnx -o $M/RapidOCR/ch_PP-OCRv4_det_infer.onnx
+sha256sum $M/RapidOCR/ch_PP-OCRv4_det_infer.onnx
+# d2a7720d45a54257208b1e13e36a8479894cb74155a5efe29462512d42f49da9, 4745517 bytes
 ```
 
 The matting model can be changed with `HOLOCARD_MATTE_MODEL`, `HOLOCARD_MATTE_SIZE` and `HOLOCARD_MATTE_DTYPE`. The weight file name depends on the precision: `fp32` reads `onnx/model.onnx`, `fp16` reads `onnx/model_fp16.onnx`, `q8` reads `onnx/model_quantized.onnx`.

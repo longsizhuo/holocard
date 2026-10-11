@@ -144,7 +144,7 @@ The website's renderer and `@holocard/player` share the same rendering code (`sr
 | `layers[].inpainted` | Marks whether occluded areas were filled; not used by the current renderer. Layers that were not filled show holes when shifted far |
 | `effects.halo` | Strength and angle window of the card-wide halo. While adjusting on the website, the card turns to the angle given by `peakAt` to show the effect |
 | `effects.glare` | When `false`, the glare is not shown |
-| `effects.parallax` | Present: both the website and the player follow it (amplitude 0 when `enabled` is `false`). Missing: the website uses the viewer's local "Parallax" preference with a 10% amplitude; the player uses its default amplitude of 0.1 |
+| `effects.parallax` | Present: both the website and the player follow it (amplitude 0 when `enabled` is `false`). Missing: the website uses the viewer's local "Parallax" preference with a 2% amplitude; the player uses its default amplitude of 0.02 |
 | `generator` | Shown in the website's status line when processing finishes; not used for rendering |
 
 ### Author configuration

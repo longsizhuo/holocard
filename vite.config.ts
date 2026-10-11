@@ -25,5 +25,9 @@ export default defineConfig({
   },
   build: {
     target: 'esnext', // WebGPU / 顶层 await 需要
+    rollupOptions: {
+      // 两个页面：首页（卡带、分享页、渲染页都是它）和卡面遮罩页（/masks，见 src/masks/main.ts）
+      input: { main: 'index.html', masks: 'masks.html' },
+    },
   },
 });

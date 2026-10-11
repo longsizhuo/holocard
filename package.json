@@ -15,6 +15,7 @@
     "start:server": "node dist-server/holocard-server.mjs",
     "dev:server": "vite build --config vite.server.config.ts && node --env-file=server/dev.env dist-server/holocard-server.mjs",
     "og": "vite build --config vite.og.config.ts --logLevel error && node .og-cache/bin/og-preview.mjs",
+    "cardmask:eval": "vite build --config vite.cardmask.config.ts --logLevel error && node .cardmask/bin/cardmask-eval.mjs",
     "build:player": "vite build --config vite.player.config.ts && cp LICENSE packages/player/LICENSE",
     "docs:dev": "vitepress dev docs-site"
   },

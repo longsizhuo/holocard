@@ -116,6 +116,8 @@ pnpm og --export gif       # 导出动图：gif / motion / apng，写到 out/exp
 | 性能埋点（`src/demo/perf.ts`、`server/store/perf.ts`） | `node scripts/verify-perf.mjs [--url …] [--browser chromium\|webkit\|firefox]` | `pnpm dev` 与 `pnpm dev:server` |
 | 对外接口 `/v1`（`server/routes/v1.ts`、`server/account/apikeys.ts`） | `HOLOCARD_DB=out/data/holocard.db HOLOCARD_OUT_DIR=out/layers node scripts/verify-api.mjs http://127.0.0.1:8791` | `pnpm dev:server`，且 `.models/` 下有 NudeNet 权重 |
 | 登录、卡片归属与认领、个人中心的 API key（`server/account/auth.ts` 及相关路由） | `pnpm build:server && HOLOCARD_MODEL_DIR=.models node scripts/verify-auth.mjs` | 深度模型权重。脚本自行启动模拟 IH 与临时服务端，不需要开发服务 |
+| 卡面遮罩的接口与页面（`server/pipeline/cardmask.ts`、`server/routes/cardmask.ts`、`masks.html`） | `pnpm build && pnpm build:server && node scripts/verify-cardmask.mjs` | 抠图与文字检测的权重，`HOLOCARD_MODEL_DIR` 指定模型目录（默认 `/srv/holocard-models`）。脚本自行启动临时服务端 |
+| 卡面遮罩的识别质量（`src/cardmask/`） | `node scripts/cardmask-fetch.mjs` 下载评测集，再 `pnpm cardmask:eval [--matte] [--only <前缀>] [--debug]`，改了遮罩规则再跑 `pnpm cardmask:eval --masks` | 评测集下载到 `.cardmask/data/`（卡图版权归各家，不进仓库）；`--matte` 需要抠图权重，`HOLOCARD_MODEL_DIR` 指定模型目录 |
 | 页头与个人中心界面（`account-ui.ts`） | `pnpm build && pnpm build:server && node scripts/verify-account.mjs` | 无。脚本以假登录启动临时服务端 |
 | 播放器 `<holo-card>`（`src/player/`、`packages/player/`） | `pnpm build:player && node scripts/verify-player.mjs [截图目录]` | Chromium，见下方说明 |
 | 开包音效（`src/demo/sfx.ts`） | `node scripts/render-sfx.mjs`，试听 `/tmp/sfx/reel.wav` | `pnpm dev` |
@@ -130,6 +132,8 @@ pnpm og --export gif       # 导出动图：gif / motion / apng，写到 out/exp
 - `verify-config`：合法配置原样合并、其余字段不变；层数不符、未知箔面类型、数值越界、试图修改文件名等一律拒收或忽略。
 - `verify-perf`：页面静置后上报一条埋点、服务端收到；畸形数据被拒。
 - `verify-api`：鉴权、私有性（接口卡在 `/api`、分享、导出、删除路由上视同不存在）、交付与缓存头、配额、吊销、处理途中删除、网页任务优先、畸形请求行与超限请求的处理。每张卡实际分层，耗时 30–60 秒。
+- `verify-cardmask`：卡面遮罩接口的错误码（405、415、404）、上传到完成、卡图与六张遮罩和分区总览的尺寸与通道、六张遮罩互不重叠（每个像素相加正好 255）、状态里的版式与文字角色、下载头、结果目录；`/masks` 页面的语言、浏览器中上传后出现预览与六张遮罩和分区总览、切换区域后预览仍正常、页面无报错。
+- `cardmask-eval`：在三类卡上评测画框检测与主角抠图，指标为 IoU。标准答案：宝可梦普通闪卡（swholo、cosmos）的官方箔面遮罩（画框 = 遮罩白色区域的外接框，主角 = 画框内遮罩未覆盖的部分）；万智牌、游戏王以单独的插画在全卡中的位置为画框（多尺度模板匹配，匹配代价过高的不评）。评测集分两半（`cardmask-fetch.mjs --split holdout` 另下一批），调参只用 dev，holdout 单独报分。每张卡输出对照图到 `.cardmask/out/`，汇总写入 `report.json`；`--debug` 另存每张卡的全部候选矩形及特征，用于离线比较挑选规则；`--train` 训练画框检测里小块「是插画」的逻辑回归并打印 `ART_MODEL`；`--masks` 出六张遮罩，按宝可梦各稀有度的组合（几张遮罩相加，见脚本里的 `RECIPES`；同一稀有度有几种组合的取最好的，因为主角、卡边、画中特效闪不闪由卡面设计决定）与官方遮罩比较（官方遮罩先模糊再取覆盖范围，蚀刻纹理不按像素比），按 dev / holdout、稀有度、版式（画框、内板、都没有）分别汇总，写入 `masks-report.json`，对照图为卡图、官方遮罩、组合结果、上色的分区总览；抠图和文字检测的结果缓存在 `.cardmask/out/cache/`；`--model`、`--crops` 用于比较抠图模型，见下文「抠图模型对比」。
 - `verify-account`：页头「文档」链接随界面语言切换；未登录时个人中心的登录入口与本机卡册；登录后申请多个 key、新 key 只显示一次、吊销其中一个。
 - `verify-auth`：登录流程（state cookie、换码、PKCE、一次性授权码、`next` 只认本站路径）；登录状态下的卡片归属；凭口令认领；其他账号无权操作；退出后会话失效；账号名下的卡不过期；个人中心 API key 的申请（每个账号最多 10 个）、吊销、按账号合计的额度与管理员不限额度；正式地址下开启假登录时拒绝启动。
 - `verify-player`：目录地址与 `manifest.json` 地址两种写法均可加载并触发 `load`；地址错误时触发 `error`；宿主页面 CSS 无法影响卡片内部、组件不向宿主注入样式；指针划过时卡片转动。设置 `PLAYER_URL=https://cdn.jsdelivr.net/npm/@holocard/player@<版本>/dist/holocard.js` 可核对已发布到 CDN 的版本。
@@ -188,6 +192,30 @@ node scripts/blind/score.mjs /tmp/exp/pack/key.json "1A 2= 3B 4X ..." --candidat
 
 - 原图与实验目录通常包含用户照片，应放在仓库之外（`/tmp` 等），评审结束后删除，不得提交。
 - `key.json` 不得随对比页一起发出，否则失去双盲性。
+
+### 卡面遮罩：抠图模型对比
+
+卡面遮罩的主角用 BiRefNet_lite 抠图。比较其他抠图模型时，大模型在服务器的 4 核 ARM 上一张约一分钟、峰值七八 GB 内存，因此抠图放到有显卡的机器上运行，评测仍在本机：
+
+```bash
+pnpm cardmask:eval --crops                      # 1. 本机：把每张卡要抠的区域裁到 .cardmask/out/crops/
+python scripts/cardmask-matte.py lite matting   # 2. 显卡机：crops/ → out/<模型>/，依赖 onnxruntime-gpu、numpy、Pillow
+pnpm cardmask:eval --masks --model matting      # 3. 本机：out/<模型>/ 放回 .cardmask/out/remote/<模型>/ 后评测
+```
+
+`cardmask-matte.py` 支持 `lite`、`birefnet`、`hrsod`、`toonout`、`matting`，第一次运行时从 Hugging Face 下载 ONNX 权重（地址见脚本中的 `MODELS`，均为 MIT 许可）。也可将权重放在 `.models/cmp/` 下，由评测脚本直接在本机运行，但速度很慢。
+
+2026 年 10 月的对比结果（宝可梦 40 张卡的 `--masks` 平均 IoU，当时尚未引入版式先验）：
+
+| 模型 | 平均 IoU | 大小 |
+|---|---|---|
+| BiRefNet_lite（线上使用） | 0.686 | 214 MB |
+| BiRefNet-matting | 0.693 | 897 MB |
+| BiRefNet | 0.636 | 928 MB |
+| BiRefNet-HRSOD | 0.603 | 928 MB |
+| ToonOut（动漫微调） | 0.530 | 929 MB |
+
+BiRefNet 与 HRSOD 在全图卡上常把整张卡当作主体；ToonOut 在有画框的卡上前景与背景颠倒；matting 只比 lite 略好，体积是其四倍多，因此线上保留 lite。此外，在缓存结果可用的 23 张卡上，即使每张卡都选到六个模型中最好的一个，平均 IoU 也只从 0.723 提高到 0.758：多数稀有度的组合对主角的抠图结果不敏感，剩余误差主要在其他遮罩上。
 
 ## 常见问题
 

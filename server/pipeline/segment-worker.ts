@@ -23,7 +23,9 @@ import {
 } from '../../src/segmenter/matte';
 import { setCpuThreads } from '../../src/segmenter/runtime';
 import { SERVER_REFINE_OPTIONS } from '../../src/segmenter/refine';
+import sharp from 'sharp';
 import { sharpImages } from './images';
+import { textProbability } from './textdet';
 
 /** 起线程时一次性给的配置 */
 export interface SegmenterConfig {
@@ -36,16 +38,36 @@ export interface SegmenterConfig {
   matteModel: MatteModelConfig;
 }
 
-export interface SegmentRequest {
-  bytes: Uint8Array<ArrayBuffer>;
-  /** 这一张抠不抠主体。除了服务本身能不能抠，还要看这张是不是上次把进程弄崩的那张，由主线程判断 */
-  matte: boolean;
+export type SegmentRequest =
+  | {
+      type: 'segment';
+      bytes: Uint8Array<ArrayBuffer>;
+      /** 这一张抠不抠主体。除了服务本身能不能抠，还要看这张是不是上次把进程弄崩的那张，由主线程判断 */
+      matte: boolean;
+    }
+  | {
+      /** 卡面遮罩（src/cardmask/masks.ts）要的两样模型输出：画框里的主角、整张卡上的文字 */
+      type: 'cardmask';
+      /** 规范化过的卡图（PNG） */
+      bytes: Uint8Array<ArrayBuffer>;
+      /** 在哪抠主角，按卡图宽高归一化。全图卡是整张 */
+      region: { x: number; y: number; w: number; h: number };
+      textModel: string;
+    };
+
+/** 0..1 的概率图 */
+export interface ProbabilityPlane {
+  data: Float32Array;
+  width: number;
+  height: number;
 }
 
 export type SegmentReply =
   | { type: 'ready' }
   | { type: 'stage'; stage: string }
   | { type: 'done'; manifest: LayerManifest; images: Uint8Array[] }
+  /** 卡面遮罩：matte 是 region 里的主角（认不出主体时为 null），text 是整张卡的文字概率 */
+  | { type: 'cardmask'; matte: ProbabilityPlane | null; text: ProbabilityPlane }
   | { type: 'error'; message: string };
 
 const port = parentPort;
@@ -69,9 +91,35 @@ port.postMessage({ type: 'ready' } satisfies SegmentReply);
 void loadDepthModel().catch(() => undefined);
 if (config.matte) void loadMatteModel().catch(() => undefined);
 
+/** 卡面遮罩：抠主角、找文字。规则部分在主线程做（server/pipeline/cardmask.ts） */
+async function cardmask(request: Extract<SegmentRequest, { type: 'cardmask' }>): Promise<void> {
+  const { data, info } = await sharp(request.bytes).ensureAlpha().raw().toBuffer({ resolveWithObject: true });
+  const { x, y, w, h } = request.region;
+  const left = Math.round(x * info.width);
+  const top = Math.round(y * info.height);
+  const crop = await sharp(request.bytes)
+    .extract({ left, top, width: Math.max(1, Math.round(w * info.width)), height: Math.max(1, Math.round(h * info.height)) })
+    .png()
+    .toBuffer();
+  const matte = await estimateMatte(new Blob([new Uint8Array(crop)], { type: 'image/png' })).catch((error: unknown) => {
+    // 认不出主体（几乎全是前景或全是背景）：主角那张留空，边框、文字照出
+    console.warn(`[cardmask] 认不出主角：${error instanceof Error ? error.message : String(error)}`);
+    return null;
+  });
+  const text = await textProbability(data, info.width, info.height, request.textModel);
+  port!.postMessage(
+    { type: 'cardmask', matte, text } satisfies SegmentReply,
+    [text.data.buffer as ArrayBuffer, ...(matte ? [matte.data.buffer as ArrayBuffer] : [])],
+  );
+}
+
 port.on('message', (request: SegmentRequest) => {
   void (async () => {
     try {
+      if (request.type === 'cardmask') {
+        await cardmask(request);
+        return;
+      }
       const set = await segmentToLayerSet(new Blob([request.bytes]), {
         subjectModel: config.matteModel.id,
         extract: { images: sharpImages, refine: SERVER_REFINE_OPTIONS },

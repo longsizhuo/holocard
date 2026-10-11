@@ -33,13 +33,13 @@
 import { HoloCard } from './renderer/card';
 import { loadLayerSet } from './format/io';
 
-const card = new HoloCard(document.querySelector('#card')!, { amplitude: 0.1 });
+const card = new HoloCard(document.querySelector('#card')!, { amplitude: 0.02 });
 card.setLayerSet(await loadLayerSet('/api/layers/<id>'));
 ```
 
 | 选项 / 方法 | 说明 |
 |---|---|
-| `amplitude` | 视差振幅：最近层与最远层之间的最大相对位移占卡宽的比例，默认 0.1；0 关闭视差。作者配置的上限为 0.16（`PARALLAX_MAX`） |
+| `amplitude` | 视差振幅：最近层与最远层之间的最大相对位移占卡宽的比例，默认 0.02；0 关闭视差。作者配置的上限为 0.16（`PARALLAX_MAX`） |
 | `tiltScale` | 倾斜幅度倍率，默认 1（最大转角约 14.3°） |
 | `setLayerSet(set)` | 挂载或替换一组层。先校验层数与图片数一致，再拆除旧卡 |
 | `setLayerFoil(index, foil)` / `setHalo(halo)` / `setOptions(patch)` | 运行时修改箔面、炫光、振幅，立即生效，不重建 DOM |
