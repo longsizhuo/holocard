@@ -444,6 +444,146 @@ function pickWindow(candidates: Candidate[]): (Box & { score: number }) | null {
   return best ? { x: best.x, y: best.y, w: best.w, h: best.h, score: best.score } : null;
 }
 
+/** 底板（见 textPlates）：边的支持率、找边时比字左右多看出去多少（占卡宽）、最远往上下找多远（占卡高） */
+const PLATE_SUPPORT = 0.7;
+const PLATE_MARGIN = 0.03;
+const PLATE_REACH = 0.3;
+/** 底板至少占卡宽的这个比例。更窄的（攻防框、费用）不要：画里凑巧围成的小矩形太多 */
+const PLATE_MIN_WIDTH = 0.6;
+/**
+ * 底板内部（去掉字）的平均横向亮度差（工作尺寸，0..255）不超过这个，且不超过外面一圈的 PLATE_MAX_RATIO 倍。
+ * 说明框压在画上，内部比外面平；字直接压在画上的宝可梦插画稀有卡，画里凑出来的矩形内外一样花
+ */
+const PLATE_MAX_GRAD = 7.5;
+const PLATE_MAX_RATIO = 0.9;
+/**
+ * 至少这么宽（占卡宽）的一行字才拿来找底板。画里的小白花这类被当成一行字的小块（约 0.03），
+ * 会从两行字之间的一条画里找出「底板」来；最短的一个词（万智牌类型栏的 Sorcery）约 0.12
+ */
+const PLATE_MIN_SEED = 0.06;
+/** 量「外面一圈」的宽度（工作像素） */
+const PLATE_RING = 8;
+
+/**
+ * 全图卡上压在画上的底板：万智牌无边框卡的名字栏、类型栏、说明框，宝可梦的规则框。
+ * 没有画框也没有内板时，框架就是这些底板。
+ *
+ * 从每行字往上下找最近的一条长横边（只看字的左右再多出去一点的范围，跳过和别的字相交的行），
+ * 再在这两条边之间往左右找长竖边，四条都找到就是一个候选。同一个说明框里的每行字会找到同一个框，取并集即可。
+ * 候选里只留够宽、内部平、比外面一圈平的（见 PLATE_MAX_GRAD）。
+ * ponytail: 阈值是拿 24 张全图卡调的，另 27 张留出检验过（检验时找出一处假底板，加了 PLATE_MIN_SEED）。纹理底的说明框（羊皮纸）、
+ * 压在很花的画上的半透明说明框会漏掉；要更全，就拿底板的标注训练
+ */
+export function textPlates(rgba: Uint8Array | Uint8ClampedArray, width: number, height: number, lines: Box[]): Box[] {
+  const { luma: L, w, h } = workImage(rgba, width, height);
+  const hEdge = new Uint8Array(w * h);
+  const vEdge = new Uint8Array(w * h);
+  const grad = new Float32Array(w * h);
+  for (let y = 0; y < h; y++) {
+    for (let x = 0; x < w; x++) {
+      const p = y * w + x;
+      // 边线有抗锯齿过渡，横边上下、竖边左右各放宽一个像素
+      if (y > 0 && Math.abs((L[p] ?? 0) - (L[p - w] ?? 0)) > EDGE) {
+        for (const q of [p - w, p, p + w]) if (q < w * h) hEdge[q] = 1;
+      }
+      if (x > 0) {
+        const d = Math.abs((L[p] ?? 0) - (L[p - 1] ?? 0));
+        grad[p] = d;
+        if (d > EDGE) for (const q of [p - 1, p, p + 1]) if (q < (y + 1) * w) vEdge[q] = 1;
+      }
+    }
+  }
+  /** 字占的地方：找边时跳过（外扩 2），量平坦度时去掉（外扩 1） */
+  const textMask = (pad: number): Uint8Array => {
+    const m = new Uint8Array(w * h);
+    for (const l of lines) {
+      const x0 = Math.max(0, Math.floor(l.x * w) - pad);
+      const x1 = Math.min(w, Math.floor((l.x + l.w) * w) + pad + 1);
+      const y1 = Math.min(h, Math.floor((l.y + l.h) * h) + pad + 1);
+      for (let y = Math.max(0, Math.floor(l.y * h) - pad); y < y1; y++) m.fill(1, y * w + x0, y * w + x1);
+    }
+    return m;
+  };
+  const skip = textMask(2);
+  const text = textMask(1);
+
+  const found = new Map<string, Box>();
+  for (const l of lines) {
+    if (l.w < PLATE_MIN_SEED) continue;
+    const x0 = Math.max(0, Math.floor((l.x - PLATE_MARGIN) * w));
+    const x1 = Math.min(w, Math.floor((l.x + l.w + PLATE_MARGIN) * w));
+    const rowOk = (y: number): boolean => {
+      let hits = 0;
+      for (let x = x0; x < x1; x++) {
+        if (skip[y * w + x]) return false;
+        hits += hEdge[y * w + x] ?? 0;
+      }
+      return hits >= PLATE_SUPPORT * (x1 - x0);
+    };
+    const ly0 = Math.floor(l.y * h);
+    const ly1 = Math.floor((l.y + l.h) * h);
+    const reach = Math.floor(PLATE_REACH * h);
+    let top = -1;
+    for (let y = ly0 - 1; y > Math.max(0, ly0 - reach); y--) {
+      if (rowOk(y)) {
+        top = y;
+        break;
+      }
+    }
+    let bottom = -1;
+    for (let y = ly1 + 1; y < Math.min(h, ly1 + reach); y++) {
+      if (rowOk(y)) {
+        bottom = y;
+        break;
+      }
+    }
+    if (top < 0 || bottom < 0) continue;
+    const colOk = (x: number): boolean => {
+      let hits = 0;
+      for (let y = top; y < bottom; y++) hits += vEdge[y * w + x] ?? 0;
+      return hits >= PLATE_SUPPORT * (bottom - top);
+    };
+    let left = -1;
+    for (let x = Math.floor(l.x * w) - 1; x > 0; x--) {
+      if (colOk(x)) {
+        left = x;
+        break;
+      }
+    }
+    let right = -1;
+    for (let x = Math.floor((l.x + l.w) * w) + 1; x < w; x++) {
+      if (colOk(x)) {
+        right = x;
+        break;
+      }
+    }
+    if (left < 0 || right < 0 || right - left < PLATE_MIN_WIDTH * w) continue;
+    const key = `${left},${top},${right},${bottom}`;
+    if (found.has(key)) continue;
+
+    // 平坦度：框里（离边两个像素以内的不算）和框外一圈，都去掉字
+    let inSum = 0, inN = 0, outSum = 0, outN = 0;
+    for (let y = Math.max(0, top - PLATE_RING); y < Math.min(h, bottom + PLATE_RING); y++) {
+      for (let x = Math.max(1, left - PLATE_RING); x < Math.min(w, right + PLATE_RING); x++) {
+        const p = y * w + x;
+        if (text[p]) continue;
+        if (y >= top + 2 && y < bottom - 1 && x >= left + 2 && x < right - 1) {
+          inSum += grad[p] ?? 0;
+          inN++;
+        } else if (y < top - 2 || y > bottom + 2 || x < left - 2 || x > right + 2) {
+          outSum += grad[p] ?? 0;
+          outN++;
+        }
+      }
+    }
+    if (inN < 20 || outN < 20) continue;
+    const inner = inSum / inN;
+    if (inner > PLATE_MAX_GRAD || inner > PLATE_MAX_RATIO * (outSum / outN)) continue;
+    found.set(key, { x: left / w, y: top / h, w: (right - left) / w, h: (bottom - top) / h });
+  }
+  return [...found.values()];
+}
+
 /** inner 是否落在 outer 里（容差约一个工作像素） */
 function contains(outer: Box, inner: Box): boolean {
   const tol = 0.004;
