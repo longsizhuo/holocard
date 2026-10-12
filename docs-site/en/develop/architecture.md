@@ -86,7 +86,13 @@ The site frontend, i.e. holocard.longsizhuo.com.
 
 | File | Responsibility |
 |---|---|
-| `main.ts` | Page entry: upload, layering, tuning panel, share, delete, export, language switch, and setup for the three routes |
+| `main.ts` | Page entry: creates the deck, wires the panel parts to the current card, switches language, and loads the first screen for the three routes |
+| `tuning.ts` | The page's single HoloCard and the tuning panel (parallax, halo, per-layer foils); saves the owner's changes to the server and tracks which card the panel shows |
+| `actions.ts` | Actions on the current card: share, delete, export animation |
+| `upload.ts` | Upload area: shrinks oversized images in the browser, sends them to the server for layering, falls back to the in-browser pipeline when there is no server |
+| `progress.ts` | Progress bar and remaining time while a card is being made |
+| `render-page.ts` | Render page `/render/<id>`: adds the background and copy, waits for images and textures, sets the pose, exposes hooks for server screenshots and frame-by-frame export |
+| `text.ts` | Shared by the modules: element lookup, text rewritten on language change, turning errors into a readable sentence |
 | `route.ts` | Route parsing and share links |
 | `api.ts` | Client of the layering service: submit and poll, delete-token records, share, author config, account and key endpoints. Decides when to fall back to the in-browser pipeline |
 | `deck.ts` | The card strip on the home page: cards made in this visit, a pack shown while uploading, replaced by the new card after opening |

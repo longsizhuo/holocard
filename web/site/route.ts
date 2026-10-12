@@ -30,6 +30,9 @@ export function parseRoute(pathname: string = location.pathname): Route {
   return { mode: 'demo', id: null };
 }
 
+/** 这次打开页面时的路由。做完卡、删卡时地址栏会被换掉，但页面形态始终按打开时的算 */
+export const route = parseRoute();
+
 /**
  * 某张卡片的分享地址。
  * 带上分享人的语言（中文是默认，不带）：链接发出去之后，预览卡片的标题、描述、分享图，

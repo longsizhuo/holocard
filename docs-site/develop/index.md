@@ -107,7 +107,8 @@ pnpm og --export gif       # 导出动图：gif / motion / apng，写到 out/exp
 
 | 修改范围 | 命令 | 前置条件 |
 |---|---|---|
-| 卡带、卡包、面板状态栏、上传区（`deck.ts`、`pack.ts`、`main.ts` 及相关样式） | `node scripts/verify-pack.mjs [--url …] [--out /tmp/verify-pack]` | `HOLOCARD_API=http://127.0.0.1:9 pnpm dev`（脚本在浏览器内拦截全部 `/api`，后端指向不存在的地址可防止误连） |
+| 卡带、卡包、面板状态栏、上传区（`deck.ts`、`pack.ts`、`upload.ts`、`progress.ts` 及相关样式） | `node scripts/verify-pack.mjs [--url …] [--out /tmp/verify-pack]` | `HOLOCARD_API=http://127.0.0.1:9 pnpm dev`（脚本在浏览器内拦截全部 `/api`，后端指向不存在的地址可防止误连） |
+| 调参面板、分享、删除、渲染页、页面入口（`tuning.ts`、`actions.ts`、`render-page.ts`、`main.ts`） | `node scripts/verify-panel.mjs [--url …]` | 同上 |
 | 开包动效（逐帧检查 `pack-gl.ts`、`deck.ts`） | `node scripts/film-pack.mjs [--url …] [--out /tmp/film-pack]` | 同上；拼接胶片需 ImageMagick |
 | 珠光底（`style.css` 的渐变、`pearl-keyframes.mjs` 的配置） | `node scripts/pearl-keyframes.mjs` 重新生成 `web/site/pearl-drift.css`，再 `node scripts/verify-pearl.mjs [--browser chromium\|webkit]` | `pnpm dev` |
 | 回退到浏览器端分层的判断（`web/site/api.ts`） | `pnpm build && node scripts/verify-fallback.mjs` | 无，脚本自带模拟服务端 |

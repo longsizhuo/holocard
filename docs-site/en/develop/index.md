@@ -107,7 +107,8 @@ Run `pnpm typecheck` first and `pnpm build` before committing. Then run the scri
 
 | Changed | Command | Prerequisites |
 |---|---|---|
-| Card strip, card pack, panel status line, upload area (`deck.ts`, `pack.ts`, `main.ts` and related styles) | `node scripts/verify-pack.mjs [--url …] [--out /tmp/verify-pack]` | `HOLOCARD_API=http://127.0.0.1:9 pnpm dev` (the script intercepts every `/api` request in the browser; pointing the backend at a dead address prevents accidental real calls) |
+| Card strip, card pack, panel status line, upload area (`deck.ts`, `pack.ts`, `upload.ts`, `progress.ts` and related styles) | `node scripts/verify-pack.mjs [--url …] [--out /tmp/verify-pack]` | `HOLOCARD_API=http://127.0.0.1:9 pnpm dev` (the script intercepts every `/api` request in the browser; pointing the backend at a dead address prevents accidental real calls) |
+| Tuning panel, share, delete, render page, page entry (`tuning.ts`, `actions.ts`, `render-page.ts`, `main.ts`) | `node scripts/verify-panel.mjs [--url …]` | Same as above |
 | Pack-opening animation (frame by frame, `pack-gl.ts`, `deck.ts`) | `node scripts/film-pack.mjs [--url …] [--out /tmp/film-pack]` | Same as above; ImageMagick for the contact sheet |
 | Pearl background (gradients in `style.css`, configuration in `pearl-keyframes.mjs`) | `node scripts/pearl-keyframes.mjs` to regenerate `web/site/pearl-drift.css`, then `node scripts/verify-pearl.mjs [--browser chromium\|webkit]` | `pnpm dev` |
 | When to fall back to in-browser layering (`web/site/api.ts`) | `pnpm build && node scripts/verify-fallback.mjs` | None; the script runs its own fake server |
