@@ -12,6 +12,7 @@
  * 由界面按当前语言翻译（见 src/i18n）。
  */
 
+import type { Account, ApiErrorBody, Claimed, JobCreated, JobStatus, KeyCreated, Me, MyKeys } from '../../src/api';
 import { lang, type MessageKey } from '../../src/i18n';
 import type { CardConfig } from '../../src/format/config';
 
@@ -40,11 +41,7 @@ export class ApiError extends Error {
 
 /** 从错误响应里取出 code 和参数 */
 export async function apiError(res: Response, fallback: string): Promise<ApiError> {
-  const body = (await res.json().catch(() => ({}))) as {
-    error?: string;
-    code?: string;
-    params?: Record<string, string | number>;
-  };
+  const body = (await res.json().catch(() => ({}))) as Partial<ApiErrorBody>;
   return new ApiError(body.error ?? fallback, body.code, body.params);
 }
 
@@ -61,16 +58,6 @@ export interface ServerProgress {
   ratio?: number;
   /** 服务端估计还要多少秒（排队 + 处理），倒计时用；老版本服务端不给 */
   eta?: number;
-}
-
-interface JobStatus {
-  state: 'queued' | 'running' | 'done' | 'error';
-  stage: string | null;
-  position: number;
-  eta?: number;
-  layers?: string;
-  layerCount?: number;
-  error?: string;
 }
 
 const STAGE_KEYS: Record<string, MessageKey> = {
@@ -181,7 +168,7 @@ export async function segmentOnServer(
     throw await apiError(created, `上传失败（HTTP ${created.status}）`);
   }
 
-  const { id, deleteToken } = (await created.json()) as { id: string; deleteToken: string | null };
+  const { id, deleteToken } = (await created.json()) as JobCreated;
   let deadline = Date.now() + TIMEOUT_MS;
   /*
    * 连续失败从什么时候开始算。
@@ -368,12 +355,6 @@ export async function shareCard(id: string): Promise<void> {
  * 登录着做的卡直接归到账号下（服务端不再给口令），换设备登录也能看到、管理；
  * 这台设备上以前做的卡，要用户自己勾选认领进来——公用电脑上留着别人的卡，不能一登录就收走。
  */
-export interface Account {
-  id: string;
-  name: string;
-  avatar: string | null;
-}
-
 /** 这个部署开没开登录、现在是谁 */
 let me: { login: boolean; user: Account | null } = { login: false, user: null };
 /** 账号名下还在的卡，最新的在前 */
@@ -388,7 +369,8 @@ export async function loadMe(timeoutMs = 2000): Promise<void> {
   try {
     const res = await fetch(`${import.meta.env.BASE_URL}api/me`, { signal: AbortSignal.timeout(timeoutMs) });
     if (!res.ok) return;
-    const body = (await res.json()) as { login?: unknown; user?: Account | null; cards?: unknown };
+    // 老版本服务端可能少字段，逐个兜底
+    const body = (await res.json()) as Partial<Me>;
     me = { login: body.login === true, user: body.user ?? null };
     accountCards = Array.isArray(body.cards) ? body.cards.filter((id): id is string => typeof id === 'string') : [];
   } catch {
@@ -424,24 +406,11 @@ export async function claimCards(ids: string[]): Promise<string[]> {
     body: JSON.stringify({ cards }),
   });
   if (!res.ok) throw await apiError(res, `HTTP ${res.status}`);
-  const { claimed } = (await res.json()) as { claimed: string[] };
+  const { claimed } = (await res.json()) as Claimed;
   for (const id of claimed) forgetOwned(id);
   // 顺序以服务端为准（按做好的先后），重新拉一次
   await loadMe();
   return claimed;
-}
-
-/** 个人中心里的对外接口 key（服务端见 handleMyKeys）。key 本身只在申请那一次的响应里有 */
-export interface MyKey {
-  id: string;
-  createdAt: string;
-}
-
-/** 还能用的 key 和账号的额度：几个 key 共用，dailyLimit 为 null 是不限（管理员） */
-export interface MyKeys {
-  keys: MyKey[];
-  used: number;
-  dailyLimit: number | null;
 }
 
 export async function myKeys(): Promise<MyKeys> {
@@ -453,7 +422,7 @@ export async function myKeys(): Promise<MyKeys> {
 export async function requestKey(): Promise<{ id: string; key: string }> {
   const res = await fetch(`${import.meta.env.BASE_URL}api/me/keys`, { method: 'POST', headers: apiHeaders() });
   if (!res.ok) throw await apiError(res, `HTTP ${res.status}`);
-  return (await res.json()) as { id: string; key: string };
+  return (await res.json()) as KeyCreated;
 }
 
 export async function revokeKey(id: string): Promise<void> {

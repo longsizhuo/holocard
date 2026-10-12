@@ -14,6 +14,7 @@ holocard/
 │   ├── lab/blind/        blind comparison page
 │   └── web/public/           static assets (sample card samples/demo, icons, share images)
 ├── src/                  libraries imported by the pages and the server; they never import pages
+│   ├── api/              response shapes of the web API /api (types shared by frontend and server)
 │   ├── format/           .layers format: types, reading and validation, author config
 │   ├── segmenter/        layering pipeline (shared by server and browser)
 │   ├── renderer/         holographic card renderer
@@ -39,6 +40,10 @@ holocard/
 | `docs-site/.vitepress/config.ts` | `pnpm build` / `pnpm docs:dev` | `dist/docs/` |
 
 ## Modules
+
+### `src/api`
+
+Response shapes of the web API `/api`, types only. The server checks each response against them with `satisfies` and the frontend (`web/site/api.ts`, `export.ts`) parses with them, so changing a field on one side fails type checking on the other. The public API `/v1` is defined by the [API documentation](/en/api/), not here. The card mask endpoints `/api/cardmask` are not covered yet.
 
 ### `src/format`
 

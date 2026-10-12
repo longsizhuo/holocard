@@ -14,6 +14,7 @@ holocard/
 │   ├── lab/blind/        双盲对比页
 │   └── web/public/           静态资源（示例卡 samples/demo、图标、分享图）
 ├── src/                  库：页面和服务端都从这里引用，库不引用页面
+│   ├── api/              网页接口 /api 返回的结构（前后端共用的类型）
 │   ├── format/           .layers 格式：类型、读写与校验、作者配置
 │   ├── segmenter/        分层流水线（服务端与浏览器端共用）
 │   ├── renderer/         闪卡渲染器
@@ -39,6 +40,10 @@ holocard/
 | `docs-site/.vitepress/config.ts` | `pnpm build` / `pnpm docs:dev` | `dist/docs/` |
 
 ## 模块
+
+### `src/api`
+
+网页接口 `/api` 返回的结构，只有类型。服务端返回前用 `satisfies` 对上，前端（`web/site/api.ts`、`export.ts`）按它解析，一边改了字段另一边类型检查失败。对外接口 `/v1` 的结构以[接口文档](/api/)为准，不在这里。卡面遮罩 `/api/cardmask` 的结构暂未收进来。
 
 ### `src/format`
 

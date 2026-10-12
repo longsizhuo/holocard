@@ -6,7 +6,8 @@
  * 退出直接刷新页面：卡算不算「我的」、卡册、页头都跟着登录状态变，重来一遍最不容易漏。
  */
 
-import { account, loginHref, logout, myKeys, ownedCards, requestKey, revokeKey, unclaimedCards, type MyKeys } from './api';
+import { account, loginHref, logout, myKeys, ownedCards, requestKey, revokeKey, unclaimedCards } from './api';
+import type { MyKeys } from '../../src/api';
 import { lang, onLangChange, t } from '../../src/i18n';
 import { openAlbums } from './albums-ui';
 import { track } from './track';

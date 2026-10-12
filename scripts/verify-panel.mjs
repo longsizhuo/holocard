@@ -2,7 +2,8 @@
  * 走一遍面板上跟卡有关的部分（web/site 的 tuning.ts、actions.ts、upload.ts、render-page.ts）：
  * 示例卡只出箔面面板、不给分享删除导出；关视差滑块变灰、偏好记到本机；切英文状态栏和层名跟着换；
  * 做一张卡、开包后地址栏换成卡片链接，点分享拿到链接，切语言链接跟着换；改箔面停手后存回服务端；
- * 删卡后操作收起、地址退回首页；渲染页就绪、带分享图文案、导出钩子在；全程页面不报错。
+ * 导出动图排队后下载、失败时提示服务端给的原因；删卡后操作收起、地址退回首页；渲染页就绪、带分享图文案、导出钩子在；
+ * 全程页面不报错。
  *
  * 不需要分层服务：/api 的请求全部在浏览器里拦下来，假装服务端做好了，结果是 web/public/samples/demo 那张卡。
  * 用法：先把站点跑起来（后端指到一个不存在的地址，拦漏了也不会碰到线上）
@@ -29,8 +30,9 @@ function check(ok, message) {
   if (!ok) failures++;
 }
 
-/** 假的分层服务：任务轮询两次后做好；记下页面发出的每个 /api 请求 */
+/** 假的分层服务：任务轮询两次后做好；导出先排队再按 exportResult 回；记下页面发出的每个 /api 请求 */
 const requests = [];
+let exportResult;
 async function fakeBackend(page) {
   let polls = 0;
   await page.route('**/api/**', async (route) => {
@@ -44,6 +46,9 @@ async function fakeBackend(page) {
           ? { state: 'running', stage: 'finding-subject', position: 0, eta: 3 }
           : { state: 'done', stage: null, position: 0, layers: '/samples/demo', layerCount: 2 },
       });
+    }
+    if (/\/api\/cards\/[0-9a-f-]{36}\/export\/\w+$/.test(pathname)) {
+      return route.fulfill({ status: method === 'POST' ? 202 : 200, json: method === 'POST' ? { state: 'queued', position: 1 } : exportResult });
     }
     const layers = /\/api\/layers\/[0-9a-f-]{36}\/(.+)$/.exec(pathname);
     if (layers) {
@@ -111,6 +116,15 @@ await page.selectOption('#foil-list .foil-row select >> nth=0', 'rainbow');
 // 停手 800ms 才存
 await page.waitForTimeout(1200);
 check(requests.slice(before).includes(`PUT /api/cards/${ID}/config`), '改箔面：停手后存回服务端');
+
+// 电脑上导出的是 APNG，做好直接下载
+exportResult = { state: 'done', files: [{ url: '/samples/demo/manifest.json', name: 'holocard.apng', type: 'image/apng' }] };
+const [download] = await Promise.all([page.waitForEvent('download', { timeout: 10_000 }).catch(() => null), page.click('#export-btn')]);
+check(download?.suggestedFilename() === 'holocard.apng' && !(await page.locator('#export-hint').textContent()), '导出：排队、做好后下载，没有报错提示');
+exportResult = { state: 'error', error: '测试用的失败原因' };
+await page.click('#export-btn');
+await page.waitForFunction(() => document.querySelector('#export-hint')?.textContent, null, { timeout: 10_000 }).catch(() => {});
+check((await page.locator('#export-hint').textContent()).includes('测试用的失败原因'), '导出失败：提示服务端给的原因');
 
 page.once('dialog', (dialog) => dialog.accept());
 await page.click('#delete-btn');

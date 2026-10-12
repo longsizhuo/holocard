@@ -7,6 +7,7 @@
  * 文件都在服务端生成（server/render/export.ts），这里只负责提交、等待、交到用户手上。
  */
 
+import type { ExportedFile, ExportStatus } from '../../src/api';
 import { apiError, apiHeaders, ApiError } from './api';
 import type { MessageKey } from '../../src/i18n';
 
@@ -40,19 +41,6 @@ export function blockingInAppBrowser(): MessageKey | null {
   return null;
 }
 
-export interface ExportedFile {
-  url: string;
-  /** 下载时的文件名 */
-  name: string;
-  type: string;
-}
-
-interface ExportStatus {
-  state: 'none' | 'queued' | 'running' | 'done' | 'error';
-  position?: number;
-  files?: ExportedFile[];
-  error?: string;
-}
 
 /** 轮询间隔。生成要十几到几十秒，一秒半问一次足够 */
 const POLL_INTERVAL_MS = 1500;
@@ -80,10 +68,10 @@ export async function requestExport(
     await new Promise((resolve) => setTimeout(resolve, POLL_INTERVAL_MS));
     status = await call(url, 'GET');
   }
-  if (status.state === 'done' && status.files?.length) return status.files;
+  if (status.state === 'done' && status.files.length) return status.files;
   // none：服务重启把排着的请求丢了
   if (status.state === 'none') throw new ApiError('服务刚重启过', 'export_restarted');
-  throw new Error(status.error ?? '生成失败');
+  throw new Error(status.state === 'error' ? status.error : '生成失败');
 }
 
 /** 下载一个文件。同源地址配 download 属性，浏览器直接存，不跳页面 */
