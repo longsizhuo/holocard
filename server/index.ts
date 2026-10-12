@@ -12,16 +12,15 @@
  *   POST /api/jobs             请求体是图片字节 → 202 {id}
  *   GET  /api/jobs/{id}        → {state, stage, position, eta?, layers?, error?}
  *   GET  /api/layers/{id}/...  产出的层文件与 manifest
- *   POST /api/perf             性能埋点，一次页面访问最多一条（见 perf.ts）
+ *   POST /api/perf             性能埋点，一次页面访问最多一条（见 routes/service.ts）
  *   GET  其余路径               前端静态文件（HOLOCARD_WEB_DIR）
  *
  * 静态文件也由这个服务自己发，所以它是自包含的：上游只要一条反代就够，
  * 别人拿去单跑一个 Node 进程就是完整的站点。
  */
 
-import { mkdir, stat } from 'node:fs/promises';
-import { createServer } from 'node:http';
-import { join, resolve, sep } from 'node:path';
+import { mkdir } from 'node:fs/promises';
+import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
 import {
   CONCURRENCY,
   DB_PATH,
@@ -35,42 +34,47 @@ import {
   OUT_DIR,
   PORT,
   PUBLIC_ORIGIN,
-  RATE_WINDOW_MS,
   TTL_MS,
   WEB_DIR,
 } from './config';
-import { clientIp, json, makeLimiter, readBody, requestLang, text } from './http';
-import {
-  CPU_SHARE,
-  backfillNsfw,
-  queue,
-  resumeUnfinished,
-  running,
-  segmenterBroken,
-  startSegmenter,
-} from './pipeline/jobs';
-import { exportQueue, exporting } from './render/exports';
+import { json } from './http';
+import { CPU_SHARE, backfillNsfw, resumeUnfinished, startSegmenter } from './pipeline/jobs';
 import { backfillPreviews } from './render/previews';
 import { handleAuth, handleMe } from './routes/account';
 import { handleCards } from './routes/cards';
 import { handleCardmask } from './routes/cardmask';
 import { sweepCardmasks } from './pipeline/cardmask';
-import { robotsTxt, serveStatic, sitemapXml } from './routes/static';
+import { handleHealth, handlePerf } from './routes/service';
+import { handleSite } from './routes/static';
 import { handleV1 } from './routes/v1';
 import { db } from './store';
 import { flushHits, importLegacy, sweepCards } from './store/cards';
-import { parsePerf } from './store/perf';
 
+type Handler = (req: IncomingMessage, res: ServerResponse, url: URL) => Promise<void>;
 
-/** 性能埋点的限流：正常一次页面访问一条，这个数只挡刷的 */
-const perfLimited = makeLimiter(30, RATE_WINDOW_MS);
+const under = (prefix: string) => (path: string) => path === prefix || path.startsWith(`${prefix}/`);
+
 /**
- * 性能埋点的总量上限，不分来源。换着地址刷能绕过按 IP 的限流，而表只留最新 20 万行，
- * 灌满的话真实数据全被挤掉。正常流量离这个数远得很
+ * 路径 → 处理函数，从上往下第一个对得上的接手，各自再分方法和子路径。
+ * 最后一条是网站本身（GET 的都当前端页面发），所以 /v1、/auth 这些不在 /api 下的接口要排在它前面
  */
-const perfFlooded = makeLimiter(120, 60 * 1000);
+const ROUTES: [match: (path: string) => boolean, handle: Handler][] = [
+  [under('/v1'), handleV1],
+  [(path) => path.startsWith('/auth/'), handleAuth],
+  [under('/api/me'), handleMe],
+  [(path) => path === '/api/health', handleHealth],
+  [(path) => path === '/api/perf', handlePerf],
+  [under('/api/cardmask'), handleCardmask],
+  // 分层任务、层文件、卡片的分享 / 配置 / 删除 / 导出
+  [
+    (path) => path.startsWith('/api/'),
+    async (req, res, url) => {
+      if (!(await handleCards(req, res, url))) json(res, 404, { error: 'not found' });
+    },
+  ],
+  [() => true, handleSite],
+];
 
-/** 定期清理过期产物 */
 /** 清理过期卡。定时器和启动时各调一次，外面没有兜底，失败只记日志 */
 function sweepSafely(): void {
   void sweep().catch((error: unknown) => console.error('[sweep] 清理失败', error));
@@ -105,99 +109,8 @@ const server = createServer((req, res) => {
       return;
     }
 
-    // 对外接口。要在下面「GET 非 /api 路径一律当静态文件」之前接住
-    if (url.pathname === '/v1' || url.pathname.startsWith('/v1/')) {
-      await handleV1(req, res, url);
-      return;
-    }
-
-    // 登录、退出。也要在「GET 非 /api 路径一律当静态文件」之前接住
-    if (url.pathname.startsWith('/auth/')) {
-      await handleAuth(req, res, url);
-      return;
-    }
-    if (url.pathname === '/api/me' || url.pathname.startsWith('/api/me/')) {
-      await handleMe(req, res, url);
-      return;
-    }
-
-    if ((req.method === 'GET' || req.method === 'HEAD') && url.pathname === '/api/health') {
-      json(res, segmenterBroken ? 503 : 200, {
-        ok: !segmenterBroken,
-        running,
-        queued: queue.length,
-        concurrency: CONCURRENCY,
-        exporting: exporting ? 1 : 0,
-        exportQueued: exportQueue.length,
-      });
-      return;
-    }
-
-    // 这两个要写完整域名，所以按 PUBLIC_ORIGIN 现生成，不放静态文件——别人自托管时地址自然就对
-    // 文档在 /docs/ 下（VitePress 生成的静态页）。目录地址手打漏了末尾斜杠（/docs、/docs/deploy）时补上，
-    // 不然按文件找不到就落到首页的 404；带斜杠的才会去找目录下的 index.html
-    if ((req.method === 'GET' || req.method === 'HEAD') && /^\/docs(\/[\w./-]*[^/])?$/.test(url.pathname)) {
-      const dir = resolve(WEB_DIR, `.${url.pathname}`);
-      if (dir.startsWith(resolve(WEB_DIR) + sep) && (await stat(join(dir, 'index.html')).then((s) => s.isFile(), () => false))) {
-        res.writeHead(301, { location: `${url.pathname}/${url.search}` }).end();
-        return;
-      }
-    }
-    if ((req.method === 'GET' || req.method === 'HEAD') && url.pathname === '/robots.txt') {
-      text(res, 'text/plain; charset=utf-8', robotsTxt(), req.method);
-      return;
-    }
-    if ((req.method === 'GET' || req.method === 'HEAD') && url.pathname === '/sitemap.xml') {
-      text(res, 'application/xml; charset=utf-8', await sitemapXml(), req.method);
-      return;
-    }
-
-    if (req.method === 'POST' && url.pathname === '/api/perf') {
-      /*
-       * 只收本站前端发的：它发的是 application/json 的 Blob。别的网站想借访客的浏览器灌假数据，
-       * 要么只能发 text/plain（这里拒收），要么带 application/json 触发预检（这个服务不答 OPTIONS）
-       */
-      const site = req.headers['sec-fetch-site'];
-      if (!String(req.headers['content-type'] ?? '').startsWith('application/json') || (site && site !== 'same-origin')) {
-        res.writeHead(400).end();
-        return;
-      }
-      if (perfLimited(clientIp(req)) || perfFlooded('all')) {
-        res.writeHead(429).end();
-        return;
-      }
-      let sample;
-      try {
-        sample = parsePerf(JSON.parse((await readBody(req, 4096)).toString('utf8')), req);
-      } catch {
-        sample = null;
-      }
-      if (!sample) {
-        res.writeHead(400).end();
-        return;
-      }
-      // 埋点写不进去（磁盘满、库被锁）不能把服务带崩：这个处理函数外面没有兜底的 catch
-      try {
-        db.insertPerf(sample);
-      } catch (error) {
-        console.error('[perf] 写库失败', error);
-      }
-      res.writeHead(204).end();
-      return;
-    }
-
-    if (url.pathname === '/api/cardmask' || url.pathname.startsWith('/api/cardmask/')) {
-      await handleCardmask(req, res, url);
-      return;
-    }
-    if (await handleCards(req, res, url)) return;
-
-    if ((req.method === 'GET' || req.method === 'HEAD') && !url.pathname.startsWith('/api/')) {
-      await serveStatic(url.pathname, res, req.method, clientIp(req), requestLang(req, url));
-      return;
-    }
-
-    json(res, 404, { error: 'not found' });
+    const [, handle] = ROUTES.find(([match]) => match(url.pathname)) ?? [];
+    await handle?.(req, res, url);
   })().catch((error: unknown) => {
     // 兜底：哪个路由漏接了异常，回 500（或者断开），不让未处理的拒绝把整个服务带崩
     console.error('[http] 未处理的异常', req.method, req.url, error);

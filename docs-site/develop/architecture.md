@@ -144,12 +144,13 @@ holocard/
 
 | 文件 | 职责 |
 |---|---|
-| `index.ts` | 入口：按路径分发请求、健康检查 `/api/health`、性能埋点 `POST /api/perf`、定时清理、启动（续跑中断的任务、补分享图与裸露识别） |
+| `index.ts` | 入口：路由表（路径前缀 → 各 `routes/` 的处理函数）、定时清理、启动（续跑中断的任务、补分享图与裸露识别） |
 | `config.ts` | 环境变量与由其推导的配置（端口、目录、额度、保留期、登录、抠图模型），各模块从这里读取 |
 | `http.ts` | JSON 与错误响应、读请求体、来源 IP、请求语言、限流、同源判断、HTML 转义 |
 | `umami.ts` | 对外接口的活动由服务端发送到 umami |
 | `routes/cards.ts` | 网页的卡片接口：上传、任务状态、分享、导出、作者配置、删除、层文件与缩略图、`/models/` 权重 |
-| `routes/static.ts` | 前端静态文件：按语言发页面、首页与分享页的 OG 标签、`robots.txt`、`sitemap.xml` |
+| `routes/static.ts` | 路由表的最后一条，网站本身：按语言发页面、首页与分享页的 OG 标签、`robots.txt`、`sitemap.xml`、文档目录补斜杠 |
+| `routes/service.ts` | 健康检查 `GET /api/health`、性能埋点 `POST /api/perf` |
 | `routes/account.ts` | `/auth/*` 登录与退出，`/api/me/*` 当前账号、认领与个人中心的 API key |
 | `routes/v1.ts` | 对外接口 `/v1` |
 | `routes/cardmask.ts` | 卡面遮罩 `/api/cardmask`：上传、状态、遮罩文件 |

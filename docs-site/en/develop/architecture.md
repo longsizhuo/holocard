@@ -144,12 +144,13 @@ The layering service is one Node process that serves the frontend's static files
 
 | File | Responsibility |
 |---|---|
-| `index.ts` | Entry: request dispatch, health check `/api/health`, performance beacon `POST /api/perf`, periodic sweep, startup (resuming interrupted jobs, backfilling share images and nudity scores) |
+| `index.ts` | Entry: route table (path prefix → handler in `routes/`), periodic sweep, startup (resuming interrupted jobs, backfilling share images and nudity scores) |
 | `config.ts` | Environment variables and derived settings (port, directories, quotas, retention, sign-in, matting model); other modules read from here |
 | `http.ts` | JSON and error responses, reading request bodies, client IP, request language, rate limiting, same-origin checks, HTML escaping |
 | `umami.ts` | Sends public API activity to umami from the server |
 | `routes/cards.ts` | Card endpoints for the website: upload, job status, sharing, export, author config, deletion, layer files and thumbnails, `/models/` weights |
-| `routes/static.ts` | Frontend static files: pages in the request language, OG tags for the home and share pages, `robots.txt`, `sitemap.xml` |
+| `routes/static.ts` | Last entry of the route table, the site itself: pages in the request language, OG tags for the home and share pages, `robots.txt`, `sitemap.xml`, trailing slash for documentation directories |
+| `routes/service.ts` | Health check `GET /api/health`, performance beacon `POST /api/perf` |
 | `routes/account.ts` | `/auth/*` sign-in and sign-out; `/api/me/*` current account, claiming and API keys in the account panel |
 | `routes/v1.ts` | The public API `/v1` |
 | `routes/cardmask.ts` | Card masks `/api/cardmask`: upload, status, mask files |
