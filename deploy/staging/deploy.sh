@@ -73,7 +73,8 @@ sudo systemd-run --quiet --wait --pipe --collect \
   -E COREPACK_ENABLE_DOWNLOAD_PROMPT=0 -E npm_config_store_dir="$BUILD/pnpm-store" \
   bash -c 'corepack pnpm install --frozen-lockfile --reporter=silent &&
            corepack pnpm build >/dev/null &&
-           corepack pnpm exec vite build --config config/vite.server.config.ts --logLevel error'
+           corepack pnpm build:server >/dev/null'
+# build:server 走 package.json 的脚本，不写配置文件路径：这份脚本装在 /usr/local/lib，各个 PR 的目录结构可能新旧不一
 
 # ---------- 上线（ubuntu） ----------
 RELEASE="$(date +%Y%m%d-%H%M%S)-pr$PR-$SHORT"

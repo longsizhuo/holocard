@@ -95,7 +95,8 @@ if [ -f "$STATE_DIR/env.production" ]; then cp "$STATE_DIR/env.production" "$TRE
   cd "$TREE"
   corepack pnpm install --frozen-lockfile --reporter=silent
   corepack pnpm build >/dev/null
-  corepack pnpm exec vite build --config config/vite.server.config.ts --logLevel error
+  # 走 package.json 的脚本，不写配置文件路径：这份脚本装在 /usr/local/lib，要能构建新旧两种目录结构的提交
+  corepack pnpm build:server >/dev/null
 )
 
 RELEASE="$(date +%Y%m%d-%H%M%S)-$SHORT"
