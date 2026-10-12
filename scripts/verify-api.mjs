@@ -11,6 +11,7 @@
  *   - 处理途中删卡：状态保持 deleted、产物不留
  *   - 排队：网页任务插到接口任务前面
  *   - 分享：只有拿着删除口令的人能分享
+ *   - 卡面遮罩（/v1/masks）：只有提交它的 key 能看，网页路由上当作不存在，文件不让缓存
  *   - 健壮：畸形请求行回 400 而不是把进程打崩；超过 16MB 回 413；路径和方法不对回 404 / 405
  *
  * 用法：
@@ -139,6 +140,26 @@ assert.equal((await call(`/v1/cards/${id}/files/preview.jpg`, { key: a.key })).s
 const postFile = await call(`/v1/cards/${id}/files/manifest.json`, { key: a.key, method: 'POST' });
 assert.equal(postFile.status, 405);
 assert.equal(postFile.headers.get('allow'), 'GET, HEAD');
+
+// ---------- 卡面遮罩：只有提交它的 key 能看，网页的 /api/cardmask 上当作不存在；不算额度 ----------
+const maskSubmit = await call('/v1/masks', { key: a.key, method: 'POST', body: IMAGE, headers: { 'content-type': 'image/jpeg' } });
+assert.equal(maskSubmit.status, 202, '交遮罩任务');
+const maskId = (await maskSubmit.json()).id;
+assert.equal((await call(`/v1/masks/${maskId}`)).status, 401, '遮罩：没有 key → 401');
+assert.equal((await call(`/v1/masks/${maskId}`, { key: b.key })).status, 404, '遮罩：别的 key 看不到');
+assert.equal((await call(`/api/cardmask/${maskId}`)).status, 404, '遮罩：网页路由上不存在');
+assert.equal((await call(`/api/cardmask/${maskId}/card.png`)).status, 404, '遮罩：网页路由也拿不到卡图');
+const masks = await until('遮罩做完', async () => {
+  const body = await (await call(`/v1/masks/${maskId}`, { key: a.key })).json();
+  return body.status === 'done' || body.status === 'failed' ? body : null;
+});
+assert.equal(masks.status, 'done', '遮罩任务应当做完');
+// 地址里是线上域名，只取路径打本地
+const maskFile = await call(new URL(masks.files.character).pathname, { key: a.key });
+assert.equal(maskFile.status, 200, '遮罩：能下文件');
+assert.equal(maskFile.headers.get('content-type'), 'image/png');
+assert.equal(maskFile.headers.get('cache-control'), 'private, no-store', '遮罩文件不让缓存');
+assert.equal((await call(`/v1/masks/${maskId}/files/owner.png`, { key: a.key })).status, 404, '遮罩：只给列出的文件');
 
 // ---------- 处理途中删卡 ----------
 const second = await submit(a.key);
