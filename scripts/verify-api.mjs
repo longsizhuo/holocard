@@ -11,7 +11,7 @@
  *   - 处理途中删卡：状态保持 deleted、产物不留
  *   - 排队：网页任务插到接口任务前面
  *   - 分享：只有拿着删除口令的人能分享
- *   - 卡面遮罩（/v1/masks）：只有提交它的 key 能看，网页路由上当作不存在，文件不让缓存
+ *   - 卡面遮罩（/v1/masks）：只有提交它的 key 能看，网页路由上当作不存在，文件不让缓存；并发提交越不过上限，接口排满时网页照样能交
  *   - 健壮：畸形请求行回 400 而不是把进程打崩；超过 16MB 回 413；路径和方法不对回 404 / 405
  *
  * 用法：
@@ -160,6 +160,13 @@ assert.equal(maskFile.status, 200, '遮罩：能下文件');
 assert.equal(maskFile.headers.get('content-type'), 'image/png');
 assert.equal(maskFile.headers.get('cache-control'), 'private, no-store', '遮罩文件不让缓存');
 assert.equal((await call(`/v1/masks/${maskId}/files/owner.png`, { key: a.key })).status, 404, '遮罩：只给列出的文件');
+// 同时到的一批不能一起越过上限：接口全站最多 2 个，排满了网页照样能交
+const burst = await Promise.all(
+  [0, 1, 2].map(() => call('/v1/masks', { key: a.key, method: 'POST', body: IMAGE, headers: { 'content-type': 'image/jpeg' } })),
+);
+assert.deepEqual(burst.map((r) => r.status).sort(), [202, 202, 503], '遮罩：并发提交只进 2 个');
+const webMask = await call('/api/cardmask', { method: 'POST', body: IMAGE, headers: { 'content-type': 'image/jpeg' } });
+assert.equal(webMask.status, 202, '遮罩：接口排满时网页照样能交');
 
 // ---------- 处理途中删卡 ----------
 const second = await submit(a.key);

@@ -136,7 +136,7 @@ curl -O https://holocard.longsizhuo.com/v1/masks/9b2e…/files/character.png -H 
 
 遮罩为灰度加 alpha 的 PNG，两个通道取值相同，可直接用作 CSS 的 `mask-image`。六张遮罩互不重叠，合起来覆盖整张卡。
 
-遮罩任务不计入 24 小时配额，每个 Key 同时处理中的任务不超过 3 个，提交频率限制与卡片相同。
+遮罩任务不计入 24 小时配额。所有 Key 的遮罩任务全站同时最多处理 2 个，排满时返回 `503 queue_full`，请稍后重试；提交频率限制与卡片相同。
 
 ## 配额与错误码
 

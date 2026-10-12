@@ -15,7 +15,7 @@
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
-import { API_KEY_IN_FLIGHT, MAX_UPLOAD, PUBLIC_ORIGIN, RATE_LIMIT, RATE_WINDOW_MS } from '../config';
+import { MAX_UPLOAD, PUBLIC_ORIGIN, RATE_LIMIT, RATE_WINDOW_MS } from '../config';
 import { clientIp, fail, json, makeLimiter, methodNotAllowed, readBody } from '../http';
 import {
   CARDMASK_DIR,
@@ -34,8 +34,15 @@ import { trackApi } from '../umami';
 /** 和上传分层分开计数，限额相同 */
 const cardmaskLimited = makeLimiter(RATE_LIMIT, RATE_WINDOW_MS);
 /** 对外接口按 key 数提交次数，和 /v1/cards 一样宽 */
-// ponytail: 没有按天的额度（遮罩不进数据库，不好数），靠这个、每个 key 的在途上限和全站队列兜住；有 key 刷量再加
+// ponytail: 没有按天的额度、也不按 key 分在途上限（遮罩不进数据库，白名单 key 也少），靠这个和 V1_MASKS_QUEUE 兜住；有 key 刷量再加
 const v1MasksLimited = makeLimiter(30, RATE_WINDOW_MS);
+/** 对外接口的遮罩任务全站最多占几个（含上传中的），MAX_CARDMASK_QUEUE 里剩下的留给网页 */
+const V1_MASKS_QUEUE = 2;
+/**
+ * 正在读请求体、规范化、写盘（还没进任务表）的提交数。上限要连它们一起算：
+ * 只看任务表的话，同时到的一批请求都在读图之前通过检查，读完一起入队，就越过了上限
+ */
+const uploading = { all: 0, api: 0 };
 
 export async function handleCardmask(req: IncomingMessage, res: ServerResponse, url: URL): Promise<void> {
   if (url.pathname === '/api/cardmask') {
@@ -97,10 +104,6 @@ export async function handleV1Masks(req: IncomingMessage, res: ServerResponse, u
       fail(res, 429, 'rate_limited', '提交太频繁了，过几分钟再试');
       return;
     }
-    if (cardmaskInFlight(key.id) >= API_KEY_IN_FLIGHT) {
-      fail(res, 429, 'too_many_in_flight', `同一个 key 同时最多 ${API_KEY_IN_FLIGHT} 张在处理`, { limit: API_KEY_IN_FLIGHT });
-      return;
-    }
     const id = await acceptCardmask(req, res, key.id);
     if (!id) return;
     trackApi(key, 'api-masks');
@@ -158,10 +161,25 @@ async function acceptCardmask(req: IncomingMessage, res: ServerResponse, owner?:
     fail(res, 503, 'cardmask_unavailable', '这台服务没有装卡面遮罩要用的模型');
     return null;
   }
-  if (cardmaskInFlight() >= MAX_CARDMASK_QUEUE) {
-    fail(res, 503, 'queue_full', '排队的太多，稍后再试', { queued: cardmaskInFlight() });
+  // 检查和计数之间没有 await：并发的请求在这里只能一个个过
+  const queued = cardmaskInFlight() + uploading.all;
+  if (queued >= MAX_CARDMASK_QUEUE || (owner !== undefined && cardmaskInFlight(true) + uploading.api >= V1_MASKS_QUEUE)) {
+    fail(res, 503, 'queue_full', '排队的太多，稍后再试', { queued });
     return null;
   }
+  const api = owner === undefined ? 0 : 1;
+  uploading.all++;
+  uploading.api += api;
+  try {
+    return await readAndStart(req, res, owner);
+  } finally {
+    // startCardmask 返回时任务已经进了任务表，这里再减不会漏算
+    uploading.all--;
+    uploading.api -= api;
+  }
+}
+
+async function readAndStart(req: IncomingMessage, res: ServerResponse, owner?: string): Promise<string | null> {
   const limitMb = Math.round(MAX_UPLOAD / 1024 / 1024);
   let bytes: Buffer;
   try {

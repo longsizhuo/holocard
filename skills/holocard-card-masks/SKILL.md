@@ -50,7 +50,7 @@ Calls `https://holocard.longsizhuo.com/v1/masks`. Full reference: https://holoca
 | 401 | Missing, invalid or revoked key | Ask the user for a valid key |
 | 404 | Masks expired or belong to another key | Submit again |
 | 413 / 415 | Image too large / unsupported format | Convert or downscale, then submit again |
-| 429 | Too many submissions, or 3 jobs already in progress for this key | Wait for running jobs to finish, then retry |
-| 503 | Server busy | Retry after a minute |
+| 429 | Too many submissions in 10 minutes | Wait a few minutes, then retry |
+| 503 | Mask queue full or server busy | Retry after a minute |
 
 `status: failed` with `error.code: processing_failed` means the image could not be processed; tell the user rather than retrying in a loop.

@@ -136,7 +136,7 @@ The request body is the same as for `POST /v1/cards`. Card images whose long sid
 
 Masks are grayscale-plus-alpha PNGs with identical values in both channels, usable directly as a CSS `mask-image`. The six masks do not overlap and together cover the whole card.
 
-Mask jobs do not count toward the 24-hour quota. Each key can have at most 3 mask jobs in progress, and the submission rate limit is the same as for cards.
+Mask jobs do not count toward the 24-hour quota. At most 2 mask jobs from all keys are processed at a time; when they are full the response is `503 queue_full`, so retry later. The submission rate limit is the same as for cards.
 
 ## Quotas and error codes
 

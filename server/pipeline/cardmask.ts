@@ -67,10 +67,10 @@ export function cardmaskAvailable(): boolean {
   return MATTE_READY && existsSync(TEXT_MODEL);
 }
 
-/** 排着和在做的任务数；给了 owner 就只数这个 key 的 */
-export function cardmaskInFlight(owner?: string): number {
+/** 排着和在做的任务数；api 为 true 时只数对外接口提交的 */
+export function cardmaskInFlight(api = false): number {
   let n = 0;
-  for (const job of jobs.values()) if ((job.state === 'queued' || job.state === 'running') && (owner === undefined || job.owner === owner)) n++;
+  for (const job of jobs.values()) if ((job.state === 'queued' || job.state === 'running') && (!api || job.owner !== undefined)) n++;
   return n;
 }
 
