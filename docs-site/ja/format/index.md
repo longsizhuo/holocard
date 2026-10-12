@@ -91,7 +91,7 @@ mycard.layers/
 
 ## 例
 
-Web サイトのトップページにあるサンプルカード（`public/samples/demo/manifest.json`）です。2 レイヤーで、視差の設定は保存されていません。
+Web サイトのトップページにあるサンプルカード（`web/public/samples/demo/manifest.json`）です。2 レイヤーで、視差の設定は保存されていません。
 
 ```json
 {

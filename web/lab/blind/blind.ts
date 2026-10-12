@@ -7,8 +7,8 @@
  *   pairs/NN.json     { a: {manifest, layers}, b: {...} }   layers 是 { 文件名: base64 }
  * A、B 各是哪种做法只写在 pack 另存的 key.json 里，不随页面发出去。流程见 docs-site/develop/index.md「双盲对比」
  */
-import { HoloCard } from '../renderer/card';
-import { parseManifest } from '../format/io';
+import { HoloCard } from '../../../src/renderer/card';
+import { parseManifest } from '../../../src/format/io';
 
 interface Experiment {
   id: string;

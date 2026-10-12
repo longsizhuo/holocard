@@ -11,9 +11,9 @@
  * 开出来的卡怎么摆上来由卡带决定（deck.ts），这里不管。
  */
 
-import { HoloCard } from '../renderer/card';
-import type { FoilType, LayerSet } from '../format/types';
-import { onLangChange, t, type MessageKey } from '../i18n';
+import { HoloCard } from '../../src/renderer/card';
+import type { FoilType, LayerSet } from '../../src/format/types';
+import { onLangChange, t, type MessageKey } from '../../src/i18n';
 import { packLayerSet, TEAR_Y } from './pack-art';
 
 export type PackState = 'working' | 'ready' | 'failed';

@@ -10,7 +10,7 @@
  */
 
 import { account, claimCards, loginHref, logout, ownedCards, unclaimedCards } from './api';
-import { onLangChange, t } from '../i18n';
+import { onLangChange, t } from '../../src/i18n';
 import { track } from './track';
 
 const BASE = import.meta.env.BASE_URL;

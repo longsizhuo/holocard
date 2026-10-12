@@ -3,10 +3,10 @@
 import './style.css';
 // 珠光底的漂移动画，由 scripts/pearl-keyframes.mjs 生成
 import './pearl-drift.css';
-import { HoloCard } from '../renderer/card';
-import { ensureTextures } from '../renderer/textures';
-import { LayerFormatError, loadLayerSet } from '../format/io';
-import { FOIL_TYPES, type FoilType, type LayerSet, type ParallaxEffect } from '../format/types';
+import { HoloCard } from '../../src/renderer/card';
+import { ensureTextures } from '../../src/renderer/textures';
+import { LayerFormatError, loadLayerSet } from '../../src/format/io';
+import { FOIL_TYPES, type FoilType, type LayerSet, type ParallaxEffect } from '../../src/format/types';
 import {
   account,
   ApiError,
@@ -20,7 +20,7 @@ import {
   segmentOnServer,
   shareCard,
 } from './api';
-import { configOf, type CardConfig } from '../format/config';
+import { configOf, type CardConfig } from '../../src/format/config';
 import { initAlbums, openAlbums } from './albums-ui';
 import { initAccount, openAccount, refreshAccountButton } from './account-ui';
 import { Deck, forgetSession } from './deck';
@@ -46,7 +46,7 @@ import {
   t,
   type Lang,
   type MessageKey,
-} from '../i18n';
+} from '../../src/i18n';
 
 /** 取元素并断言存在，省掉一堆空判断 */
 function need<T extends Element>(selector: string): T {
@@ -641,7 +641,7 @@ async function processImage(file: File): Promise<void> {
       console.info('[holocard] 服务端不可用，回退到浏览器端：', serverError.message);
       stage = 'browser';
       showProgress('progress.fallback');
-      const { segmentToLayerSet } = await import('../segmenter');
+      const { segmentToLayerSet } = await import('../../src/segmenter');
       set = await segmentToLayerSet(file, {
         onProgress: (p) =>
           p.file

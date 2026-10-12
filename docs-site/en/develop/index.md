@@ -76,7 +76,7 @@ pnpm dev:server   # layering service on port 8791
 |---|---|
 | `pnpm dev` | Frontend dev server (Vite, port 5273) |
 | `pnpm dev:server` | Build and start the local layering service (port 8791, directories from `server/dev.env`) |
-| `pnpm typecheck` | `tsc --noEmit` over `src/`, `server/`, `scripts/og-preview.ts` and the Vite configs |
+| `pnpm typecheck` | `tsc --noEmit` over `src/`, `web/`, `server/`, `scripts/og-preview.ts` and the Vite configs |
 | `pnpm build` | Runs `pearl-keyframes.mjs --check` on the generated file, then type-checks and builds the frontend (`dist/`) and this documentation site (`dist/docs`) |
 | `pnpm preview` | Preview the `dist/` build |
 | `pnpm build:server` | Type-check and build the server into `dist-server/` |
@@ -109,18 +109,18 @@ Run `pnpm typecheck` first and `pnpm build` before committing. Then run the scri
 |---|---|---|
 | Card strip, card pack, panel status line, upload area (`deck.ts`, `pack.ts`, `main.ts` and related styles) | `node scripts/verify-pack.mjs [--url …] [--out /tmp/verify-pack]` | `HOLOCARD_API=http://127.0.0.1:9 pnpm dev` (the script intercepts every `/api` request in the browser; pointing the backend at a dead address prevents accidental real calls) |
 | Pack-opening animation (frame by frame, `pack-gl.ts`, `deck.ts`) | `node scripts/film-pack.mjs [--url …] [--out /tmp/film-pack]` | Same as above; ImageMagick for the contact sheet |
-| Pearl background (gradients in `style.css`, configuration in `pearl-keyframes.mjs`) | `node scripts/pearl-keyframes.mjs` to regenerate `src/demo/pearl-drift.css`, then `node scripts/verify-pearl.mjs [--browser chromium\|webkit]` | `pnpm dev` |
-| When to fall back to in-browser layering (`src/demo/api.ts`) | `pnpm build && node scripts/verify-fallback.mjs` | None; the script runs its own fake server |
+| Pearl background (gradients in `style.css`, configuration in `pearl-keyframes.mjs`) | `node scripts/pearl-keyframes.mjs` to regenerate `web/site/pearl-drift.css`, then `node scripts/verify-pearl.mjs [--browser chromium\|webkit]` | `pnpm dev` |
+| When to fall back to in-browser layering (`web/site/api.ts`) | `pnpm build && node scripts/verify-fallback.mjs` | None; the script runs its own fake server |
 | Gyroscope (`src/renderer/gyro.ts`) | `node scripts/verify-gyro.mjs` | None |
 | Author config validation (`src/format/config.ts`) | `node scripts/verify-config.mjs` | None |
-| Performance beacon (`src/demo/perf.ts`, `server/store/perf.ts`) | `node scripts/verify-perf.mjs [--url …] [--browser chromium\|webkit\|firefox]` | `pnpm dev` and `pnpm dev:server` |
+| Performance beacon (`web/site/perf.ts`, `server/store/perf.ts`) | `node scripts/verify-perf.mjs [--url …] [--browser chromium\|webkit\|firefox]` | `pnpm dev` and `pnpm dev:server` |
 | Public API `/v1` (`server/routes/v1.ts`, `server/account/apikeys.ts`) | `HOLOCARD_DB=out/data/holocard.db HOLOCARD_OUT_DIR=out/layers node scripts/verify-api.mjs http://127.0.0.1:8791` | `pnpm dev:server`, with NudeNet weights in `.models/` |
 | Sign-in, card ownership and claiming, API keys in the account panel (`server/account/auth.ts` and related routes) | `pnpm build:server && HOLOCARD_MODEL_DIR=.models node scripts/verify-auth.mjs` | Depth model weights. The script starts its own fake IH and a temporary server; no dev servers needed |
-| Card mask endpoints and page (`server/pipeline/cardmask.ts`, `server/routes/cardmask.ts`, `masks.html`) | `pnpm build && pnpm build:server && node scripts/verify-cardmask.mjs` | Matting and text-detection weights, with the model directory in `HOLOCARD_MODEL_DIR` (default `/srv/holocard-models`). The script starts its own temporary server |
+| Card mask endpoints and page (`server/pipeline/cardmask.ts`, `server/routes/cardmask.ts`, `web/masks.html`) | `pnpm build && pnpm build:server && node scripts/verify-cardmask.mjs` | Matting and text-detection weights, with the model directory in `HOLOCARD_MODEL_DIR` (default `/srv/holocard-models`). The script starts its own temporary server |
 | Card mask quality (`src/cardmask/`) | `node scripts/cardmask-fetch.mjs` to download the evaluation set, then `pnpm cardmask:eval [--matte] [--only <prefix>] [--debug]`; after changing the mask rules, also `pnpm cardmask:eval --masks` | The set is downloaded to `.cardmask/data/` (card images are copyrighted by their publishers and not committed); `--matte` needs the matting weights, with the model directory in `HOLOCARD_MODEL_DIR` |
 | Header and account panel UI (`account-ui.ts`) | `pnpm build && pnpm build:server && node scripts/verify-account.mjs` | None. The script starts a temporary server with fake sign-in |
 | Player `<holo-card>` (`src/player/`, `packages/player/`) | `pnpm build:player && node scripts/verify-player.mjs [screenshot dir]` | Chromium, see below |
-| Pack sound effects (`src/demo/sfx.ts`) | `node scripts/render-sfx.mjs`, then listen to `/tmp/sfx/reel.wav` | `pnpm dev` |
+| Pack sound effects (`web/site/sfx.ts`) | `node scripts/render-sfx.mjs`, then listen to `/tmp/sfx/reel.wav` | `pnpm dev` |
 | Look of share images and exported animations | `pnpm og` | None |
 
 What each script checks:
@@ -163,7 +163,7 @@ What each script checks:
 
 ### Blind comparison (`scripts/blind/`)
 
-Compares the output of two server configurations (for example two matting models): each configuration makes one card per source image, a reviewer picks the better side pair by pair on a comparison page, and the answers are decoded into wins per configuration afterwards. The page source is `lab/blind/index.html` with `src/lab/blind.ts`; it uses the site's renderer and keeps cards A and B in the same pose.
+Compares the output of two server configurations (for example two matting models): each configuration makes one card per source image, a reviewer picks the better side pair by pair on a comparison page, and the answers are decoded into wins per configuration afterwards. The page source is `web/lab/blind/index.html` with `src/lab/blind.ts`; it uses the site's renderer and keeps cards A and B in the same pose.
 
 ```bash
 # 1. Run each configuration in turn (not in parallel: matting peaks at about 7 GB)

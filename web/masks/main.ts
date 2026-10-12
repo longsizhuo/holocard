@@ -6,12 +6,12 @@
  * 视差关掉：实体卡是平的，这里要看的是箔面落在哪
  */
 
-import '../demo/style.css';
-import '../demo/pearl-drift.css';
+import '../site/style.css';
+import '../site/pearl-drift.css';
 import './masks.css';
-import { HoloCard } from '../renderer/card';
-import { defaultHalo, type FoilType, type LayerSet } from '../format/types';
-import { applyTranslations, lang, onLangChange, setLang, t, type Lang, type MessageKey } from '../i18n';
+import { HoloCard } from '../../src/renderer/card';
+import { defaultHalo, type FoilType, type LayerSet } from '../../src/format/types';
+import { applyTranslations, lang, onLangChange, setLang, t, type Lang, type MessageKey } from '../../src/i18n';
 
 const BASE = import.meta.env.BASE_URL;
 const POLL_MS = 1500;

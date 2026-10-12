@@ -8,7 +8,7 @@
  */
 
 import { apiError, apiHeaders, ApiError } from './api';
-import type { MessageKey } from '../i18n';
+import type { MessageKey } from '../../src/i18n';
 
 export type ExportFormat = 'gif' | 'motion' | 'apng';
 

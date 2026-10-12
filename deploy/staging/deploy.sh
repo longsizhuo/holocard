@@ -73,7 +73,7 @@ sudo systemd-run --quiet --wait --pipe --collect \
   -E COREPACK_ENABLE_DOWNLOAD_PROMPT=0 -E npm_config_store_dir="$BUILD/pnpm-store" \
   bash -c 'corepack pnpm install --frozen-lockfile --reporter=silent &&
            corepack pnpm build >/dev/null &&
-           corepack pnpm exec vite build --config vite.server.config.ts --logLevel error'
+           corepack pnpm exec vite build --config config/vite.server.config.ts --logLevel error'
 
 # ---------- 上线（ubuntu） ----------
 RELEASE="$(date +%Y%m%d-%H%M%S)-pr$PR-$SHORT"

@@ -19,7 +19,7 @@ out/
 .env.production
 
 # 本地测试用的临时素材
-public/__test*
+web/public/__test*
 
 # 录制脚本的浏览器缓存（含已下载的模型）
 .cache/

@@ -76,7 +76,7 @@ pnpm dev:server   # 分层服务，监听 8791
 |---|---|
 | `pnpm dev` | 启动前端开发服务器（Vite，端口 5273） |
 | `pnpm dev:server` | 构建并启动本地分层服务（端口 8791，目录取 `server/dev.env`） |
-| `pnpm typecheck` | `tsc --noEmit`，覆盖 `src/`、`server/`、`scripts/og-preview.ts` 与各 Vite 配置 |
+| `pnpm typecheck` | `tsc --noEmit`，覆盖 `src/`、`web/`、`server/`、`scripts/og-preview.ts` 与各 Vite 配置 |
 | `pnpm build` | 先运行 `pearl-keyframes.mjs --check` 核对生成文件，再类型检查、构建前端（`dist/`）和文档站（`dist/docs`） |
 | `pnpm preview` | 预览 `dist/` 构建结果 |
 | `pnpm build:server` | 类型检查并构建服务端到 `dist-server/` |
@@ -109,18 +109,18 @@ pnpm og --export gif       # 导出动图：gif / motion / apng，写到 out/exp
 |---|---|---|
 | 卡带、卡包、面板状态栏、上传区（`deck.ts`、`pack.ts`、`main.ts` 及相关样式） | `node scripts/verify-pack.mjs [--url …] [--out /tmp/verify-pack]` | `HOLOCARD_API=http://127.0.0.1:9 pnpm dev`（脚本在浏览器内拦截全部 `/api`，后端指向不存在的地址可防止误连） |
 | 开包动效（逐帧检查 `pack-gl.ts`、`deck.ts`） | `node scripts/film-pack.mjs [--url …] [--out /tmp/film-pack]` | 同上；拼接胶片需 ImageMagick |
-| 珠光底（`style.css` 的渐变、`pearl-keyframes.mjs` 的配置） | `node scripts/pearl-keyframes.mjs` 重新生成 `src/demo/pearl-drift.css`，再 `node scripts/verify-pearl.mjs [--browser chromium\|webkit]` | `pnpm dev` |
-| 回退到浏览器端分层的判断（`src/demo/api.ts`） | `pnpm build && node scripts/verify-fallback.mjs` | 无，脚本自带模拟服务端 |
+| 珠光底（`style.css` 的渐变、`pearl-keyframes.mjs` 的配置） | `node scripts/pearl-keyframes.mjs` 重新生成 `web/site/pearl-drift.css`，再 `node scripts/verify-pearl.mjs [--browser chromium\|webkit]` | `pnpm dev` |
+| 回退到浏览器端分层的判断（`web/site/api.ts`） | `pnpm build && node scripts/verify-fallback.mjs` | 无，脚本自带模拟服务端 |
 | 陀螺仪（`src/renderer/gyro.ts`） | `node scripts/verify-gyro.mjs` | 无 |
 | 作者配置的校验（`src/format/config.ts`） | `node scripts/verify-config.mjs` | 无 |
-| 性能埋点（`src/demo/perf.ts`、`server/store/perf.ts`） | `node scripts/verify-perf.mjs [--url …] [--browser chromium\|webkit\|firefox]` | `pnpm dev` 与 `pnpm dev:server` |
+| 性能埋点（`web/site/perf.ts`、`server/store/perf.ts`） | `node scripts/verify-perf.mjs [--url …] [--browser chromium\|webkit\|firefox]` | `pnpm dev` 与 `pnpm dev:server` |
 | 对外接口 `/v1`（`server/routes/v1.ts`、`server/account/apikeys.ts`） | `HOLOCARD_DB=out/data/holocard.db HOLOCARD_OUT_DIR=out/layers node scripts/verify-api.mjs http://127.0.0.1:8791` | `pnpm dev:server`，且 `.models/` 下有 NudeNet 权重 |
 | 登录、卡片归属与认领、个人中心的 API key（`server/account/auth.ts` 及相关路由） | `pnpm build:server && HOLOCARD_MODEL_DIR=.models node scripts/verify-auth.mjs` | 深度模型权重。脚本自行启动模拟 IH 与临时服务端，不需要开发服务 |
-| 卡面遮罩的接口与页面（`server/pipeline/cardmask.ts`、`server/routes/cardmask.ts`、`masks.html`） | `pnpm build && pnpm build:server && node scripts/verify-cardmask.mjs` | 抠图与文字检测的权重，`HOLOCARD_MODEL_DIR` 指定模型目录（默认 `/srv/holocard-models`）。脚本自行启动临时服务端 |
+| 卡面遮罩的接口与页面（`server/pipeline/cardmask.ts`、`server/routes/cardmask.ts`、`web/masks.html`） | `pnpm build && pnpm build:server && node scripts/verify-cardmask.mjs` | 抠图与文字检测的权重，`HOLOCARD_MODEL_DIR` 指定模型目录（默认 `/srv/holocard-models`）。脚本自行启动临时服务端 |
 | 卡面遮罩的识别质量（`src/cardmask/`） | `node scripts/cardmask-fetch.mjs` 下载评测集，再 `pnpm cardmask:eval [--matte] [--only <前缀>] [--debug]`，改了遮罩规则再跑 `pnpm cardmask:eval --masks` | 评测集下载到 `.cardmask/data/`（卡图版权归各家，不进仓库）；`--matte` 需要抠图权重，`HOLOCARD_MODEL_DIR` 指定模型目录 |
 | 页头与个人中心界面（`account-ui.ts`） | `pnpm build && pnpm build:server && node scripts/verify-account.mjs` | 无。脚本以假登录启动临时服务端 |
 | 播放器 `<holo-card>`（`src/player/`、`packages/player/`） | `pnpm build:player && node scripts/verify-player.mjs [截图目录]` | Chromium，见下方说明 |
-| 开包音效（`src/demo/sfx.ts`） | `node scripts/render-sfx.mjs`，试听 `/tmp/sfx/reel.wav` | `pnpm dev` |
+| 开包音效（`web/site/sfx.ts`） | `node scripts/render-sfx.mjs`，试听 `/tmp/sfx/reel.wav` | `pnpm dev` |
 | 分享图、导出动图的画面 | `pnpm og` | 无 |
 
 各脚本的核对内容：
@@ -163,7 +163,7 @@ pnpm og --export gif       # 导出动图：gif / motion / apng，写到 out/exp
 
 ### 双盲对比（`scripts/blind/`）
 
-用于比较两种服务端配置（例如两种抠图模型）的输出：同一批原图用两种配置各出一张卡，评审在对比页上逐对选择，事后按答案还原各配置的胜负。对比页源码为 `lab/blind/index.html` 与 `src/lab/blind.ts`，使用与站点相同的渲染器，A、B 两张卡姿态同步。
+用于比较两种服务端配置（例如两种抠图模型）的输出：同一批原图用两种配置各出一张卡，评审在对比页上逐对选择，事后按答案还原各配置的胜负。对比页源码为 `web/lab/blind/index.html` 与 `src/lab/blind.ts`，使用与站点相同的渲染器，A、B 两张卡姿态同步。
 
 ```bash
 # 1. 两种配置各运行一遍（须先后运行：抠图峰值约 7 GB，同时运行会耗尽内存）

@@ -211,12 +211,12 @@ ssh oracle 'cd /opt/holocard && node22/bin/node db.mjs perf 30'   # 最近 30 �
 |---|---|
 | `robots.txt` | 服务端按 `PUBLIC_ORIGIN` 现生成。允许所有爬虫（包括 AI 的），只挡 `/render/`（截分享图的内部页）、`/api/jobs`、`/api/cards` 和 `/models/`（27MB 的权重） |
 | `sitemap.xml` | 同上，首页的中、英、日三个版本，每条都用 `xhtml:link` 列出全部语言版本；`lastmod` 取 index.html 的修改时间 |
-| `llms.txt` | 给 AI 读的说明，静态文件 `public/llms.txt`，中英日三段，内容摘自 README |
+| `llms.txt` | 给 AI 读的说明，静态文件 `web/public/llms.txt`，中英日三段，内容摘自 README |
 | 首页 | 每种语言一个规范地址（`/`、`/?lang=en`、`/?lang=ja`）+ hreflang（`x-default` 指向不带参数、按浏览器语言自动选的 `/`）+ JSON-LD（`WebApplication` + `SoftwareSourceCode`）。结构化数据里的描述直接读页面的 meta description，不另写一份 |
 | 卡片页 `/c/<id>` | `noindex, nofollow`，不进 sitemap |
 | 层文件 `/api/layers/` | 响应头 `x-robots-tag: noindex`。**不在 robots.txt 里挡**：分享图就在这下面，Twitter 的爬虫遵守 robots.txt，挡了分享卡片就没图 |
 | 不存在的路径 | 返回 404（页面照旧显示首页，人看不出区别）。以前一律 200，搜索引擎会把 `/abc` 这类当成首页的重复页 |
-| 网站图标 | `public/favicon.svg`、`favicon.ico`（16/32/48）、`apple-touch-icon.png`（180，iOS 会把透明填成黑，所以带底色）。备选方案在 `docs/favicon-options/` |
+| 网站图标 | `web/public/favicon.svg`、`favicon.ico`（16/32/48）、`apple-touch-icon.png`（180，iOS 会把透明填成黑，所以带底色）。备选方案在 `docs/favicon-options/` |
 
 **只能在各自后台做的**（需要账号）：
 
@@ -242,7 +242,7 @@ ssh oracle 'cd /opt/holocard && node22/bin/node db.mjs perf 30'   # 最近 30 �
   同时在后台调一次分享接口，分享框直接显示链接。原来要点「生成分享链接」，只有 28% 的人点；现在手机用户
   用浏览器菜单分享、复制地址栏，发出去的都是这张卡而不是首页，刷新也不会丢卡。
   刷新后落在 `/c/<id>`，卡的主人（本机有删除口令）照样看得到分享和删除入口；删卡后地址栏退回首页
-- **首页分享图**：`public/og.jpg`、`og-en.jpg`、`og-ja.jpg`，都用 `pnpm og --lang <语言> --out public/og-<语言>.jpg` 从同一张测试图出。
+- **首页分享图**：`web/public/og.jpg`、`og-en.jpg`、`og-ja.jpg`，都用 `pnpm og --lang <语言> --out web/public/og-<语言>.jpg` 从同一张测试图出。
   某个语言的图缺了就用中文那张
 
 ## 分享图
@@ -263,7 +263,7 @@ ssh oracle 'cd /opt/holocard && node22/bin/node db.mjs perf 30'   # 最近 30 �
 - **权重**：服务端本来就有的 q8 权重在 `/models/` 下原样发出去，给浏览器端退回处理用（国内连不上 huggingface.co）。
   现在有后端的部署不会再退回浏览器端（见文末），线上这个路由暂时用不到
   只发三个文件，其余 404
-- upng-js、heic-decode、libheif-js 是纯 JS/WASM，打进了服务端的包（`vite.server.config.ts` 的 `ssr.noExternal`），
+- upng-js、heic-decode、libheif-js 是纯 JS/WASM，打进了服务端的包（`config/vite.server.config.ts` 的 `ssr.noExternal`），
   服务器上的 `node_modules` 不用动
 
 ## 保留与删除

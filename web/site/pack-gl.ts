@@ -13,7 +13,7 @@
  * 改完跑 scripts/verify-pack.mjs，看它逐帧截的图。
  */
 
-import { defaultFoilFor, type FoilType, type LayerSet } from '../format/types';
+import { defaultFoilFor, type FoilType, type LayerSet } from '../../src/format/types';
 import {
   DEFAULT_PACK_FOIL,
   FLASH,

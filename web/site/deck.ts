@@ -13,8 +13,8 @@
  * 卡包是 WebGL 的就从袋口接着转：卡包交出它那张卡在屏幕上的位置，真正的闪卡从那里接手。
  */
 
-import type { LayerSet } from '../format/types';
-import { onLangChange, t } from '../i18n';
+import type { LayerSet } from '../../src/format/types';
+import { onLangChange, t } from '../../src/i18n';
 import { reducedMotion, type Handoff, type OpenMethod, type PackView } from './pack';
 import { createPack, packFoil } from './pack-gl';
 import { setSfxOn, sfx, sfxOn } from './sfx';

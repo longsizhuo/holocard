@@ -114,7 +114,7 @@ export const zh = {
   'error.network': '网络连接断了，稍后再试',
   'error.server_unavailable': '服务器暂时处理不了，稍后再试',
 
-  // ---------- 卡册（只存在本机，见 src/demo/albums.ts） ----------
+  // ---------- 卡册（只存在本机，见 web/site/albums.ts） ----------
   'albums.open': '我的卡册',
   'albums.title': '我的卡册',
   'albums.titleOnline': '我的在线卡册',

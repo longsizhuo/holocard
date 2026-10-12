@@ -7,7 +7,7 @@
  * 动效本身逐帧看用 scripts/film-pack.mjs。
  * 每一步断言，关键时刻截图到 --out 给人看。改了 deck.ts / pack.ts / 相关样式之后跑一遍。
  *
- * 不需要分层服务：/api 的请求全部在浏览器里拦下来，假装服务端做好了，结果是 public/samples/demo 那张卡。
+ * 不需要分层服务：/api 的请求全部在浏览器里拦下来，假装服务端做好了，结果是 web/public/samples/demo 那张卡。
  * 用法：先把站点跑起来（后端指到一个不存在的地址，拦漏了也不会碰到线上）
  *   HOLOCARD_API=http://127.0.0.1:9 pnpm dev
  *   node scripts/verify-pack.mjs [--url http://localhost:5273/] [--out /tmp/verify-pack]
@@ -28,8 +28,8 @@ const arg = (name, fallback) => {
 const url = arg('url', 'http://localhost:5273/');
 const out = arg('out', '/tmp/verify-pack');
 mkdirSync(out, { recursive: true });
-const image = fileURLToPath(new URL('../public/apple-touch-icon.png', import.meta.url));
-const sample = fileURLToPath(new URL('../public/samples/demo', import.meta.url));
+const image = fileURLToPath(new URL('../web/public/apple-touch-icon.png', import.meta.url));
+const sample = fileURLToPath(new URL('../web/public/samples/demo', import.meta.url));
 
 let failures = 0;
 function check(ok, message) {

@@ -7,7 +7,7 @@
  */
 
 import { account, loginHref, logout, myKeys, ownedCards, requestKey, revokeKey, unclaimedCards, type MyKeys } from './api';
-import { lang, onLangChange, t } from '../i18n';
+import { lang, onLangChange, t } from '../../src/i18n';
 import { openAlbums } from './albums-ui';
 import { track } from './track';
 

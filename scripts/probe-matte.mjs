@@ -29,11 +29,11 @@ try {
   await page.goto(arg('url', 'http://localhost:5273/'), { waitUntil: 'networkidle' });
 
   const base64 = readFileSync(imagePath).toString('base64');
-  const result = await page.evaluate(async ([b64, inputSize]) => {
+  const result = await page.evaluate(async ([b64, inputSize, src]) => {
     const bytes = Uint8Array.from(atob(b64), (c) => c.charCodeAt(0));
     const blob = new Blob([bytes], { type: 'image/png' });
-    const { estimateMatte } = await import('/src/segmenter/matte.ts');
-    const { pickDevice } = await import('/src/segmenter/runtime.ts');
+    const { estimateMatte } = await import(`/@fs${src}/segmenter/matte.ts`);
+    const { pickDevice } = await import(`/@fs${src}/segmenter/runtime.ts`);
 
     const t0 = performance.now();
     let files = [];
@@ -66,7 +66,7 @@ try {
       半透明像素占比: (mid / matte.data.length).toFixed(4),
       files, png: btoa(bin),
     };
-  }, [base64, Number(arg('size', '1024'))]);
+  }, [base64, Number(arg('size', '1024')), join(ROOT, 'src')]);
 
   writeFileSync(outFile, Buffer.from(result.png, 'base64'));
   delete result.png;

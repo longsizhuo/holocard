@@ -1,7 +1,7 @@
 /**
  * 验证 npm 包 @holocard/player 的 <holo-card>（packages/player）：先 pnpm build:player。
  *
- * 起一个静态服务器发 packages/player（示例页 + dist），demo/sample 指到 public/samples/demo，
+ * 起一个静态服务器发 packages/player（示例页 + dist），demo/sample 指到 web/public/samples/demo，
  * 用无头浏览器打开示例页，核对：
  *   - 目录地址、manifest.json 地址两种写法都能加载，层数和清单一致，触发 load
  *   - 地址不对时触发 error，不抛到页面上
@@ -21,7 +21,7 @@ import { chromium } from 'playwright-core';
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const PKG = join(ROOT, 'packages', 'player');
-const SAMPLE = join(ROOT, 'public', 'samples', 'demo');
+const SAMPLE = join(ROOT, 'web', 'public', 'samples', 'demo');
 const TYPES = { '.html': 'text/html', '.js': 'text/javascript', '.json': 'application/json', '.webp': 'image/webp', '.png': 'image/png' };
 assert.ok(existsSync(join(PKG, 'dist', 'holocard.js')), '先跑 pnpm build:player');
 

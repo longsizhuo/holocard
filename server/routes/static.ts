@@ -173,7 +173,7 @@ function injectShareMeta(
 /**
  * 给首页注入 OG / Twitter card 标签、规范地址和各语言版本的地址。
  *
- * 分享图是 public/og.jpg（英文、日文是 og-en.jpg、og-ja.jpg）——用 `pnpm og` 从一张挑好的卡
+ * 分享图是 web/public/og.jpg（英文、日文是 og-en.jpg、og-ja.jpg）——用 `pnpm og` 从一张挑好的卡
  * 渲染出来的静态文件，不直接引用某张用户卡：用户的卡会过期、会被删，首页的门面不能跟着没了。
  * 某个语言的图还没做出来时用中文那张。
  *

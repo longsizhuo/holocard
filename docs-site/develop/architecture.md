@@ -6,32 +6,36 @@ HoloCard 的一个仓库包含四个产物：线上站点的前端、分层服�
 
 ```text
 holocard/
-├── index.html            前端页面（三种路由共用）
-├── src/
+├── web/                  页面（html 的位置就是线上地址）
+│   ├── index.html        首页（三种路由共用）
+│   ├── masks.html        卡面遮罩页 /masks
+│   ├── site/             站点前端（holocard.longsizhuo.com）
+│   ├── masks/            卡面遮罩页的脚本
+│   ├── lab/blind/        双盲对比页
+│   └── web/public/           静态资源（示例卡 samples/demo、图标、分享图）
+├── src/                  库：页面和服务端都从这里引用，库不引用页面
 │   ├── format/           .layers 格式：类型、读写与校验、作者配置
 │   ├── segmenter/        分层流水线（服务端与浏览器端共用）
 │   ├── renderer/         闪卡渲染器
-│   ├── demo/             站点前端（holocard.longsizhuo.com）
+│   ├── cardmask/         卡面遮罩的识别规则
 │   ├── player/           <holo-card> 自定义元素，npm 包的入口
-│   ├── i18n/             界面文字与语言判定（前后端共用）
-│   └── lab/              双盲对比页
+│   └── i18n/             界面文字与语言判定（前后端共用）
 ├── server/               分层服务（Node 单进程）
 ├── packages/player/      npm 包 @holocard/player 的发布目录
 ├── scripts/              验证脚本与运维脚本，见「本地开发」
-├── lab/blind/            双盲对比页的 HTML
 ├── docs-site/            本文档站（VitePress）
 ├── deploy/               线上与 staging 的部署配置
-├── public/               静态资源（示例卡 public/samples/demo、图标、分享图）
-└── vite*.config.ts       各产物的构建配置
+├── vite.config.ts        站点前端的构建配置（pnpm dev 默认读它，所以留在根目录）
+└── config/               其余产物的构建配置
 ```
 
 | 构建配置 | 命令 | 输出 |
 |---|---|---|
 | `vite.config.ts` | `pnpm dev` / `pnpm build` | `dist/`（站点前端），开发端口 5273 |
-| `vite.server.config.ts` | `pnpm build:server` / `pnpm dev:server` | `dist-server/` |
-| `vite.player.config.ts` | `pnpm build:player` | `packages/player/dist/holocard.js` |
-| `vite.og.config.ts` | `pnpm og` | `.og-cache/bin/og-preview.mjs` |
-| `vite.lab.config.ts` | 由 `scripts/blind/pack.mjs` 调用 | `dist-lab/blind/` |
+| `config/vite.server.config.ts` | `pnpm build:server` / `pnpm dev:server` | `dist-server/` |
+| `config/vite.player.config.ts` | `pnpm build:player` | `packages/player/dist/holocard.js` |
+| `config/vite.og.config.ts` | `pnpm og` | `.og-cache/bin/og-preview.mjs` |
+| `config/vite.lab.config.ts` | 由 `scripts/blind/pack.mjs` 调用 | `dist-lab/blind/` |
 | `docs-site/.vitepress/config.ts` | `pnpm build` / `pnpm docs:dev` | `dist/docs/` |
 
 ## 模块
@@ -76,7 +80,7 @@ holocard/
 | `gyro.ts` | 设备倾斜 → 指针位置，基准姿态自动回正 |
 | `textures.ts` | 箔面用的颗粒与闪粉纹理，运行时用固定种子程序化生成 |
 
-### `src/demo`
+### `web/site`
 
 站点前端，即 holocard.longsizhuo.com。
 
@@ -108,7 +112,7 @@ holocard/
 | `core.ts` | 前后端共用：语言判定（`?lang=` → cookie `hc_lang` → `Accept-Language` → 中文）、`translate`、`localizeHtml` |
 | `index.ts` | 前端：当前语言、`t()`、切换语言时原地替换页面文字 |
 
-`index.html` 中的静态文字用 `data-i18n`、`data-i18n-html`、`data-i18n-title`、`data-i18n-aria` 标记。服务端发送页面时按语言替换，前端切换语言时原地重写，不刷新页面。
+`web/index.html` 中的静态文字用 `data-i18n`、`data-i18n-html`、`data-i18n-title`、`data-i18n-aria` 标记。服务端发送页面时按语言替换，前端切换语言时原地重写，不刷新页面。
 
 ### `src/cardmask`
 
@@ -120,13 +124,13 @@ holocard/
 | `layout.ts` | 版式先验：文字按位置分成名字、HP、说明、底栏、画内文字；给出说明区的上沿，主角在全图卡上从这里淡出 |
 | `masks.ts` | 由版式、主角概率图、文字概率图拼出卡边、边框、文字、主角、特效、背景六张互不重叠的遮罩和分区总览 |
 
-页面是 `masks.html` 与 `src/masks/main.ts`：上传、轮询、按勾选区域合成预览用的两层 LayerSet 交给渲染器。评测见[本地开发](/develop/)中的 `cardmask-eval`。
+页面是 `web/masks.html` 与 `web/masks/main.ts`：上传、轮询、按勾选区域合成预览用的两层 LayerSet 交给渲染器。评测见[本地开发](/develop/)中的 `cardmask-eval`。
 
-卡面遮罩只面向游戏卡，和主流程（照片 → 分层 → 闪卡）是分开的：`src/cardmask/` 不被 `src/segmenter/`、`src/demo/` 引用，页面是独立的入口，首页不放链接；服务端只共用分层线程和抠图模型（抠图模型常驻内存，不另加载一份），任务排同一个队。要整体去掉卡面遮罩：删除 `src/cardmask/`、`src/masks/`、`masks.html`、`server/routes/cardmask.ts`、`server/pipeline/cardmask.ts`、`server/pipeline/textdet.ts`，再去掉 `server/index.ts` 里的路由与定时清理、`jobs.ts` 的 `cardmaskInWorker`、分层线程里的 `cardmask` 消息、`vite.config.ts` 里的 `masks` 入口。
+卡面遮罩只面向游戏卡，和主流程（照片 → 分层 → 闪卡）是分开的：`src/cardmask/` 不被 `src/segmenter/`、`web/site/` 引用，页面是独立的入口，首页不放链接；服务端只共用分层线程和抠图模型（抠图模型常驻内存，不另加载一份），任务排同一个队。要整体去掉卡面遮罩：删除 `src/cardmask/`、`web/masks/`、`web/masks.html`、`server/routes/cardmask.ts`、`server/pipeline/cardmask.ts`、`server/pipeline/textdet.ts`，再去掉 `server/index.ts` 里的路由与定时清理、`jobs.ts` 的 `cardmaskInWorker`、分层线程里的 `cardmask` 消息、`vite.config.ts` 里的 `masks` 入口。
 
-### `src/lab`
+### `web/lab`
 
-`blind.ts` 是双盲对比页的脚本，与 `lab/blind/index.html` 一起由 `scripts/blind/pack.mjs` 构建。用法见[本地开发](/develop/#双盲对比-scripts-blind)。
+`blind.ts` 是双盲对比页的脚本，与 `web/lab/blind/index.html` 一起由 `scripts/blind/pack.mjs` 构建。用法见[本地开发](/develop/#双盲对比-scripts-blind)。
 
 ### `server`
 
@@ -178,7 +182,7 @@ npm 包 `@holocard/player` 的发布目录：`package.json`、`README.md`、示�
 
 ### 页面路由
 
-三种路由共用同一个 `index.html`（`src/demo/route.ts`）：
+三种路由共用同一个 `web/index.html`（`web/site/route.ts`）：
 
 | 路径 | 模式 | 说明 |
 |---|---|---|
@@ -286,8 +290,8 @@ onnxruntime-node 的推理同步运行在调用线程上，切层与补全是纯
 
 | 来源 | 去向 | 内容 |
 |---|---|---|
-| `src/demo/track.ts` | 自建 umami | 页面访问与事件：`upload`、`segment-ok`、`segment-fail`、`pack-open`、`parallax`、`share`、`share-copy`、`delete`、`export`、`export-share`、`export-fail`、`lang`、`login`、`card-view`、`claim`、`api-key`、`api-key-revoke` |
+| `web/site/track.ts` | 自建 umami | 页面访问与事件：`upload`、`segment-ok`、`segment-fail`、`pack-open`、`parallax`、`share`、`share-copy`、`delete`、`export`、`export-share`、`export-fail`、`lang`、`login`、`card-view`、`claim`、`api-key`、`api-key-revoke` |
 | `server/umami.ts` | 同一 umami 站点 | 对外接口的活动：`api-submit`、`api-reject`、`api-fetch`、`api-done`、`api-fail`。访客标识按账号或 key 编号 |
-| `src/demo/perf.ts` | 本服务 `POST /api/perf` | 静置时 10 秒的帧率分布，一次访问最多一条，不带 id，服务端不存 IP |
+| `web/site/perf.ts` | 本服务 `POST /api/perf` | 静置时 10 秒的帧率分布，一次访问最多一条，不带 id，服务端不存 IP |
 
 umami 站点 id 在构建时从 `VITE_UMAMI_ID` 注入，未配置时前后端都不发送；本机与内网地址也不发送。`/render/<id>` 不加载埋点脚本。

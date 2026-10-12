@@ -95,7 +95,7 @@ if [ -f "$STATE_DIR/env.production" ]; then cp "$STATE_DIR/env.production" "$TRE
   cd "$TREE"
   corepack pnpm install --frozen-lockfile --reporter=silent
   corepack pnpm build >/dev/null
-  corepack pnpm exec vite build --config vite.server.config.ts --logLevel error
+  corepack pnpm exec vite build --config config/vite.server.config.ts --logLevel error
 )
 
 RELEASE="$(date +%Y%m%d-%H%M%S)-$SHORT"

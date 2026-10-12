@@ -1,5 +1,5 @@
 /**
- * 打包 scripts/cardmask-eval.ts（卡面遮罩的评测），做法同 vite.og.config.ts：
+ * 打包 scripts/cardmask-eval.ts（卡面遮罩的评测），做法同 vite.og.config.ts（同目录）：
  * TS 源码打成一个 ESM 文件交给 node 跑，原生模块和 node 内置模块保持 external
  */
 import { defineConfig } from 'vite';

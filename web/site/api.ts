@@ -12,8 +12,8 @@
  * 由界面按当前语言翻译（见 src/i18n）。
  */
 
-import { lang, type MessageKey } from '../i18n';
-import type { CardConfig } from '../format/config';
+import { lang, type MessageKey } from '../../src/i18n';
+import type { CardConfig } from '../../src/format/config';
 
 /** 这个部署没有分层服务。只有这种情况调用方才回退到浏览器端 */
 export class NoBackendError extends Error {

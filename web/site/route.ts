@@ -7,7 +7,7 @@
  *   render  /render/<id>   给服务端截 OG 预览图用的裸页面：只有卡片、固定姿态、无 UI
  */
 
-import type { Lang } from '../i18n';
+import type { Lang } from '../../src/i18n';
 
 export type PageMode = 'demo' | 'card' | 'render';
 

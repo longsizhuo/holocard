@@ -10,7 +10,7 @@
  * 中间调上彩虹才出得来，卡包要的就是一眼看上去闪。
  */
 
-import { defaultHalo, type FoilType, type LayerSet } from '../format/types';
+import { defaultHalo, type FoilType, type LayerSet } from '../../src/format/types';
 
 const W = 700;
 const H = 1000;
