@@ -22,6 +22,7 @@ import { db } from '../store';
 import { expiresAt } from '../store/cards';
 import type { ApiKeyRow, CardRow } from '../store/db';
 import { trackApi } from '../umami';
+import { handleV1Masks } from './cardmask';
 
 /*
  * 对外接口 /v1：给白名单里的少数调用方（key 由站长用 scripts/apikey.mjs 发）。用法见 docs-site/api/index.md。
@@ -69,6 +70,11 @@ export async function handleV1(req: IncomingMessage, res: ServerResponse, url: U
   }
   // HEAD 按 GET 处理，Node 会自己去掉响应体
   const method = req.method === 'HEAD' ? 'GET' : req.method;
+
+  if (url.pathname === '/v1/masks' || url.pathname.startsWith('/v1/masks/')) {
+    await handleV1Masks(req, res, url, key);
+    return;
+  }
 
   if (url.pathname === '/v1/cards') {
     if (method !== 'POST') {

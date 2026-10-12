@@ -89,18 +89,68 @@ API キーはアカウントの身元を表します。サーバー側でのみ�
 - 納品前に裸体の判定を行い、完全な裸体の画像は拒否されます（`nsfw_rejected`）。
 - サイトの利用者が優先され、API のジョブはその後に処理されます。
 
+## カードマスク
+
+完成した平面のカード画像を、互いに重ならない 6 枚のマスクに分割します。カードの領域ごとに異なるホイル効果を適用するためのものです（サイトの[カードマスク](https://holocard.longsizhuo.com/masks)と同じ処理）。認証、画像の条件、24 時間後に削除される点は上記と同じです。
+
+```bash
+curl -X POST https://holocard.longsizhuo.com/v1/masks \
+  -H "Authorization: Bearer hc_xxx" \
+  -H "Content-Type: image/png" --data-binary @card.png
+# レスポンス：202 {"id":"9b2e…","status":"queued","url":"…"}
+
+curl https://holocard.longsizhuo.com/v1/masks/9b2e… -H "Authorization: Bearer hc_xxx"
+curl -O https://holocard.longsizhuo.com/v1/masks/9b2e…/files/character.png -H "Authorization: Bearer hc_xxx"
+```
+
+1 枚あたり通常 20〜40 秒かかります。
+
+### `POST /v1/masks` カード画像の送信
+
+リクエストボディは `POST /v1/cards` と同じです。長辺が 1400 ピクセルを超えるカード画像は縮小され、マスクは縮小後の画像と同じサイズになります。成功すると `202 Accepted` で `{ "id", "status": "queued", "url" }` を返します。
+
+### `GET /v1/masks/{id}` 状態と結果
+
+| フィールド | 説明 |
+|---|---|
+| `status` | `queued`、`running`、`done`、`failed` |
+| `width`、`height` | マスクのサイズ（ピクセル）。完了時のみ |
+| `window` | イラスト枠の位置 `{x, y, w, h}`（幅・高さで 0〜1 に正規化）。フルアートのカードでは `null` |
+| `panel` | フルアートのカードの内側パネル。形式は `window` と同じ。イラスト枠のあるカードでは `null` |
+| `lines` | 各行のテキストの位置と役割（`name`、`hp`、`body`、`footer`、`art`） |
+| `files` | ファイル名からダウンロード URL への対応。完了時のみ |
+| `error.code` | 失敗時は `processing_failed` |
+
+### `GET /v1/masks/{id}/files/{name}.png` マスクのダウンロード
+
+| ファイル | 内容 |
+|---|---|
+| `card.png` | 縮小後のカード画像 |
+| `border.png` | カードの縁 |
+| `frame.png` | フレーム |
+| `text.png` | テキスト |
+| `character.png` | メインキャラクター |
+| `effects.png` | エフェクト（現在はルールベースで、対応範囲は限定的） |
+| `background.png` | 背景 |
+| `labels.png` | 領域の一覧。各ピクセルを所属する領域の色で塗ったもの |
+
+マスクはグレースケールとアルファの PNG で、2 つのチャンネルは同じ値です。CSS の `mask-image` にそのまま使えます。6 枚のマスクは互いに重ならず、合わせるとカード全体を覆います。
+
+マスクのジョブは 24 時間の利用上限に含まれません。すべてのキーを合わせて同時に処理できるマスクのジョブは 2 件までで、埋まっている場合は `503 queue_full` を返します。時間をおいて再試行してください。送信頻度の制限はカードと同じです。
+
 ## 利用上限とエラーコード
 
 | ステータス | code | 説明 |
 |---|---|---|
 | 401 | — | API キーがない、無効、または無効化済み |
-| 404 | `card_not_found` / `file_not_found` | カードが存在しない、他のキーのもの、または削除済み・期限切れ |
+| 404 | `card_not_found` / `masks_not_found` / `file_not_found` | カードまたはマスクが存在しない、他のキーのもの、または削除済み・期限切れ |
 | 413 | `too_large` | 画像が 16 MB を超えている |
 | 415 | `unsupported_image` | 認識できない画像形式 |
 | 429 | `quota_exceeded` | 24 時間の上限を超過：個人で申請したキーは 1 アカウントにつき、すべてのキーの合計で 20 枚（再申請してもリセットされません） |
 | 429 | `too_many_in_flight` | 1 つのキーで同時にアップロード・待機・処理できるジョブは 3 件まで |
 | 429 | `rate_limited` | 10 分間の送信回数が 30 回を超過 |
 | 503 | `api_daily_limit` / `queue_full` / `busy` | API の当日の総量に達したか、待ち行列が混雑しています。時間をおいて再試行してください |
+| 503 | `cardmask_unavailable` | サーバーにカードマスク用のモデルがありません |
 | 507 | `disk_full` | サーバーの容量不足。時間をおいて再試行してください |
 
 上限の引き上げをご希望の場合は、サイト管理者にお問い合わせください。

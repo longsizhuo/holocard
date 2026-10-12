@@ -89,18 +89,68 @@ API Key 代表账号身份，请仅在服务端使用，切勿写入前端代码
 - 结果交付前会进行裸露内容检测，完全裸露的图片将被拒绝（`nsfw_rejected`）。
 - 网站用户的任务优先处理，API 任务在其后排队。
 
+## 卡面遮罩
+
+把一张做好的平面卡图拆成六张互不重叠的遮罩，用于给卡面不同区域套用不同的箔面效果（与网站的[卡面遮罩](https://holocard.longsizhuo.com/masks)相同）。鉴权、图片要求和 24 小时后删除的规则与上文相同。
+
+```bash
+curl -X POST https://holocard.longsizhuo.com/v1/masks \
+  -H "Authorization: Bearer hc_xxx" \
+  -H "Content-Type: image/png" --data-binary @card.png
+# 响应：202 {"id":"9b2e…","status":"queued","url":"…"}
+
+curl https://holocard.longsizhuo.com/v1/masks/9b2e… -H "Authorization: Bearer hc_xxx"
+curl -O https://holocard.longsizhuo.com/v1/masks/9b2e…/files/character.png -H "Authorization: Bearer hc_xxx"
+```
+
+单张通常需要 20–40 秒。
+
+### `POST /v1/masks` 提交卡图
+
+请求体与 `POST /v1/cards` 相同。卡图长边超过 1400 像素时会按比例缩小，遮罩与缩小后的卡图同尺寸。成功时返回 `202 Accepted`：`{ "id", "status": "queued", "url" }`。
+
+### `GET /v1/masks/{id}` 查询状态与结果
+
+| 字段 | 说明 |
+|---|---|
+| `status` | `queued`、`running`、`done`、`failed` |
+| `width`、`height` | 遮罩尺寸（像素），仅在已完成时返回 |
+| `window` | 画框位置 `{x, y, w, h}`，按宽高归一化到 0–1；全图卡为 `null` |
+| `panel` | 全图卡的内板位置，格式同 `window`；有画框的卡为 `null` |
+| `lines` | 每行文字的位置和角色（`name`、`hp`、`body`、`footer`、`art`） |
+| `files` | 文件名到下载地址的映射，仅在已完成时返回 |
+| `error.code` | 失败时为 `processing_failed` |
+
+### `GET /v1/masks/{id}/files/{name}.png` 下载遮罩
+
+| 文件 | 内容 |
+|---|---|
+| `card.png` | 缩放后的卡图 |
+| `border.png` | 卡边 |
+| `frame.png` | 框架 |
+| `text.png` | 文字 |
+| `character.png` | 主角 |
+| `effects.png` | 特效（目前按规则识别，覆盖面有限） |
+| `background.png` | 背景 |
+| `labels.png` | 分区总览，每个像素按所属区域上色 |
+
+遮罩为灰度加 alpha 的 PNG，两个通道取值相同，可直接用作 CSS 的 `mask-image`。六张遮罩互不重叠，合起来覆盖整张卡。
+
+遮罩任务不计入 24 小时配额。所有 Key 的遮罩任务全站同时最多处理 2 个，排满时返回 `503 queue_full`，请稍后重试；提交频率限制与卡片相同。
+
 ## 配额与错误码
 
 | 状态码 | code | 说明 |
 |---|---|---|
 | 401 | — | 未提供 API Key，或 Key 无效、已吊销 |
-| 404 | `card_not_found` / `file_not_found` | 卡片不存在、不属于当前 Key，或已删除、已过期 |
+| 404 | `card_not_found` / `masks_not_found` / `file_not_found` | 卡片或遮罩不存在、不属于当前 Key，或已删除、已过期 |
 | 413 | `too_large` | 图片超过 16 MB |
 | 415 | `unsupported_image` | 无法识别的图片格式 |
 | 429 | `quota_exceeded` | 超出 24 小时配额：个人申请的 Key 每个账号 20 张，账号下所有 Key 合计（吊销后重新申请不重置） |
 | 429 | `too_many_in_flight` | 单个 Key 同时处于上传、排队或处理中的任务不超过 3 个 |
 | 429 | `rate_limited` | 10 分钟内提交次数超过 30 次 |
 | 503 | `api_daily_limit` / `queue_full` / `busy` | API 当日总量已用尽，或当前排队任务过多，请稍后重试 |
+| 503 | `cardmask_unavailable` | 服务端未安装卡面遮罩所需的模型 |
 | 507 | `disk_full` | 服务器存储空间不足，请稍后重试 |
 
 如需更高配额，请联系站长。

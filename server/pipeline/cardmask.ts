@@ -6,7 +6,8 @@
  *
  * 结果放在产物目录的 .cardmasks/<id>/ 下：card.png（规范化后的卡图）、border / frame / text / character / effects / background.png（灰度 + alpha）、
  * labels.png（每个像素归哪一类，按 LABEL_COLORS 上色）、masks.json（尺寸、版式、每行字的位置和角色）。不进数据库：没有分享、没有卡册，地址是随机 UUID，24 小时后连目录一起删。
- * 任务状态在内存里，重启后丢了的话，做完的照 masks.json 认，没做完的就是没了，前端提示重试
+ * 任务状态在内存里，重启后丢了的话，做完的照 masks.json 认，没做完的就是没了，前端提示重试。
+ * 对外接口（/v1/masks）提交的任务在目录里多一个 owner 文件记着 key 的 id：只有这个 key 能看，网页的 /api/cardmask 上当作不存在
  */
 
 import { randomUUID } from 'node:crypto';
@@ -57,21 +58,24 @@ export interface CardmaskResult {
 
 type JobState = { state: 'queued' | 'running' } | { state: 'error'; error: string } | ({ state: 'done' } & CardmaskResult);
 
-const jobs = new Map<string, JobState & { createdAt: number }>();
+/** owner：提交它的 API key 的 id，网页提交的没有 */
+type Job = JobState & { createdAt: number; owner?: string };
+const jobs = new Map<string, Job>();
 
 /** 这台服务能不能做卡面遮罩：抠图和文字检测的权重都要在 */
 export function cardmaskAvailable(): boolean {
   return MATTE_READY && existsSync(TEXT_MODEL);
 }
 
-export function cardmaskInFlight(): number {
+/** 排着和在做的任务数；api 为 true 时只数对外接口提交的 */
+export function cardmaskInFlight(api = false): number {
   let n = 0;
-  for (const job of jobs.values()) if (job.state === 'queued' || job.state === 'running') n++;
+  for (const job of jobs.values()) if ((job.state === 'queued' || job.state === 'running') && (!api || job.owner !== undefined)) n++;
   return n;
 }
 
 /** 收下一张卡图（已经规范化过：摆正方向、去掉 EXIF），排队出遮罩，返回任务 id */
-export async function startCardmask(image: Buffer): Promise<string> {
+export async function startCardmask(image: Buffer, owner?: string): Promise<string> {
   const id = randomUUID();
   const dir = join(CARDMASK_DIR, id);
   await mkdir(dir, { recursive: true });
@@ -80,18 +84,20 @@ export async function startCardmask(image: Buffer): Promise<string> {
     .png()
     .toBuffer();
   await writeFile(join(dir, 'card.png'), card);
-  jobs.set(id, { state: 'queued', createdAt: Date.now() });
+  if (owner !== undefined) await writeFile(join(dir, 'owner'), owner);
+  jobs.set(id, { state: 'queued', createdAt: Date.now(), ...(owner === undefined ? {} : { owner }) });
   void run(id, dir, card);
   return id;
 }
 
 async function run(id: string, dir: string, card: Buffer): Promise<void> {
-  const createdAt = jobs.get(id)?.createdAt ?? Date.now();
+  const { createdAt = Date.now(), owner } = jobs.get(id) ?? {};
+  const keep = owner === undefined ? {} : { owner };
   try {
     const { data, info } = await sharp(card).ensureAlpha().raw().toBuffer({ resolveWithObject: true });
     const layout = findLayout(data, info.width, info.height);
     const region = layout.window ?? layout.panel ?? { x: 0, y: 0, w: 1, h: 1 };
-    jobs.set(id, { state: 'running', createdAt });
+    jobs.set(id, { state: 'running', createdAt, ...keep });
     const { matte, text } = await cardmaskInWorker(new Uint8Array(card), region, TEXT_MODEL);
     // 抠图的结果只覆盖 region，铺回整张卡的尺寸；认不出主角就是全空
     const character = new Float32Array(info.width * info.height);
@@ -137,20 +143,21 @@ async function run(id: string, dir: string, card: Buffer): Promise<void> {
       lines: masks.lines.map((line) => ({ ...round(line), role: line.role })),
     };
     await writeFile(join(dir, 'masks.json'), JSON.stringify(result));
-    jobs.set(id, { state: 'done', createdAt, ...result });
+    jobs.set(id, { state: 'done', createdAt, ...keep, ...result });
   } catch (error) {
     console.error(`[cardmask] ${id} 失败`, error);
-    jobs.set(id, { state: 'error', error: error instanceof Error ? error.message : String(error), createdAt });
+    jobs.set(id, { state: 'error', error: error instanceof Error ? error.message : String(error), createdAt, ...keep });
   }
 }
 
 /** 任务现在怎么样了。内存里没有（重启过）就看磁盘上做完了没有；都没有是 null */
-export async function cardmaskStatus(id: string): Promise<JobState | null> {
+export async function cardmaskStatus(id: string): Promise<(JobState & { owner?: string }) | null> {
   const job = jobs.get(id);
   if (job) return job;
   try {
     const result = JSON.parse(await readFile(join(CARDMASK_DIR, id, 'masks.json'), 'utf8')) as CardmaskResult;
-    return { state: 'done', ...result };
+    const owner = await readFile(join(CARDMASK_DIR, id, 'owner'), 'utf8').catch(() => undefined);
+    return { state: 'done', ...result, ...(owner === undefined ? {} : { owner }) };
   } catch {
     return null;
   }
