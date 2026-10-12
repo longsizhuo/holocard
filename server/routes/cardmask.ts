@@ -39,8 +39,8 @@ const v1MasksLimited = makeLimiter(30, RATE_WINDOW_MS);
 /** 对外接口的遮罩任务全站最多占几个（含上传中的），MAX_CARDMASK_QUEUE 里剩下的留给网页 */
 const V1_MASKS_QUEUE = 2;
 /**
- * 正在读请求体、规范化、写盘（还没进任务表）的提交数。上限要连它们一起算：
- * 只看任务表的话，同时到的一批请求都在读图之前通过检查，读完一起入队，就越过了上限
+ * 读完请求体、正在规范化和写盘（还没进任务表）的提交数。上限要连它们一起算：
+ * 只看任务表的话，同时读完的一批请求都在规范化之前通过检查，写完一起入队，就越过了上限
  */
 const uploading = { all: 0, api: 0 };
 
@@ -161,25 +161,8 @@ async function acceptCardmask(req: IncomingMessage, res: ServerResponse, owner?:
     fail(res, 503, 'cardmask_unavailable', '这台服务没有装卡面遮罩要用的模型');
     return null;
   }
-  // 检查和计数之间没有 await：并发的请求在这里只能一个个过
-  const queued = cardmaskInFlight() + uploading.all;
-  if (queued >= MAX_CARDMASK_QUEUE || (owner !== undefined && cardmaskInFlight(true) + uploading.api >= V1_MASKS_QUEUE)) {
-    fail(res, 503, 'queue_full', '排队的太多，稍后再试', { queued });
-    return null;
-  }
-  const api = owner === undefined ? 0 : 1;
-  uploading.all++;
-  uploading.api += api;
-  try {
-    return await readAndStart(req, res, owner);
-  } finally {
-    // startCardmask 返回时任务已经进了任务表，这里再减不会漏算
-    uploading.all--;
-    uploading.api -= api;
-  }
-}
-
-async function readAndStart(req: IncomingMessage, res: ServerResponse, owner?: string): Promise<string | null> {
+  // 读请求体之前只粗查、不占位：传多慢由对方决定，占着位慢慢传就能把队列堵死
+  if (queueFull(res, owner)) return null;
   const limitMb = Math.round(MAX_UPLOAD / 1024 / 1024);
   let bytes: Buffer;
   try {
@@ -194,22 +177,41 @@ async function readAndStart(req: IncomingMessage, res: ServerResponse, owner?: s
     fail(res, 415, 'unsupported_image', '不是可识别的图片（支持 JPEG / PNG / WebP / AVIF / HEIC）');
     return null;
   }
-  let image: Buffer;
+  // 读完再查一次并占位，检查和计数之间没有 await：同时读完的一批只能一个个过。占着的只有规范化和写盘，快慢由本机定
+  if (queueFull(res, owner)) return null;
+  const api = owner === undefined ? 0 : 1;
+  uploading.all++;
+  uploading.api += api;
   try {
-    image = (await normalizeOriginal(bytes)).data;
-  } catch (error) {
-    if (error instanceof ImageError) fail(res, 415, error.code, error.message, error.params);
-    else fail(res, 415, 'unsupported_image', '无法识别的图片');
-    return null;
+    let image: Buffer;
+    try {
+      image = (await normalizeOriginal(bytes)).data;
+    } catch (error) {
+      if (error instanceof ImageError) fail(res, 415, error.code, error.message, error.params);
+      else fail(res, 415, 'unsupported_image', '无法识别的图片');
+      return null;
+    }
+    // 写盘出错要在这里接住：外面虽有兜底，但那样回的是 500 而不是能翻译的错误码
+    try {
+      return await startCardmask(image, owner);
+    } catch (error) {
+      console.error('[cardmask] 保存失败', error);
+      fail(res, 500, 'store_failed', '保存图片失败，稍后再试');
+      return null;
+    }
+  } finally {
+    // startCardmask 返回时任务已经进了任务表，这里再减不会漏算
+    uploading.all--;
+    uploading.api -= api;
   }
-  // 写盘出错要在这里接住：外面虽有兜底，但那样回的是 500 而不是能翻译的错误码
-  try {
-    return await startCardmask(image, owner);
-  } catch (error) {
-    console.error('[cardmask] 保存失败', error);
-    fail(res, 500, 'store_failed', '保存图片失败，稍后再试');
-    return null;
-  }
+}
+
+/** 队列满了就回 503 并返回 true。接口的任务另有全站上限 V1_MASKS_QUEUE */
+function queueFull(res: ServerResponse, owner?: string): boolean {
+  const queued = cardmaskInFlight() + uploading.all;
+  if (queued < MAX_CARDMASK_QUEUE && (owner === undefined || cardmaskInFlight(true) + uploading.api < V1_MASKS_QUEUE)) return false;
+  fail(res, 503, 'queue_full', '排队的太多，稍后再试', { queued });
+  return true;
 }
 
 async function sendFile(req: IncomingMessage, res: ServerResponse, id: string, file: string, headers: Record<string, string>): Promise<void> {
