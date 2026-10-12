@@ -2,6 +2,7 @@
  * 请求和响应的小工具：JSON 与错误响应、读请求体、来源 IP、请求语言、限流、同源判断、HTML 转义
  */
 
+import type { ApiErrorBody } from '../src/api';
 import { timingSafeEqual } from 'node:crypto';
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import { isLang, langFromAcceptLanguage, langFromCookie, type Lang } from '../src/i18n/core';
@@ -100,7 +101,7 @@ export function fail(
 ): void {
   // 限流、排满、盘满这几种拒绝记一行：不记的话，被刷的时候日志里什么都看不出来
   if (status === 429 || status === 503 || status === 507) console.warn(`[reject] ${status} ${code}`);
-  json(res, status, { error, code, ...(params ? { params } : {}) });
+  json(res, status, { error, code, ...(params ? { params } : {}) } satisfies ApiErrorBody);
 }
 
 /**

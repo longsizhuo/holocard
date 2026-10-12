@@ -1,5 +1,5 @@
 /**
- * 性能埋点的接收端：POST /api/perf，前端 src/demo/perf.ts 每次页面访问最多发一条。
+ * 性能埋点的接收端：POST /api/perf，前端 web/site/perf.ts 每次页面访问最多发一条。
  *
  * 这个接口在公网上谁都能打，所以每个字段都按下面的规则校验：数字必须有限、在范围内，
  * 字符串截断、去掉控制字符。不合规的整条丢掉，而不是截到边界值——截出来的数会混进统计里分不出来。
@@ -42,7 +42,7 @@ const NUMBERS = {
 /** 开关类字段，存 0 / 1 */
 const FLAGS = ['parallax', 'busy', 'interacted', 'reduced_motion'] as const;
 
-/** 首页（摆的是示例卡）或 /c/<id> 卡片页，和 src/demo/route.ts 的 PageMode 同名 */
+/** 首页（摆的是示例卡）或 /c/<id> 卡片页，和 web/site/route.ts 的 PageMode 同名 */
 const MODES = new Set(['demo', 'card']);
 
 export type PerfSample = Record<string, string | number | null>;

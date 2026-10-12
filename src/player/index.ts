@@ -17,7 +17,7 @@
  *   load   层都加载好、卡片挂上了
  *   error  加载失败，detail.error 是错误
  *
- * 包的入口，构建见 vite.player.config.ts；发布见 packages/player/README.md。
+ * 包的入口，构建见 config/vite.player.config.ts；发布见 packages/player/README.md。
  */
 
 import { HoloCard } from '../renderer/card';

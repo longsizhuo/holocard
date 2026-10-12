@@ -1,6 +1,6 @@
 /**
  * 把开包音效离线渲染成 wav：每个声音一个文件，外加一条按开包顺序排好的试听（reel.wav）。
- * 顺带检查每个声音有声、没爆音（峰值 < 1）。改了 src/demo/sfx.ts 的配方之后跑一遍，听一听。
+ * 顺带检查每个声音有声、没爆音（峰值 < 1）。改了 web/site/sfx.ts 的配方之后跑一遍，听一听。
  *
  * 配方就是页面里用的那份：从开发服务器上把 sfx.ts 动态 import 进来，用 OfflineAudioContext 渲染。
  * 用法：先起站点（pnpm dev），然后
@@ -25,7 +25,7 @@ const page = await browser.newPage();
 await page.goto(url);
 
 const results = await page.evaluate(async () => {
-  const { recipes, tearSound, masterBus } = await import('/src/demo/sfx.ts');
+  const { recipes, tearSound, masterBus } = await import('/site/sfx.ts');
   const rate = 44100;
 
   /** 渲染一段，返回 16 位 PCM wav（base64）和峰值、响度 */

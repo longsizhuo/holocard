@@ -4,7 +4,7 @@
 
 [![npm @holocard/player](https://img.shields.io/npm/v/@holocard/player?label=npm%20%40holocard%2Fplayer)](https://www.npmjs.com/package/@holocard/player)
 
-[![HoloCard](public/og-en.jpg)](https://holocard.longsizhuo.com/?lang=en)
+[![HoloCard](web/public/og-en.jpg)](https://holocard.longsizhuo.com/?lang=en)
 
 HoloCard splits a photo into layers automatically and renders it as an interactive holographic card: the server estimates depth, separates the image into foreground, middle and background layers, assigns each layer its own foil, and the card turns with the pointer or device tilt. Live site: https://holocard.longsizhuo.com
 

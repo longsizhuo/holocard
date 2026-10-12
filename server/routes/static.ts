@@ -1,13 +1,14 @@
 /**
- * 前端静态文件：按请求语言发页面，首页和分享页注入分享标签，robots.txt、sitemap.xml
+ * 前端静态文件：按请求语言发页面，首页和分享页注入分享标签，robots.txt、sitemap.xml；
+ * 路由表最后一条，前面的都没接住的请求落到这里
  */
 
 import { readFile, stat } from 'node:fs/promises';
-import type { ServerResponse } from 'node:http';
+import type { IncomingMessage, ServerResponse } from 'node:http';
 import { basename, dirname, extname, join, resolve, sep } from 'node:path';
 import { LANGS, LANG_TAG, localizeHtml, translate, type Lang } from '../../src/i18n/core';
 import { OUT_DIR, PUBLIC_ORIGIN, WEB_DIR } from '../config';
-import { escapeAttr, json } from '../http';
+import { clientIp, escapeAttr, json, requestLang, text } from '../http';
 import { PREVIEW_HEIGHT, PREVIEW_WIDTH } from '../render/preview';
 import { previewFile, queuePreview } from '../render/previews';
 import { db } from '../store';
@@ -19,7 +20,7 @@ import { recordHit } from '../store/cards';
  * /api/layers/ 故意不挡：分享图在那下面，挡了 Twitter 取不到图；
  * 用户的图不进搜索结果靠的是那边的 x-robots-tag: noindex 响应头。
  */
-export function robotsTxt(): string {
+function robotsTxt(): string {
   return [
     'User-agent: *',
     'Allow: /',
@@ -39,7 +40,7 @@ export function robotsTxt(): string {
  * 每一条都列出所有语言版本（xhtml:link），搜索引擎据此把它们认成同一页的不同语言。
  * lastmod 取 index.html 的修改时间，也就是最近一次发版。
  */
-export async function sitemapXml(): Promise<string> {
+async function sitemapXml(): Promise<string> {
   const index = WEB_DIR ? await stat(join(WEB_DIR, 'index.html')).catch(() => null) : null;
   const lastmod = index ? new Date(index.mtimeMs).toISOString().slice(0, 10) : null;
   const url = (lang: Lang): string => `${PUBLIC_ORIGIN}/${lang === 'zh' ? '' : `?lang=${lang}`}`;
@@ -173,7 +174,7 @@ function injectShareMeta(
 /**
  * 给首页注入 OG / Twitter card 标签、规范地址和各语言版本的地址。
  *
- * 分享图是 public/og.jpg（英文、日文是 og-en.jpg、og-ja.jpg）——用 `pnpm og` 从一张挑好的卡
+ * 分享图是 web/public/og.jpg（英文、日文是 og-en.jpg、og-ja.jpg）——用 `pnpm og` 从一张挑好的卡
  * 渲染出来的静态文件，不直接引用某张用户卡：用户的卡会过期、会被删，首页的门面不能跟着没了。
  * 某个语言的图还没做出来时用中文那张。
  *
@@ -257,6 +258,33 @@ async function fileVersion(path: string): Promise<number | null> {
   return s ? Math.floor(s.mtimeMs) : null;
 }
 
+/** 网站本身：只答 GET / HEAD，其余一律 404 */
+export async function handleSite(req: IncomingMessage, res: ServerResponse, url: URL): Promise<void> {
+  if (req.method !== 'GET' && req.method !== 'HEAD') {
+    json(res, 404, { error: 'not found' });
+    return;
+  }
+  // 文档在 /docs/ 下（VitePress 生成的静态页）。目录地址手打漏了末尾斜杠（/docs、/docs/deploy）时补上，
+  // 不然按文件找不到就落到首页的 404；带斜杠的才会去找目录下的 index.html
+  if (/^\/docs(\/[\w./-]*[^/])?$/.test(url.pathname)) {
+    const dir = resolve(WEB_DIR, `.${url.pathname}`);
+    if (dir.startsWith(resolve(WEB_DIR) + sep) && (await stat(join(dir, 'index.html')).then((s) => s.isFile(), () => false))) {
+      res.writeHead(301, { location: `${url.pathname}/${url.search}` }).end();
+      return;
+    }
+  }
+  // 这两个要写完整域名，所以按 PUBLIC_ORIGIN 现生成，不放静态文件——别人自托管时地址自然就对
+  if (url.pathname === '/robots.txt') {
+    text(res, 'text/plain; charset=utf-8', robotsTxt(), req.method);
+    return;
+  }
+  if (url.pathname === '/sitemap.xml') {
+    text(res, 'application/xml; charset=utf-8', await sitemapXml(), req.method);
+    return;
+  }
+  await serveStatic(url.pathname, res, req.method, clientIp(req), requestLang(req, url));
+}
+
 /**
  * 发前端静态文件。找不到就回 index.html，交给前端路由。
  *
@@ -266,7 +294,7 @@ async function fileVersion(path: string): Promise<number | null> {
  * 页面按这次请求的语言发（见 requestLang）：静态文字、标题、分享标签都换成那个语言，
  * 页面一出来就是对的，不用等脚本跑完再变。
  */
-export async function serveStatic(
+async function serveStatic(
   pathname: string,
   res: ServerResponse,
   method: string,

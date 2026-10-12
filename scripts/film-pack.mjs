@@ -23,8 +23,8 @@ const arg = (name, fallback) => {
 const url = arg('url', 'http://localhost:5273/');
 const out = arg('out', '/tmp/film-pack');
 mkdirSync(out, { recursive: true });
-const image = fileURLToPath(new URL('../public/apple-touch-icon.png', import.meta.url));
-const sample = fileURLToPath(new URL('../public/samples/demo', import.meta.url));
+const image = fileURLToPath(new URL('../web/public/apple-touch-icon.png', import.meta.url));
+const sample = fileURLToPath(new URL('../web/public/samples/demo', import.meta.url));
 
 const browser = await chromium.launch({
   args: ['--no-sandbox', '--disable-gpu', '--use-gl=swiftshader', '--in-process-gpu'],

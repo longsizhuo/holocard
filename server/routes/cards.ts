@@ -2,6 +2,7 @@
  * 网页用的卡片接口：上传、任务状态、分享、导出动图、作者配置、删除、层文件，以及给浏览器端退回处理用的模型权重
  */
 
+import type { JobCreated, JobStatus, Shared } from '../../src/api';
 import { randomUUID } from 'node:crypto';
 import { createReadStream } from 'node:fs';
 import { readFile, rename, rm, stat, writeFile } from 'node:fs/promises';
@@ -88,7 +89,7 @@ export async function handleCards(req: IncomingMessage, res: ServerResponse, url
       id: card.id,
       position: queue.indexOf(card.id) + 1,
       deleteToken: card.user_id ? null : card.delete_token,
-    });
+    } satisfies JobCreated);
     return true;
   }
 
@@ -120,7 +121,7 @@ export async function handleCards(req: IncomingMessage, res: ServerResponse, url
     json(res, 200, {
       url: `${PUBLIC_ORIGIN}/c/${id}`,
       expiresAt: expiresAt(updated, TTL_MS, KEEP_DOUBLINGS_CAP),
-    });
+    } satisfies Shared);
 
     // 预览图慢（要起浏览器渲染），不让用户等；排队渲染分享人那个语言的，失败也不影响分享本身
     const lang = requestLang(req, url);
@@ -129,7 +130,7 @@ export async function handleCards(req: IncomingMessage, res: ServerResponse, url
   }
 
   /*
-   * 导出动图（格式由前端按设备决定，见 src/demo/export.ts）。
+   * 导出动图（格式由前端按设备决定，见 web/site/export.ts）。
    *   POST  没有现成的就排队生成，返回当前状态
    *   GET   只查状态，给前端轮询
    * 生成好的文件就放在卡片目录里，和卡片同生共死：过期、被删时一起清掉。
@@ -391,7 +392,7 @@ export async function handleCards(req: IncomingMessage, res: ServerResponse, url
         ? { layers: `/api/layers/${card.id}`, layerCount: card.layer_count }
         : {}),
       ...(card.error ? { error: card.error } : {}),
-    });
+    } satisfies JobStatus);
     return true;
   }
   return false;

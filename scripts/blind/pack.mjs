@@ -105,9 +105,9 @@ picked = shuffle(picked).map((r, i) => {
 
 const page = resolve(out, 'page');
 mkdirSync(join(page, 'pairs'), { recursive: true });
-await build({ configFile: join(ROOT, 'vite.lab.config.ts'), root: ROOT, logLevel: 'error', build: { outDir: page, emptyOutDir: true } });
+await build({ configFile: join(ROOT, 'config', 'vite.lab.config.ts'), root: ROOT, logLevel: 'error', build: { outDir: page, emptyOutDir: true } });
 mkdirSync(join(page, 'pairs'), { recursive: true });
-copyFileSync(join(ROOT, 'lab', 'blind', 'index.html'), join(page, 'index.html'));
+copyFileSync(join(ROOT, 'web', 'lab', 'blind', 'index.html'), join(page, 'index.html'));
 
 for (const r of picked) {
   const pair = {};
