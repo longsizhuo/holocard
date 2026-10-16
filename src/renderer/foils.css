@@ -329,57 +329,20 @@
 /*
  * ---------- glow：光效（HoloCard 自己的配方，不来自上游） ----------
  *
- * 给识别出来的特效层用：光带、光弧、魔法轨迹。分两部分：
- *   .hc__shine  和别的箔面一样倾斜时才显：亮的彩虹渐变 + 闪粉，渐变跟指针走得比 rainbow 快，
- *               颜色随角度在光带上流动；:after 一道窄亮带跟着指针扫过
- *   .hc__flow   平时的白光：亮脉冲从左往右跑，横着的光带上看就是能量顺着线流过去（结构见 card.css）。
- *               倾斜时淡出，让位给上面的彩色流动，两者不同时出现。
- *               遮罩只取这一层的亮部（highlight.ts 的 brightMask），白光只落在光带本身，不会把旁边的暗处也提亮
+ * 给识别出来的特效层用：光带、光晕、魔法阵、火焰、闪电、闪光点。只有 .hc__flow 一部分：按类型的动画（见下），
+ * 静止和倾斜时都在播。遮罩只取这一层的亮部（highlight.ts 的 brightMask），光只落在特效本身，不会把旁边的暗处也提亮。
+ *
+ * 倾斜时不另上箔：以前这里有一层彩虹渐变 + 闪粉，color-dodge 加上提亮、加对比度，叠在本来就亮的特效上，
+ * 整块冲成纯白、纯青，像贴纸一样。特效层的画面就是原图，下面那层的箔面在倾斜时照常从特效上扫过就够了
  */
 
 .hc__shine[data-foil='glow'] {
-  --g-clr-1: hsl(330, 100%, 70%);
-  --g-clr-2: hsl(45, 100%, 65%);
-  --g-clr-3: hsl(160, 100%, 65%);
-  --g-clr-4: hsl(200, 100%, 70%);
-  --g-clr-5: hsl(270, 100%, 75%);
-
-  background-image:
-    var(--glitter, none),
-    linear-gradient(
-      110deg,
-      var(--g-clr-1), var(--g-clr-2), var(--g-clr-3), var(--g-clr-4), var(--g-clr-5),
-      var(--g-clr-1), var(--g-clr-2), var(--g-clr-3), var(--g-clr-4), var(--g-clr-5),
-      var(--g-clr-1)
-    );
-
-  background-blend-mode: soft-light;
-  background-size: var(--glittersize) var(--glittersize), 300% 300%;
-  background-position: center center, calc(var(--pointer-x) * 1.5) calc(var(--pointer-y) * 1.5);
-
-  filter: brightness(calc((var(--pointer-from-center) * 0.4) + 0.9)) contrast(1.6) saturate(1.4);
-  mix-blend-mode: color-dodge;
-}
-
-.hc__shine[data-foil='glow']:after {
-  content: '';
-
-  background-image: linear-gradient(
-    115deg,
-    transparent 0%,
-    transparent calc(var(--pointer-x) - 12%),
-    hsla(0, 0%, 100%, 0.9) var(--pointer-x),
-    transparent calc(var(--pointer-x) + 12%),
-    transparent 100%
-  );
-
-  mix-blend-mode: screen;
+  display: none;
 }
 
 .hc__flow[data-foil='glow'][data-ready] {
   display: block;
-  /* 平时白光，倾斜时让位给彩色流动：跟着 --card-opacity 反过来淡出，回正后再淡入 */
-  opacity: calc((1 - var(--card-opacity)) * var(--hc-foil-intensity, 1));
+  opacity: var(--hc-foil-intensity, 1);
   /* screen 是「加亮」：光带上推到白，晕开的那一点点余量里是一圈淡光。color-dodge 在已经很亮的细线上几乎没变化 */
   mix-blend-mode: screen;
   background-repeat: no-repeat;

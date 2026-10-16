@@ -92,7 +92,7 @@ Values of `foil.type` (`FOIL_TYPES`):
 | `holo` | Classic holo | Diagonal rainbow, fine scan lines and vertical grating | rare holo |
 | `sunpillar` | Sunpillar | Diagonal sun-pillar rainbow with metallic grain | rare holo v |
 | `rainbow` | Rainbow glitter | Glitter with a multi-color gradient | rare rainbow |
-| `glow` | Glow | At rest, plays a light animation chosen by the effect kind; when tilted, a colored flow that follows the pointer. Meant for effect layers | — (HoloCard's own recipe) |
+| `glow` | Glow | Plays a light animation chosen by the effect kind, at rest and while tilted; adds no foil when tilted. Meant for effect layers | — (HoloCard's own recipe) |
 
 ## Effect layers
 

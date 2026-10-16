@@ -12,7 +12,7 @@
 |---|---|---|---|---|
 | 景深层 | 各层自己的画面 | 是，各层系数不同 | 始终 | `layers[].parallax` |
 | 每层的箔面 | 只在该层的 alpha 形状内 | 是，跟随所在层 | 指针悬停即亮 | `layers[].foil` |
-| 特效动效 | 特效层里比周围亮的部分 | 是，跟随所在层 | 静止时播放，倾斜时淡出 | `layers[].effect` |
+| 特效动效 | 特效层里比周围亮的部分 | 是，跟随所在层 | 始终播放 | `layers[].effect` |
 | 整卡炫光 | 整张卡面 | 遮罩跟随所在视差组，光本身不动 | 只在特定倾角浮现 | `effects.halo` |
 | 整卡高光 | 整张卡面 | 同上 | 跟随指针 | `effects.glare` |
 
@@ -62,7 +62,7 @@ card.setLayerSet(await loadLayerSet('/api/layers/<id>'));
       ├ .hc__plane       每层一个：平移 + 放大
       │ ├ .hc__art       该层画面
       │ ├ .hc__shine     该层箔面，data-foil 指定配方，--hc-mask 为遮罩
-      │ └ .hc__flow      光效（glow）静止时的动画，data-effect 指定特效类型，--hc-flow-mask 为亮部遮罩
+      │ └ .hc__flow      光效（glow）的动画，data-effect 指定特效类型，--hc-flow-mask 为亮部遮罩
       └ .hc__fx          每个视差组一个，压在该组之上
         ├ .hc__halo      整卡炫光
         └ .hc__glare     整卡高光（effects.glare 为 true 时）
@@ -93,10 +93,9 @@ card.setLayerSet(await loadLayerSet('/api/layers/<id>'));
 
 ## 特效动效
 
-分层时识别出的特效单独成层（见[分层流水线](/develop/pipeline#服务端识别特效-sam3-card)），默认上光效 `glow`。光效分两部分：
+分层时识别出的特效单独成层（见[分层流水线](/develop/pipeline#服务端识别特效-sam3-card)），默认上光效 `glow`。光效只有 `.hc__flow` 一部分：按类型的动画，`mix-blend-mode: screen` 加亮，静止和倾斜时都在播。
 
-- `.hc__shine`：和其他箔面一样倾斜时才显，亮的彩虹渐变加闪粉，渐变跟指针走得比 `rainbow` 快，颜色在特效上流动。
-- `.hc__flow`：静止时的动画，`mix-blend-mode: screen` 加亮。倾斜时随 `--card-opacity` 淡出，让位给上面的彩色流动。
+倾斜时特效层不另上箔（`.hc__shine[data-foil='glow']` 不显示）。早先的版本在这里叠一层彩虹渐变加闪粉，`color-dodge` 再加提亮、加对比度，叠在本来就亮的特效上会整块冲成纯白、纯青，像贴纸。特效层的画面就是原图，下面那一层的箔面倾斜时照常从特效区域扫过。
 
 动的是光，不是形状：特效层的画面就是原图，动画只是叠在上面的一层加亮。类型决定节奏，形状决定走向：
 

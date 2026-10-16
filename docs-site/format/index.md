@@ -92,7 +92,7 @@ mycard.layers/
 | `holo` | 经典闪卡 holo | 斜向彩虹、细扫描线与竖向光栅 | rare holo |
 | `sunpillar` | 日柱 sunpillar | 斜向日柱彩虹，带金属颗粒 | rare holo v |
 | `rainbow` | 彩虹闪粉 rainbow | 闪粉与多色渐变 | rare rainbow |
-| `glow` | 光效 glow | 静止时按特效类型播放光的动画；倾斜时为跟随指针的彩色流动。供特效层使用 | —（HoloCard 自有配方） |
+| `glow` | 光效 glow | 按特效类型播放光的动画，静止和倾斜时都在播；倾斜时不另上箔。供特效层使用 | —（HoloCard 自有配方） |
 
 ## 特效层
 

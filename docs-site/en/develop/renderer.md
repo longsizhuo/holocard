@@ -12,7 +12,7 @@ The structure mirrors how real holographic cards are printed: the base is foil, 
 |---|---|---|---|---|
 | Depth layers | Each layer's own image | Yes, by each layer's coefficient | Always | `layers[].parallax` |
 | Per-layer foil | Only within that layer's alpha | Yes, with its layer | As soon as the pointer hovers | `layers[].foil` |
-| Animated effects | The brighter parts of an effect layer | Yes, with its layer | Plays at rest, fades out while tilted | `layers[].effect` |
+| Animated effects | The brighter parts of an effect layer | Yes, with its layer | Always playing | `layers[].effect` |
 | Card-wide halo | Whole card | Mask follows its parallax group; the light itself does not move | Only at certain tilt angles | `effects.halo` |
 | Card-wide glare | Whole card | Same as above | Follows the pointer | `effects.glare` |
 
@@ -62,7 +62,7 @@ The renderer does not read `effects.parallax` itself; callers set `amplitude` fr
       ├ .hc__plane       one per layer: translate + scale
       │ ├ .hc__art       the layer image
       │ ├ .hc__shine     the layer's foil; data-foil selects the recipe, --hc-mask is its mask
-      │ └ .hc__flow      the glow foil's rest animation; data-effect is the effect kind, --hc-flow-mask the bright-area mask
+      │ └ .hc__flow      the glow foil's animation; data-effect is the effect kind, --hc-flow-mask the bright-area mask
       └ .hc__fx          one per parallax group, above that group
         ├ .hc__halo      card-wide halo
         └ .hc__glare     card-wide glare (when effects.glare is true)
@@ -93,10 +93,9 @@ Grain and glitter textures are generated at runtime by `textures.ts` from a fixe
 
 ## Animated effects
 
-Effects found during layering get layers of their own (see [Layering pipeline](/en/develop/pipeline#server-side-effect-detection-sam3-card)) with the `glow` foil by default. Glow has two parts:
+Effects found during layering get layers of their own (see [Layering pipeline](/en/develop/pipeline#server-side-effect-detection-sam3-card)) with the `glow` foil by default. Glow has a single part, `.hc__flow`: the animation for the effect kind, brightening with `mix-blend-mode: screen`, playing both at rest and while tilted.
 
-- `.hc__shine`: like other foils, shows only when tilted — a bright rainbow gradient with glitter that moves faster with the pointer than `rainbow`, so colour flows along the effect.
-- `.hc__flow`: the rest animation, brightening with `mix-blend-mode: screen`. It fades out with `--card-opacity` while tilted, giving way to the coloured flow above.
+Effect layers get no extra foil when tilted (`.hc__shine[data-foil='glow']` is hidden). An earlier version laid a rainbow gradient with glitter here, and `color-dodge` plus extra brightness and contrast on top of an already bright effect blew it out into flat white or cyan, like a sticker. An effect layer's image is the original picture, so the foil of the layer below still sweeps across the effect when tilted.
 
 The light moves, not the shape: an effect layer's image is the original picture, and the animation is only a brightening on top. The kind sets the rhythm and the shape sets the direction:
 
