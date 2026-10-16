@@ -118,6 +118,27 @@ def png_b64(gray):
     return base64.b64encode(buf.getvalue()).decode()
 
 
+# 线稿按块算：2048 的图整张算，中间结果要好几 G 显存，显卡同时在训练时放不下、溢出到内存，一张要半分钟；
+# 切成 TILE 的块、每块四周多带 OVERLAP 像素的上下文再裁掉，拼起来看不出接缝，显存只要四分之一
+TILE = 1024
+OVERLAP = 64
+
+
+def manga_tiled(gray, F):
+    h, w = gray.shape[-2:]
+    out = torch.empty((h, w), device=gray.device)
+    for y0 in range(0, h, TILE):
+        for x0 in range(0, w, TILE):
+            y1, x1 = min(h, y0 + TILE), min(w, x0 + TILE)
+            ya, xa, yb, xb = max(0, y0 - OVERLAP), max(0, x0 - OVERLAP), min(h, y1 + OVERLAP), min(w, x1 + OVERLAP)
+            tile = gray[..., ya:yb, xa:xb]
+            th, tw = tile.shape[-2:]
+            # 宽高补到 256 的倍数（复制边缘），算完裁回来；按比例，不压成正方形
+            res = manga(F.pad(tile, (0, -tw % 256, 0, -th % 256), mode="replicate"))[0, 0, :th, :tw]
+            out[y0:y1, x0:x1] = res[y0 - ya : y0 - ya + (y1 - y0), x0 - xa : x0 - xa + (x1 - x0)]
+    return out
+
+
 def lineart(image):
     global proc, manga, last_used
     import torch.nn.functional as F
@@ -135,10 +156,8 @@ def lineart(image):
         t0 = time.time()
         gray = torch.from_numpy(np.asarray(image.convert("L"), np.float32)).to(opt.device)[None, None]
         h, w = gray.shape[-2:]
-        # 宽高补到 256 的倍数（复制边缘），算完裁回来；按比例，不压成正方形
-        padded = F.pad(gray, (0, -w % 256, 0, -h % 256), mode="replicate")
         with torch.inference_mode():
-            line = manga(padded)[0, 0, :h, :w].clamp(0, 255).byte().cpu().numpy()
+            line = manga_tiled(gray, F).clamp(0, 255).byte().cpu().numpy()
             subject = np.zeros((h, w), bool)
             with torch.autocast("cuda", dtype=torch.bfloat16, enabled=opt.device == "cuda"):
                 state = proc.set_image(image)
