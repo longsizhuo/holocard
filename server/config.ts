@@ -129,6 +129,15 @@ export const MATTE_READY = MATTE_WEIGHTS && (MEMORY_CAP === 0 || MEMORY_CAP >= M
  * 导出动图：同时排队的上限，和每个 IP 在限流窗口内最多导出几次。
  * 一次导出要十几到几十秒的 CPU（无头浏览器软件渲染 + 视频编码），比分层还重。
  */
+/**
+ * 特效识别服务（deploy/sam3/serve.py）的地址，逗号分隔，按顺序问，前一个不通再问下一个（见 server/pipeline/effects.ts）。
+ * 默认先问显卡机（本机 8795 是到显卡机的 ssh 隧道），再问本机的 CPU 兜底（8796）。设成空串就不识别特效
+ */
+export const EFFECTS_URLS = (process.env.HOLOCARD_EFFECTS_URLS ?? 'http://127.0.0.1:8795,http://127.0.0.1:8796')
+  .split(',')
+  .map((url) => url.trim())
+  .filter(Boolean);
+
 export const MAX_EXPORT_QUEUE = Number(process.env.HOLOCARD_MAX_EXPORT_QUEUE ?? 6);
 export const EXPORT_RATE_LIMIT = Number(process.env.HOLOCARD_EXPORT_RATE_LIMIT ?? 8);
 

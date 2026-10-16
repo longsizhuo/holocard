@@ -14,6 +14,7 @@ import type { LayerManifest } from '../../src/format/types';
 import {
   CONCURRENCY,
   MATTE_MODEL,
+  EFFECTS_URLS,
   MATTE_READY,
   MAX_UPLOAD,
   MIN_FREE_BYTES,
@@ -68,7 +69,13 @@ function cpuShare(): number {
 export const CPU_SHARE = cpuShare();
 
 function spawnSegmenter(): Worker {
-  const config: SegmenterConfig = { modelDir: MODEL_DIR, matte: MATTE_READY, threads: CPU_SHARE, matteModel: MATTE_MODEL };
+  const config: SegmenterConfig = {
+    modelDir: MODEL_DIR,
+    matte: MATTE_READY,
+    threads: CPU_SHARE,
+    matteModel: MATTE_MODEL,
+    effectsUrls: EFFECTS_URLS,
+  };
   const worker = new Worker(new URL('./segment-worker.mjs', import.meta.url), { workerData: config });
   let ready = false;
   worker.on('message', (reply: SegmentReply) => {

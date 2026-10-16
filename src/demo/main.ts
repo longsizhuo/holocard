@@ -6,7 +6,7 @@ import './pearl-drift.css';
 import { HoloCard } from '../renderer/card';
 import { ensureTextures } from '../renderer/textures';
 import { LayerFormatError, loadLayerSet } from '../format/io';
-import { FOIL_TYPES, type FoilType, type LayerSet, type ParallaxEffect } from '../format/types';
+import { FOIL_TYPES, type FoilType, type LayerFoil, type LayerSet, type ParallaxEffect } from '../format/types';
 import {
   account,
   ApiError,
@@ -60,11 +60,18 @@ const FOIL_LABEL: Record<FoilType, MessageKey> = {
   holo: 'foil.holo',
   sunpillar: 'foil.sunpillar',
   rainbow: 'foil.rainbow',
+  glow: 'foil.glow',
 };
 
 const status = need<HTMLParagraphElement>('#status');
 const foilList = need<HTMLDivElement>('#foil-list');
 
+
+const fxBox = need<HTMLLabelElement>('#fx-box');
+const fxStrengthBox = need<HTMLLabelElement>('#fx-strength-box');
+const ctlFx = need<HTMLInputElement>('#ctl-fx');
+const ctlFxStrength = need<HTMLInputElement>('#ctl-fx-strength');
+const outFx = need<HTMLOutputElement>('#out-fx');
 
 const ctlAmp = need<HTMLInputElement>('#ctl-amp');
 const ctlIntensity = need<HTMLInputElement>('#ctl-intensity');
@@ -213,7 +220,7 @@ function resetExport(): void {
 
 // ---------- 箔面面板 ----------
 
-/** 层的称呼：由远及近 */
+/** 层的称呼：由远及近。index、count 只数景深层，不算特效层 */
 function layerName(index: number, count: number): string {
   if (count === 1) return t('layer.whole');
   if (index === 0) return t('layer.far');
@@ -224,19 +231,22 @@ function layerName(index: number, count: number): string {
 /** 按当前层数重建「各层箔面」面板。层数是算出来的，不能写死在 HTML 里 */
 function buildFoilControls(set: LayerSet): void {
   foilList.replaceChildren();
-  const count = set.manifest.layers.length;
+  // 特效层不列在这里，在「景深、炫光与特效」里统一开关（buildEffectControls）
+  const depthLayers = set.manifest.layers.filter((layer) => layer.role !== 'effects');
+  const count = depthLayers.length;
 
   // 面板从近到远排，和肉眼看卡的顺序一致：先看到主体，再看到背景
-  for (let index = count - 1; index >= 0; index--) {
-    const layer = set.manifest.layers[index];
+  for (let order = count - 1; order >= 0; order--) {
+    const layer = depthLayers[order];
     if (!layer) continue;
+    const index = set.manifest.layers.indexOf(layer);
 
     const row = document.createElement('div');
     row.className = 'foil-row';
 
     const name = document.createElement('span');
     name.className = 'foil-row__name';
-    name.textContent = layerName(index, count);
+    name.textContent = layerName(order, count);
 
     const select = document.createElement('select');
     for (const type of FOIL_TYPES) {
@@ -270,7 +280,40 @@ function buildFoilControls(set: LayerSet): void {
     row.append(name, select, strength);
     foilList.append(row);
   }
+  buildEffectControls(set);
 }
+
+/**
+ * 特效动效的开关和强度。一张卡可能有好几个特效层（每类、每个景深层各一份），一起调。
+ * 关掉就是把特效层的箔面设成 none：画面就是原图，叠在下面那层上看不出来，和没有这一层一样
+ */
+function buildEffectControls(set: LayerSet): void {
+  const first = set.manifest.layers.find((layer) => layer.role === 'effects');
+  fxBox.hidden = fxStrengthBox.hidden = !first;
+  if (!first) return;
+  ctlFx.checked = first.foil.type !== 'none';
+  ctlFxStrength.value = String(first.foil.intensity);
+  syncEffectControls();
+}
+
+function syncEffectControls(): void {
+  ctlFxStrength.disabled = !ctlFx.checked;
+  outFx.value = Number(ctlFxStrength.value).toFixed(2);
+}
+
+function applyEffects(): void {
+  if (!current) return;
+  const foil: LayerFoil = { type: ctlFx.checked ? 'glow' : 'none', intensity: Number(ctlFxStrength.value) };
+  current.manifest.layers.forEach((layer, index) => {
+    if (layer.role !== 'effects') return;
+    layer.foil = { ...foil };
+    card.setLayerFoil(index, layer.foil);
+  });
+  syncEffectControls();
+  scheduleSave();
+}
+ctlFx.addEventListener('change', applyEffects);
+ctlFxStrength.addEventListener('input', applyEffects);
 
 /** 换一组层：渲染 + 重建面板 + 让面板上的全局参数继续生效 */
 function show(set: LayerSet, id: string | null = null): void {
@@ -451,7 +494,8 @@ const PROGRESS_SPANS: Partial<Record<MessageKey, readonly [number, number, numbe
   'stage.estimating-depth': [0.2, 0.3, 5],
   'stage.analyzing': [0.3, 0.32, 1],
   'stage.finding-subject': [0.32, 0.86, 28],
-  'stage.extracting': [0.86, 0.93, 3],
+  'stage.extracting': [0.86, 0.91, 3],
+  'stage.finding-effects': [0.91, 0.93, 2],
   'stage.done': [0.93, 0.95, 1],
   'progress.fetching': [0.95, 0.99, 2],
 };

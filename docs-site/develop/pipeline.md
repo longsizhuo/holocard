@@ -14,6 +14,7 @@
                      └→ 每层 alpha（同时是这一层的箔面遮罩）
                           └→ 逐层补全 + 镜像纹理填充 + 软边去背景色
                                └→ .layers ──→ 渲染器
+ └→ SAM3-Card 识别特效（仅服务端，与上面同时进行）──→ 每类特效一层，插在所在的层之后
 ```
 
 `segmentToLayerSet`（`index.ts`）依次报告以下阶段，服务端据此更新任务的 `stage` 并估计剩余时间：
@@ -25,6 +26,7 @@
 | `analyzing` | 计算梯度证据、在直方图上选切点 | `slice.ts` |
 | `finding-subject` | 抠主体并重定切点（仅当调用方提供 `findSubject`） | `matte.ts`、`slice.ts` |
 | `extracting` | 生成每层的 alpha 与颜色 | `extract.ts`、`refine.ts`、`morph.ts` |
+| `finding-effects` | 等特效识别的结果并生成特效层（仅当调用方提供 `findEffects`） | `index.ts`、`server/pipeline/effects.ts` |
 
 ## 为什么需要两种信息
 
@@ -228,6 +230,26 @@ staging 上 16 张图、以完整版为参照、4 核 ARM 的对比：
 三者训练集相同，lite 只是骨干网络较小。半精度在 ARM CPU 上反而慢四成；lite 量化为 int8 只快一成、结果相同，因此保持 fp32。
 
 更换型号时修改 `src/segmenter/matte.ts` 的 `MATTE_MODEL_ID` 与输入边长；做对比实验时可不改代码，用环境变量 `HOLOCARD_MATTE_MODEL`、`HOLOCARD_MATTE_SIZE`、`HOLOCARD_MATTE_DTYPE` 指定，配合[双盲对比](/develop/#双盲对比-scripts-blind)脚本评估。
+
+## 服务端识别特效（SAM3-Card）
+
+画中的特效（光带、光晕、魔法阵、火焰、闪电、闪光点）单独成层，静止时按类型播放光效动画（见[渲染器](/develop/renderer#特效动效)），开关在网站面板的「特效动效」。
+
+识别模型是 SAM3-Card：在 Meta 的 SAM 3 上用游戏卡图和插画微调的版本，认 6 类，按文字提示（`light energy`、`glow`、`magic circle`、`fire`、`lightning`、`sparkles`）各问一遍，每类回一张遮罩。训练数据来自 Claude 标注、SAM 3 按标注框出遮罩、多轮复核的离线流程，权重不在仓库中。当前权重（v11，四个存档的权重平均）在三套留出集上：
+
+| 指标 | 数值 |
+|---|---|
+| 召回（宝可梦卡 / 新卡 / 插画），阈值 0.5 | 67.2% / 77.1% / 66.1% |
+| 精度（报出的特效经 Claude 复核为真特效的比例，卡面固定的背景纹样算可接受） | 92.0% |
+
+模型太大，不放进分层服务：它是一个单独的 Python 服务（`deploy/sam3/serve.py`），`POST /effects` 收一张图，回各类遮罩。`server/pipeline/effects.ts` 在分层开始时就把图（缩到长边 1008）发过去，和估深度、抠主体同时进行；切完层后取结果（阶段 `finding-effects`）。地址按 `HOLOCARD_EFFECTS_URLS` 的顺序问，前一个不通再问下一个，全都不通就不出特效层，卡照常生成：
+
+| 位置 | 每张耗时 | 说明 |
+|---|---|---|
+| 有显卡的机器（`--device cuda`） | RTX 5080 上约 0.5 秒，冷启动另加十几秒 | bf16；闲置一段时间卸载模型 |
+| 分层服务所在的机器，CPU 兜底（`--device cpu`） | 4 核 ARM 上约 1.5 分钟，冷启动另加约 1 分钟 | fp32，常驻约 6 GB 内存，闲置一段时间卸载 |
+
+拿回的遮罩按比例放大到层图尺寸（双线性），每个像素归给此处看得见的那一层（由近及远第一个 alpha 不低于 0.5 的层）。每个景深层上的每类特效各成一层，插在该层之后，`depth`、`parallax` 与该层相同，画面是原图，`effect` 记录类型（见[文件格式](/format/#特效层)）。主体层也会有特效层：抠图常把角色身边的光环一起抠进主体，这部分光效应当跟着主体移动。
 
 ## 输出
 

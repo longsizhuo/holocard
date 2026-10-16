@@ -12,6 +12,7 @@
 |---|---|---|---|---|
 | 景深层 | 各层自己的画面 | 是，各层系数不同 | 始终 | `layers[].parallax` |
 | 每层的箔面 | 只在该层的 alpha 形状内 | 是，跟随所在层 | 指针悬停即亮 | `layers[].foil` |
+| 特效动效 | 特效层里比周围亮的部分 | 是，跟随所在层 | 静止时播放，倾斜时淡出 | `layers[].effect` |
 | 整卡炫光 | 整张卡面 | 遮罩跟随所在视差组，光本身不动 | 只在特定倾角浮现 | `effects.halo` |
 | 整卡高光 | 整张卡面 | 同上 | 跟随指针 | `effects.glare` |
 
@@ -22,7 +23,7 @@
 | `card.ts` | `HoloCard` 类：DOM 结构、视差、弹簧驱动的交互、炫光角度模型、陀螺仪接管 |
 | `card.css` | 结构样式、逐层箔面遮罩、整卡炫光与高光、「减少动态效果」 |
 | `foils.css` | 箔面配方 |
-| `highlight.ts` | 高光保护遮罩 |
+| `highlight.ts` | 高光保护遮罩；特效动效的亮部遮罩和形状（中心、长轴） |
 | `spring.ts` | 弹簧积分 |
 | `gyro.ts` | 设备倾斜 → 指针位置，基准自动回正 |
 | `textures.ts` | 颗粒（grain）与闪粉（glitter）纹理的程序化生成 |
@@ -60,7 +61,8 @@ card.setLayerSet(await loadLayerSet('/api/layers/<id>'));
     └ .hc__stack
       ├ .hc__plane       每层一个：平移 + 放大
       │ ├ .hc__art       该层画面
-      │ └ .hc__shine     该层箔面，data-foil 指定配方，--hc-mask 为遮罩
+      │ ├ .hc__shine     该层箔面，data-foil 指定配方，--hc-mask 为遮罩
+      │ └ .hc__flow      光效（glow）静止时的动画，data-effect 指定特效类型，--hc-flow-mask 为亮部遮罩
       └ .hc__fx          每个视差组一个，压在该组之上
         ├ .hc__halo      整卡炫光
         └ .hc__glare     整卡高光（effects.glare 为 true 时）
@@ -83,10 +85,31 @@ card.setLayerSet(await loadLayerSet('/api/layers/<id>'));
 | `holo` | 经典闪卡 | `regular-holo.css` |
 | `sunpillar` | V 卡日柱 | `v-regular.css` |
 | `rainbow` | 彩虹闪粉 | `rainbow-holo.css` |
+| `glow` | 光效，供特效层使用 | —（自有配方，见下文「特效动效」） |
 
 `foils.css` 中的渐变、混合模式与滤镜数值与上游一致，改动只有四处：选择器改为 `.hc__shine[data-foil=…]`；去掉上游限制在插画窗口内的 `clip-path`；`rainbow` 省略依赖每张卡专属蚀刻图的 `:before`；`sunpillar` 斜纹层的位置由 `-x` 改为 `100% - x`，去掉一道竖直接缝。CSS 变量名（`--pointer-x`、`--background-x`、`--card-opacity` 等）与上游保持一致，移植其他配方时可直接复制。
 
 颗粒与闪粉纹理由 `textures.ts` 用固定种子（mulberry32）在运行时生成，仓库中没有二进制素材。纹理生成前箔面照常工作，只是暂时没有颗粒与闪粉；不支持 OffscreenCanvas 的环境退化为纯渐变。
+
+## 特效动效
+
+分层时识别出的特效单独成层（见[分层流水线](/develop/pipeline#服务端识别特效-sam3-card)），默认上光效 `glow`。光效分两部分：
+
+- `.hc__shine`：和其他箔面一样倾斜时才显，亮的彩虹渐变加闪粉，渐变跟指针走得比 `rainbow` 快，颜色在特效上流动。
+- `.hc__flow`：静止时的动画，`mix-blend-mode: screen` 加亮。倾斜时随 `--card-opacity` 淡出，让位给上面的彩色流动。
+
+动的是光，不是形状：特效层的画面就是原图，动画只是叠在上面的一层加亮。类型决定节奏，形状决定走向：
+
+| `effect` | 动画 | 走向 |
+|---|---|---|
+| `energy`（缺省） | 一颗亮脉冲从一端跑到另一端，2.8 秒一趟 | 沿亮部的长轴 |
+| `glow` | 整片一明一暗，3.6 秒一次 | — |
+| `circle` | 一道亮弧旋转，3.2 秒一圈 | 绕亮部的中心 |
+| `fire` | 亮带往上窜，亮度不规则跳动 | 向上 |
+| `lightning` | 大半时间不亮，每 2.6 秒连闪两下 | — |
+| `sparkles` | 两层疏密不同的光点网格朝不同方向慢慢移动，扫过的星点先后闪烁 | — |
+
+`.hc__flow` 的遮罩（`highlight.ts` 的 `brightMask`）只取这一层亮于中位数的部分，再向外晕开约 0.2% 卡宽：特效层的边缘有一圈暗处，不只取亮部的话加亮会落在特效旁边。算遮罩时顺便按亮部的二阶矩求出中心和长轴，写入 `--hc-fx-x`、`--hc-fx-y`、`--hc-fx-angle`。动画通过注册过的自定义属性（`@property` 声明的 `--hc-fx-p`、`--hc-fx-a`、`--hc-fx-spin`）驱动，渐变中的位置、透明度和角度才能平滑插值；不支持 `@property` 的浏览器上动画按关键帧跳变。只有用到光效的层才计算这份遮罩，遮罩算好之前不显示动画。
 
 ## 视差
 
@@ -173,4 +196,4 @@ transform:
 
 ## 减少动态效果
 
-`prefers-reduced-motion: reduce` 下保留箔面，去掉几何运动：`.hc`、`.hc__rotator`、`.hc__plane` 的 `transform` 被锁定，炫光遮罩恢复原尺寸对齐；箔面的 `background-position` 仍随指针变化，表现为原地变色的微光。`card.ts` 同时停用弹簧循环，指针停止即直接落位，不产生过冲。该偏好每次实时读取，修改系统设置后无需刷新页面。
+`prefers-reduced-motion: reduce` 下保留箔面，去掉几何运动和特效动效：`.hc`、`.hc__rotator`、`.hc__plane` 的 `transform` 被锁定，炫光遮罩恢复原尺寸对齐；箔面的 `background-position` 仍随指针变化，表现为原地变色的微光。`card.ts` 同时停用弹簧循环，指针停止即直接落位，不产生过冲。该偏好每次实时读取，修改系统设置后无需刷新页面。

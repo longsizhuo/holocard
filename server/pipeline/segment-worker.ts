@@ -26,6 +26,7 @@ import { SERVER_REFINE_OPTIONS } from '../../src/segmenter/refine';
 import sharp from 'sharp';
 import { sharpImages } from './images';
 import { textProbability } from './textdet';
+import { detectEffects } from './effects';
 
 /** 起线程时一次性给的配置 */
 export interface SegmenterConfig {
@@ -36,6 +37,8 @@ export interface SegmenterConfig {
   threads: number;
   /** 抠图用哪个模型，见 server/config.ts 的 MATTE_MODEL */
   matteModel: MatteModelConfig;
+  /** 特效识别服务的地址，按顺序问，见 server/config.ts 的 EFFECTS_URLS */
+  effectsUrls: string[];
 }
 
 export type SegmentRequest =
@@ -124,6 +127,7 @@ port.on('message', (request: SegmentRequest) => {
         subjectModel: config.matteModel.id,
         extract: { images: sharpImages, refine: SERVER_REFINE_OPTIONS },
         onProgress: (p) => port.postMessage({ type: 'stage', stage: p.stage } satisfies SegmentReply),
+        findEffects: (image: Blob) => detectEffects(image, config.effectsUrls),
         ...(request.matte
           ? {
               findSubject: (image: Blob) =>

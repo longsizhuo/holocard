@@ -79,6 +79,7 @@ const STAGE_KEYS: Record<string, MessageKey> = {
   analyzing: 'stage.analyzing',
   'finding-subject': 'stage.finding-subject',
   extracting: 'stage.extracting',
+  'finding-effects': 'stage.finding-effects',
   done: 'stage.done',
 };
 

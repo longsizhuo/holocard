@@ -145,6 +145,7 @@ holocard/
 | `routes/cardmask.ts` | 卡面遮罩 `/api/cardmask`：上传、状态、遮罩文件 |
 | `pipeline/jobs.ts` | 分层任务：收上传（`acceptUpload`）、队列、调度工作线程、裸露识别、缩略图、启动时续跑 |
 | `pipeline/segment-worker.ts` | 分层流水线的常驻工作线程 |
+| `pipeline/effects.ts` | 特效识别：把图发给 SAM3-Card 识别服务（`deploy/sam3/serve.py`），按地址顺序问，拿回每类特效的遮罩 |
 | `pipeline/images.ts` | sharp 图片编解码：原图规范化（摆正方向、去除 EXIF、HEIC 解码）、层图转 WebP、卡册缩略图 |
 | `pipeline/moderation.ts` | NudeNet 裸露识别 |
 | `pipeline/eta.ts` | 剩余时间估计：按阶段的耗时指数平均 |
@@ -172,7 +173,7 @@ npm 包 `@holocard/player` 的发布目录：`package.json`、`README.md`、示�
 
 ### `deploy`
 
-线上（`deploy/production/`）与 staging（`deploy/staging/`）的安装脚本、systemd 单元与发版脚本。见[自托管部署](/deploy/)。
+线上（`deploy/production/`）与 staging（`deploy/staging/`）的安装脚本、systemd 单元与发版脚本；`deploy/sam3/` 是特效识别服务（Python，见[分层流水线](/develop/pipeline#服务端识别特效-sam3-card)）。见[自托管部署](/deploy/)。
 
 ## 前后端协作
 

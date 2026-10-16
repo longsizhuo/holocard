@@ -8,8 +8,11 @@
  * 计时用单调时钟（performance.now）：系统校时一跳，墙钟算出来的耗时会是负的或者几千秒，把平均带偏十几张图
  */
 
-/** 流水线的阶段顺序。saving 是工作线程报完 done 之后、主线程转 WebP 写盘那一段 */
-const STAGES = ['loading-model', 'estimating-depth', 'analyzing', 'finding-subject', 'extracting', 'saving'] as const;
+/**
+ * 流水线的阶段顺序。saving 是工作线程报完 done 之后、主线程转 WebP 写盘那一段。
+ * finding-effects 是切完层之后等特效识别的那一段：识别和前面几步同时跑，显卡机在线时早就好了，退到 CPU 兜底才要等
+ */
+const STAGES = ['loading-model', 'estimating-depth', 'analyzing', 'finding-subject', 'extracting', 'finding-effects', 'saving'] as const;
 type Stage = (typeof STAGES)[number];
 
 /**
@@ -22,6 +25,7 @@ const average: Record<Stage, number> = {
   analyzing: 0.5,
   'finding-subject': 24.5,
   extracting: 2.7,
+  'finding-effects': 1,
   saving: 0.5,
 };
 /** 新样本的权重。三五张图就能跟上机器的变化，又不至于被一张特别大的图带偏 */

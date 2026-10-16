@@ -145,8 +145,22 @@
               <input type="checkbox" id="ctl-parallax" role="switch" checked />
             </label>
 
+            <!--
+              特效动效开关：分层时识别出的特效（manifest 里 role 为 effects 的层）按类型动起来，关掉就是原图。
+              没有特效的卡隐藏，强度在下面的折叠面板里。逻辑见 main.ts 的 buildEffectControls
+            -->
+            <label class="toggle" id="fx-box" hidden>
+              <span class="toggle__text" data-i18n="panel.effects">特效动效</span>
+              <input type="checkbox" id="ctl-fx" role="switch" checked />
+            </label>
+
             <details class="more">
-              <summary class="more__head" data-i18n="panel.more">景深与炫光</summary>
+              <summary class="more__head" data-i18n="panel.more">景深、炫光与特效</summary>
+
+              <label class="field" id="fx-strength-box" hidden>
+                <span class="field__label"><span data-i18n="panel.effectsStrength">特效强度</span> <output id="out-fx">1</output></span>
+                <input id="ctl-fx-strength" type="range" min="0" max="1" step="0.05" value="1" />
+              </label>
 
               <label class="field">
                 <span class="field__label"><span data-i18n="panel.amp">视差振幅</span> <output id="out-amp">2%</output></span>

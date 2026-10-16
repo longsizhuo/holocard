@@ -145,6 +145,7 @@ The layering service is one Node process that serves the frontend's static files
 | `routes/cardmask.ts` | Card masks `/api/cardmask`: upload, status, mask files |
 | `pipeline/jobs.ts` | Layering jobs: accepting uploads (`acceptUpload`), the queue, dispatching to the worker thread, nudity detection, thumbnails, resuming on startup |
 | `pipeline/segment-worker.ts` | Long-lived worker thread running the layering pipeline |
+| `pipeline/effects.ts` | Effect detection: sends the image to the SAM3-Card service (`deploy/sam3/serve.py`), trying addresses in order, and returns a mask per kind of effect |
 | `pipeline/images.ts` | sharp image codecs: normalising originals (orientation, EXIF removal, HEIC decoding), converting layers to WebP, album thumbnails |
 | `pipeline/moderation.ts` | NudeNet nudity detection |
 | `pipeline/eta.ts` | Remaining-time estimate from exponentially averaged per-stage durations |
@@ -172,7 +173,7 @@ This documentation site. Chinese pages live in `docs-site/<section>/`, English i
 
 ### `deploy`
 
-Install scripts, systemd units and release scripts for production (`deploy/production/`) and staging (`deploy/staging/`). See [Self-hosting](/en/deploy/).
+Install scripts, systemd units and release scripts for production (`deploy/production/`) and staging (`deploy/staging/`); `deploy/sam3/` is the effect detection service (Python, see [Layering pipeline](/en/develop/pipeline#server-side-effect-detection-sam3-card)). See [Self-hosting](/en/deploy/).
 
 ## How frontend and server work together
 

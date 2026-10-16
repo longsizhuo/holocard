@@ -51,6 +51,8 @@ The renderer uses `width / height` as the card's aspect ratio.
 | `parallax` | number | No | Same as `depth` | Parallax coefficient; see "How the player and the website use these fields" |
 | `bbox` | `[x, y, w, h]` | Yes | — | Bounding box of the layer's non-transparent pixels, in pixel coordinates, 4 numbers |
 | `inpainted` | boolean | No | `false` | Whether occluded areas of the layer have been filled; only `true` counts as filled |
+| `role` | string | No | none | What the layer is. Missing means an ordinary depth layer; `effects` marks an effect layer, see "Effect layers" |
+| `effect` | string | No | `energy` | The kind of effect on an effect layer, only meaningful when `role` is `effects`; values in "Effect layers". Invalid values fall back to the default |
 | `foil` | object | No | By layer order, see below | The layer's foil |
 | `foil.type` | string | Yes (when `foil` is present) | — | Foil type; see "Foil types" |
 | `foil.intensity` | number | No | `1` | Foil strength, 0–1; out-of-range values are clamped |
@@ -63,6 +65,8 @@ When `foil` is missing or `foil.type` is invalid, a default is assigned by layer
 |---|---|---|---|
 | 1 | `sunpillar`, intensity 1 | — | — |
 | 2 or more | `sunpillar`, intensity 1 | `holo`, intensity 0.8 | `none`, intensity 1 |
+
+An effect layer without `foil` gets `glow` at intensity 1 and does not count in the layer order above.
 
 ### `effects`
 
@@ -88,6 +92,24 @@ Values of `foil.type` (`FOIL_TYPES`):
 | `holo` | Classic holo | Diagonal rainbow, fine scan lines and vertical grating | rare holo |
 | `sunpillar` | Sunpillar | Diagonal sun-pillar rainbow with metallic grain | rare holo v |
 | `rainbow` | Rainbow glitter | Glitter with a multi-color gradient | rare rainbow |
+| `glow` | Glow | At rest, plays a light animation chosen by the effect kind; when tilted, a colored flow that follows the pointer. Meant for effect layers | — (HoloCard's own recipe) |
+
+## Effect layers
+
+Effects found in the artwork during layering (light trails, fire, magic circles and so on) get layers of their own with `role` set to `effects`. An effect layer comes right after the depth layer the effect sits on and shares its `depth` and `parallax`, so the two move together. Its image is the original picture, so at rest it matches the layer below exactly; the only addition is the glow inside the effect's shape. An effect spread over several depth layers gets one copy per layer, and each kind of effect on a layer gets its own copy.
+
+Values of `effect` (`EFFECT_KINDS`) and the rest animation of the `glow` foil:
+
+| Value | Effect | Animation |
+|---|---|---|
+| `energy` | Light trails, beams, arcs, energy streams | A bright pulse travels along the effect's long axis from one end to the other |
+| `glow` | Halos, soft glow | The whole area slowly brightens and dims |
+| `circle` | Magic circles, light rings | A bright arc turns around the effect's center |
+| `fire` | Fire | Bright bands rise, with irregular flicker |
+| `lightning` | Lightning, electric arcs | Mostly dark, flashing twice at intervals |
+| `sparkles` | Sparkles, star points | Points twinkle one after another |
+
+The animation only affects the parts of an effect layer brighter than the layer's median brightness. It does not play when the system's reduced-motion setting is on.
 
 ## Example
 
@@ -142,6 +164,7 @@ The website's renderer and `@holocard/player` share the same rendering code (`sr
 | `layers[].foil` | The layer's foil type and strength; the foil appears only inside the layer's shape |
 | `layers[].bbox` | Describes the extent of non-transparent pixels; not used by the current renderer |
 | `layers[].inpainted` | Marks whether occluded areas were filled; not used by the current renderer. Layers that were not filled show holes when shifted far |
+| `layers[].role` / `layers[].effect` | Effect layers play the glow animation for their `effect`; the website's per-layer foil panel leaves them out and switches them all with the "Animated effects" toggle |
 | `effects.halo` | Strength and angle window of the card-wide halo. While adjusting on the website, the card turns to the angle given by `peakAt` to show the effect |
 | `effects.glare` | When `false`, the glare is not shown |
 | `effects.parallax` | Present: both the website and the player follow it (amplitude 0 when `enabled` is `false`). Missing: the website uses the viewer's local "Parallax" preference with a 2% amplitude; the player uses its default amplitude of 0.02 |

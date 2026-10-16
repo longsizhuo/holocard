@@ -20,7 +20,7 @@ import './card.css';
 import './foils.css';
 import type { HaloEffect, HaloLight, LayerFoil, LayerSet } from '../format/types';
 import { DEADZONE_DEGREES, TiltTracker } from './gyro';
-import { groupMask, layerMask } from './highlight';
+import { brightMask, groupMask, layerMask } from './highlight';
 import { Spring } from './spring';
 import { ensureTextures } from './textures';
 
@@ -153,6 +153,8 @@ export class HoloCard {
 
   #root: HTMLDivElement | null = null;
   #shines: HTMLDivElement[] = [];
+  /** 每层一个流动白光元素（光效 glow 才显示），和 #shines 按层号对应；blob 留着，换成光效时才算遮罩 */
+  #flows: { el: HTMLDivElement; blob: Blob; root: HTMLDivElement; masked: boolean }[] = [];
   /** 每个视差组各一份整卡炫光（见 setLayerSet） */
   #haloEls: HTMLDivElement[] = [];
   #halo: HaloEffect | null = null;
@@ -274,10 +276,20 @@ export class HoloCard {
       shine.style.setProperty('--hc-mask', `url("${url}")`);
       const mask = layerMask(blob);
       masks.push(this.#applyMask(root, mask, shine, '--hc-mask'));
-      this.#applyFoil(shine, layer.foil);
-      this.#shines.push(shine);
 
-      plane.append(art, shine);
+      // 光效（glow）的流动白光：单独一个元素，静止时也在流，不受箔面淡入淡出影响。
+      // 遮罩只取这一层的亮部（brightMask），算好之前不显示；只有用到光效的层才算，见 #applyFoil
+      const flow = document.createElement('div');
+      flow.className = 'hc__flow';
+      // 特效层按类型换动法（foils.css）；普通层手动选了光效的，按光带的动法
+      if (layer.role === 'effects' && layer.effect) flow.dataset['effect'] = layer.effect;
+      this.#flows.push({ el: flow, blob, root, masked: false });
+
+      this.#shines.push(shine);
+      const flowMask = this.#applyFoil(this.#shines.length - 1, layer.foil);
+      if (flowMask) masks.push(flowMask);
+
+      plane.append(art, shine, flow);
       stack.append(plane);
 
       /*
@@ -338,8 +350,7 @@ export class HoloCard {
 
   /** 改某一层的箔面，立即生效，不重建 DOM */
   setLayerFoil(index: number, foil: LayerFoil): void {
-    const shine = this.#shines[index];
-    if (shine) this.#applyFoil(shine, foil);
+    void this.#applyFoil(index, foil);
   }
 
   /** 改整卡炫光，立即生效 */
@@ -465,9 +476,25 @@ export class HoloCard {
     return 1 + 2 * this.#maxOffset * this.#options.amplitude;
   }
 
-  #applyFoil(shine: HTMLDivElement, foil: LayerFoil): void {
-    shine.dataset['foil'] = foil.type;
-    shine.style.setProperty('--hc-foil-intensity', String(foil.intensity));
+  /** 换某一层的箔面。第一次换成光效时开始算流动白光的遮罩，返回它（算好前白光不显示），否则 undefined */
+  #applyFoil(index: number, foil: LayerFoil): Promise<void> | undefined {
+    for (const el of [this.#shines[index], this.#flows[index]?.el]) {
+      if (!el) continue;
+      el.dataset['foil'] = foil.type;
+      el.style.setProperty('--hc-foil-intensity', String(foil.intensity));
+    }
+    const flow = this.#flows[index];
+    if (!flow || flow.masked || foil.type !== 'glow') return undefined;
+    flow.masked = true;
+    const shape = brightMask(flow.blob, ({ cx, cy, angle }) => {
+      // CSS 渐变角度 0deg 朝上、顺时针；长轴 angle 是从 x 轴往 y（向下）转的弧度，差 90 度
+      flow.el.style.setProperty('--hc-fx-angle', `${((angle * 180) / Math.PI + 90).toFixed(1)}deg`);
+      flow.el.style.setProperty('--hc-fx-x', `${(cx * 100).toFixed(1)}%`);
+      flow.el.style.setProperty('--hc-fx-y', `${(cy * 100).toFixed(1)}%`);
+    });
+    return this.#applyMask(flow.root, shape, flow.el, '--hc-flow-mask').then(() => {
+      flow.el.dataset['ready'] = '';
+    });
   }
 
   #bind(rotator: HTMLDivElement): void {
@@ -668,6 +695,7 @@ export class HoloCard {
     }
     this.#objectUrls = [];
     this.#shines = [];
+    this.#flows = [];
     this.#haloEls = [];
     this.#halo = null;
     this.#gyroAiming = false;
