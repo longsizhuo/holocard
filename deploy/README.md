@@ -169,7 +169,7 @@ curl -s 127.0.0.1:8796/health   # {"ok": true, "device": "cpu", "loaded": false}
 ## 线稿提取
 
 `/lineart` 先问显卡机（`HOLOCARD_LINEART_URL`，默认 `http://127.0.0.1:8795`，和特效识别是同一个 `serve.py`）：线用 MangaLineExtraction（MIT，
-权重 `erika.pth`，显卡机上在 `D:/cardmask/lineart/weights/`，`sam3serve.sh` 第一次启动时从 hf-mirror 下），主体用已经在显存里的 SAM3 按「人物」找，热的时候一张 0.7 秒、来回约 5 秒。
+权重 `erika.pth`，显卡机上在 `D:/cardmask/lineart/weights/`，`sam3serve.sh` 第一次启动时从 hf-mirror 下），主体用已经在显存里的 SAM3 按「人物」找，按长边 2048 算，热的时候一张约 4 秒、来回约 9 秒；每次算完 `torch.cuda.empty_cache()`，显卡同时在训练时别把显存攒满。
 `serve.py` 带 `--manga <erika.pth>` 才有 `/lineart`，`GET /health` 里 `lineart: true`。
 
 显卡机不通时在本机做：Anime2Sketch（MIT）的 improved 版出线稿，在分层线程里用 onnxruntime-node 跑（`server/pipeline/sketch.ts`），4 核上一张 1024 的图约 3 秒；主体用 BiRefNet。

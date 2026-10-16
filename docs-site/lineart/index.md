@@ -6,7 +6,7 @@
 
 ## 使用
 
-1. 点「选择图片」，上传插画。支持 JPEG、PNG、WebP、AVIF、HEIC，不超过 16 MB；长边超过 1024 像素的会先缩小。
+1. 点「选择图片」，上传插画。支持 JPEG、PNG、WebP、AVIF、HEIC，不超过 16 MB；长边超过 2048 像素的会先缩小（识别服务不可用、改在本机处理时为 1024）。
 2. 一般约 5 秒出结果。识别服务冷启动（闲置一段时间后的第一张）要一分钟左右；识别服务不可用时改在本机处理，线稿几秒后先显示，主体还要再抠二十秒左右，期间页面显示「正在抠主体」，「只要主体」暂时不可用，抠好后自动按主体重画。
 3. 左侧为预览，透明的地方显示为棋盘格。右侧可调整：
 
@@ -24,7 +24,7 @@
 
 线稿和主体在识别服务（`deploy/sam3/serve.py`，与[特效识别](/develop/pipeline#服务端识别特效-sam3-card)是同一个服务，跑在有显卡的机器上）里一次算完：
 
-- 线稿：[MangaLineExtraction](https://github.com/ljsabc/MangaLineExtraction_PyTorch)（MIT）。按原比例处理，长边 1024，四周补边到 256 的倍数后裁回。
+- 线稿：[MangaLineExtraction](https://github.com/ljsabc/MangaLineExtraction_PyTorch)（MIT）。按原比例处理，长边 2048，四周补边到 256 的倍数后裁回；表情头像这类小块在 1024 下线会糊成一团。
 - 主体：SAM 3 按「character」「person」两个词各找一遍，所有角色的遮罩合并。角色设定图里的多个人物、表情、三视图都算主体，文字和边框不算。
 
 识别服务不可用时在本机处理：线稿用 [Anime2Sketch](https://github.com/Mukosame/Anime2Sketch)（MIT）的 improved 版，主体用 BiRefNet_lite（只认一个最显著的主体）。

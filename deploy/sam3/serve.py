@@ -97,12 +97,19 @@ def detect(image):
                 found[kind] = (float(out["scores"].float().max()), masks.any(axis=0))
         last_used = time.time()
         print(f"{image.width}x{image.height} {last_used - t0:.1f}s {sorted(found)}", flush=True)
+        release()
     effects = []
     for kind, (score, mask) in found.items():
         buf = io.BytesIO()
         Image.fromarray(mask.astype(np.uint8) * 255).save(buf, "PNG", optimize=True)
         effects.append({"type": kind, "score": round(score, 3), "mask": base64.b64encode(buf.getvalue()).decode()})
     return {"width": image.width, "height": image.height, "effects": effects}
+
+
+def release():
+    """显卡同时在训练、桌面也在用：每次算完把这次的中间结果占的显存还回去，不然缓存越攒越多，挤得训练溢出到内存"""
+    if opt.device == "cuda":
+        torch.cuda.empty_cache()
 
 
 def png_b64(gray):
@@ -142,6 +149,7 @@ def lineart(image):
                         subject |= (out["masks_logits"][keep, 0] > 0.5).any(0).cpu().numpy()
         last_used = time.time()
         print(f"lineart {w}x{h} {last_used - t0:.1f}s subject={subject.mean():.2f}", flush=True)
+        release()
     return {"width": w, "height": h, "line": png_b64(line), "subject": png_b64(subject.astype(np.uint8) * 255) if subject.any() else None}
 
 

@@ -45,13 +45,26 @@ export function lineartAvailable(): boolean {
 
 /** 显卡机冷启动要加载 SAM3（约 40 秒）和线稿模型，再加上传图 */
 const GPU_TIMEOUT_MS = 120_000;
+/**
+ * 显卡机按这个长边算：表情头像这类小块在 1024 下只有一百来像素，线糊成一团；2048 线细、小字认得出，显卡上约 4 秒。
+ * 本机兜底还是 SKETCH_MAX_SIDE（CPU 上 2048 要四倍时间）
+ */
+const GPU_MAX_SIDE = 2048;
 
-/** 问显卡机要线稿和主体（两张灰度 PNG）。不通、出错都回 null，交给本机做 */
-async function lineartOnGpu(png: Buffer): Promise<{ line: Buffer; subject: Buffer | null } | null> {
-  if (!LINEART_URL) return null;
+/** 显卡机的线稿接口在不在 */
+async function gpuReady(): Promise<boolean> {
+  if (!LINEART_URL) return false;
   try {
     const health = await fetch(`${LINEART_URL}/health`, { signal: AbortSignal.timeout(5_000) });
-    if (!health.ok || !((await health.json()) as { lineart?: boolean }).lineart) return null;
+    return health.ok && Boolean(((await health.json()) as { lineart?: boolean }).lineart);
+  } catch {
+    return false;
+  }
+}
+
+/** 问显卡机要线稿和主体（两张灰度 PNG）。出错回 null，交给本机做 */
+async function lineartOnGpu(png: Buffer): Promise<{ line: Buffer; subject: Buffer | null } | null> {
+  try {
     // 发 JPEG：到家里的上行只有约 150KB/s，PNG 要多传好几倍
     const body = await sharp(png).jpeg({ quality: 92 }).toBuffer();
     const res = await fetch(`${LINEART_URL}/lineart`, {
@@ -81,20 +94,20 @@ export async function startLineart(image: Buffer): Promise<string> {
   const id = randomUUID();
   const dir = join(LINEART_DIR, id);
   await mkdir(dir, { recursive: true });
-  const png = await sharp(image)
-    .resize({ width: SKETCH_MAX_SIDE, height: SKETCH_MAX_SIDE, fit: 'inside', withoutEnlargement: true })
-    .png()
-    .toBuffer();
-  await writeFile(join(dir, 'image.png'), png);
   jobs.set(id, { state: 'queued', createdAt: Date.now() });
-  void run(id, dir, png);
+  void run(id, dir, image);
   return id;
 }
 
-async function run(id: string, dir: string, png: Buffer): Promise<void> {
+async function run(id: string, dir: string, image: Buffer): Promise<void> {
   const createdAt = jobs.get(id)?.createdAt ?? Date.now();
   try {
-    const gpu = await lineartOnGpu(png);
+    // 先看显卡机在不在，再定按多大算：image.png、line.png、subject.png 三张始终一样大
+    const onGpu = await gpuReady();
+    const side = onGpu ? GPU_MAX_SIDE : SKETCH_MAX_SIDE;
+    let png = await sharp(image).resize({ width: side, height: side, fit: 'inside', withoutEnlargement: true }).png().toBuffer();
+    await writeFile(join(dir, 'image.png'), png);
+    const gpu = onGpu ? await lineartOnGpu(png) : null;
     if (gpu) {
       const { width = 0, height = 0 } = await sharp(png).metadata();
       await writeFile(join(dir, 'line.png'), gpu.line);
@@ -103,6 +116,11 @@ async function run(id: string, dir: string, png: Buffer): Promise<void> {
       await writeFile(join(dir, 'lineart.json'), JSON.stringify(result));
       jobs.set(id, { state: 'done', createdAt, ...result });
       return;
+    }
+    // 显卡机在但这一下没成：图是按 2048 存的，本机按 1024 重做一份，三张图仍一样大
+    if (onGpu) {
+      png = await sharp(image).resize({ width: SKETCH_MAX_SIDE, height: SKETCH_MAX_SIDE, fit: 'inside', withoutEnlargement: true }).png().toBuffer();
+      await writeFile(join(dir, 'image.png'), png);
     }
     const { line, width, height } = await lineartInWorker(new Uint8Array(png), SKETCH_MODEL, false);
     if (!line) throw new Error('分层线程没回线稿');

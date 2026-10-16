@@ -6,7 +6,7 @@ Address: [holocard.longsizhuo.com/lineart](https://holocard.longsizhuo.com/linea
 
 ## Usage
 
-1. Click "Choose an image" and upload an illustration. JPEG, PNG, WebP, AVIF and HEIC are supported, up to 16 MB; images with a long side over 1024 pixels are scaled down first.
+1. Click "Choose an image" and upload an illustration. JPEG, PNG, WebP, AVIF and HEIC are supported, up to 16 MB; images with a long side over 2048 pixels are scaled down first (1024 when the detection service is unavailable and the server processes it itself).
 2. Results usually take about 5 seconds. A cold start of the detection service (the first image after it has been idle) takes about a minute. When the detection service is unavailable the image is processed on the server itself: the line art appears after a few seconds and matting the subject takes about twenty seconds more; meanwhile the page shows "Finding the subject" and "Subject only" is unavailable, and the preview is redrawn with the subject once it is ready.
 3. The preview is on the left, with transparent areas shown as a checkerboard. On the right:
 
@@ -24,7 +24,7 @@ Results are deleted after 24 hours.
 
 Line art and subject are computed in one go by the detection service (`deploy/sam3/serve.py`, the same service as [effect detection](/en/develop/pipeline#server-side-effect-detection-sam3-card), running on a machine with a GPU):
 
-- Line art: [MangaLineExtraction](https://github.com/ljsabc/MangaLineExtraction_PyTorch) (MIT), with the aspect ratio kept, a long side of 1024, padded to a multiple of 256 and cropped back.
+- Line art: [MangaLineExtraction](https://github.com/ljsabc/MangaLineExtraction_PyTorch) (MIT), with the aspect ratio kept, a long side of 2048, padded to a multiple of 256 and cropped back; at 1024 small parts such as expression heads blur into a tangle.
 - Subject: SAM 3 is asked for "character" and "person", and the masks of all characters are merged. Several people, expressions and turnarounds on a character sheet all count as subject; text and frames do not.
 
 When the detection service is unavailable the server does it itself: the improved version of [Anime2Sketch](https://github.com/Mukosame/Anime2Sketch) (MIT) for the lines and BiRefNet_lite for the subject (which finds only the single most salient subject).
