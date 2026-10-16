@@ -4,7 +4,10 @@ SAM3-Card 特效识别服务。分层服务（server/pipeline/effects.ts）把�
   POST /effects  请求体是一张图（JPEG/PNG），回
                  {"width": w, "height": h, "effects": [{"type": "fire", "score": 0.83, "mask": "<PNG base64>"}]}
                  每类一张遮罩（同类的几个实例并成一张），和收到的图一样大；分数不到 SCORE 的不回
-  GET  /health   {"ok": true, "device": "cuda", "loaded": false}
+  POST /lineart  线稿提取（server/pipeline/lineart.ts）：请求体是一张图，回
+                 {"width": w, "height": h, "line": "<灰度 PNG base64，白底黑线>", "subject": "<灰度 PNG base64>" 或 null}
+                 线用 MangaLineExtraction（manga_line.py，--manga 给权重才有这个接口），主体用同一个 SAM3 按「人物」找，几个角色都算
+  GET  /health   {"ok": true, "device": "cuda", "loaded": false, "lineart": true}
 
 同一份代码跑两处，分层服务按顺序问，前一个不通再问下一个：
   显卡机（WSL，--device cuda）  bf16 autocast，RTX 5080 上一张图约 0.5 秒
@@ -46,11 +49,16 @@ args.add_argument("--device", default="cuda")
 args.add_argument("--host", default="127.0.0.1")
 args.add_argument("--port", type=int, default=8796)
 args.add_argument("--idle", type=float, default=900, help="闲这么多秒卸掉模型，0 表示常驻")
+args.add_argument("--manga", help="MangaLineExtraction 的权重 erika.pth；不给就没有 /lineart")
 opt = args.parse_args()
 
 lock = threading.Lock()
 proc = None
+manga = None
 last_used = time.time()
+# 主体按这几个词问 SAM3，几个角色的遮罩并起来；分数不到 SUBJECT_SCORE 的不要
+SUBJECT_PROMPTS = ("character", "person")
+SUBJECT_SCORE = 0.4
 
 
 def load():
@@ -97,13 +105,54 @@ def detect(image):
     return {"width": image.width, "height": image.height, "effects": effects}
 
 
+def png_b64(gray):
+    buf = io.BytesIO()
+    Image.fromarray(gray).save(buf, "PNG", optimize=True)
+    return base64.b64encode(buf.getvalue()).decode()
+
+
+def lineart(image):
+    global proc, manga, last_used
+    import torch.nn.functional as F
+
+    with lock:
+        if proc is None:
+            proc = load()
+        if manga is None:
+            from manga_line import res_skip
+
+            net = res_skip()
+            state = torch.load(opt.manga, map_location="cpu", weights_only=True)
+            net.load_state_dict({k.replace("module.", ""): v for k, v in state.items()})
+            manga = net.to(opt.device).eval()
+        t0 = time.time()
+        gray = torch.from_numpy(np.asarray(image.convert("L"), np.float32)).to(opt.device)[None, None]
+        h, w = gray.shape[-2:]
+        # 宽高补到 256 的倍数（复制边缘），算完裁回来；按比例，不压成正方形
+        padded = F.pad(gray, (0, -w % 256, 0, -h % 256), mode="replicate")
+        with torch.inference_mode():
+            line = manga(padded)[0, 0, :h, :w].clamp(0, 255).byte().cpu().numpy()
+            subject = np.zeros((h, w), bool)
+            with torch.autocast("cuda", dtype=torch.bfloat16, enabled=opt.device == "cuda"):
+                state = proc.set_image(image)
+                for phrase in SUBJECT_PROMPTS:
+                    out = proc.set_text_prompt(phrase, state)
+                    keep = out["scores"].float() >= SUBJECT_SCORE
+                    if keep.any():
+                        subject |= (out["masks_logits"][keep, 0] > 0.5).any(0).cpu().numpy()
+        last_used = time.time()
+        print(f"lineart {w}x{h} {last_used - t0:.1f}s subject={subject.mean():.2f}", flush=True)
+    return {"width": w, "height": h, "line": png_b64(line), "subject": png_b64(subject.astype(np.uint8) * 255) if subject.any() else None}
+
+
 def unload_when_idle():
-    global proc
+    global proc, manga
     while True:
         time.sleep(30)
         with lock:
             if proc is not None and time.time() - last_used > opt.idle:
                 proc = None
+                manga = None
                 if opt.device == "cuda":
                     torch.cuda.empty_cache()
                 print("闲置，卸掉模型", flush=True)
@@ -121,10 +170,10 @@ class Handler(BaseHTTPRequestHandler):
     def do_GET(self):
         if self.path != "/health":
             return self.reply(404, {"error": "not found"})
-        self.reply(200, {"ok": True, "device": opt.device, "loaded": proc is not None})
+        self.reply(200, {"ok": True, "device": opt.device, "loaded": proc is not None, "lineart": bool(opt.manga)})
 
     def do_POST(self):
-        if self.path != "/effects":
+        if self.path not in ("/effects", "/lineart") or (self.path == "/lineart" and not opt.manga):
             return self.reply(404, {"error": "not found"})
         size = int(self.headers.get("content-length") or 0)
         if not 0 < size <= MAX_BODY:
@@ -133,7 +182,7 @@ class Handler(BaseHTTPRequestHandler):
             image = Image.open(io.BytesIO(self.rfile.read(size))).convert("RGB")
         except Exception as error:
             return self.reply(400, {"error": f"bad image: {error}"})
-        self.reply(200, detect(image))
+        self.reply(200, detect(image) if self.path == "/effects" else lineart(image))
 
     def log_message(self, *_):
         pass

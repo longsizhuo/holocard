@@ -168,8 +168,12 @@ curl -s 127.0.0.1:8796/health   # {"ok": true, "device": "cpu", "loaded": false}
 
 ## 线稿提取
 
-`/lineart` 用 Anime2Sketch（MIT）的 improved 版出线稿，在分层线程里用 onnxruntime-node 跑（`server/pipeline/sketch.ts`），4 核上一张 1024 的图约 3 秒。
-模型文件 `/srv/holocard-models/anime2sketch/anime2sketch-improved.onnx`（sha256 `7bfa1950…a590fb`），没有这个文件接口回 503 `lineart_unavailable`，其他功能不受影响。
+`/lineart` 先问显卡机（`HOLOCARD_LINEART_URL`，默认 `http://127.0.0.1:8795`，和特效识别是同一个 `serve.py`）：线用 MangaLineExtraction（MIT，
+权重 `erika.pth`，显卡机上在 `D:/cardmask/lineart/weights/`，`sam3serve.sh` 第一次启动时从 hf-mirror 下），主体用已经在显存里的 SAM3 按「人物」找，热的时候一张 0.7 秒、来回约 5 秒。
+`serve.py` 带 `--manga <erika.pth>` 才有 `/lineart`，`GET /health` 里 `lineart: true`。
+
+显卡机不通时在本机做：Anime2Sketch（MIT）的 improved 版出线稿，在分层线程里用 onnxruntime-node 跑（`server/pipeline/sketch.ts`），4 核上一张 1024 的图约 3 秒；主体用 BiRefNet。
+本机的模型文件 `/srv/holocard-models/anime2sketch/anime2sketch-improved.onnx`（sha256 `7bfa1950…a590fb`），没有这个文件接口回 503 `lineart_unavailable`，其他功能不受影响。
 
 导出：
 

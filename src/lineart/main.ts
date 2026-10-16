@@ -16,6 +16,12 @@ import { BASE, describe, failure, need, pixels, setupLang, submitAndWait } from 
 
 /** 低于这个不透明度的当噪点去掉：背景里淡淡的纹理不该变成一层薄雾 */
 const NOISE = 0.05;
+/**
+ * 主体遮罩按这一段收边（smoothstep）：本机兜底的抠图边缘有一大圈半透明，直接乘上去，主体外面会留一团团淡淡的残影。
+ * 显卡机那条（SAM3）出的是实心遮罩，不受影响
+ */
+const SUBJECT_FROM = 0.35;
+const SUBJECT_FULL = 0.65;
 
 const fileInput = need<HTMLInputElement>('#lineart-file');
 const status = need<HTMLParagraphElement>('#lineart-status');
@@ -59,7 +65,10 @@ function render(): void {
     const ink = Math.min(1, Math.max(0, (white - (line[p * 4] ?? 255)) / span));
     let alpha = ink ** gamma;
     if (alpha < NOISE) alpha = 0;
-    if (useSubject) alpha *= (subject[p * 4] ?? 0) / 255;
+    if (useSubject) {
+      const s = Math.min(1, Math.max(0, ((subject[p * 4] ?? 0) / 255 - SUBJECT_FROM) / (SUBJECT_FULL - SUBJECT_FROM)));
+      alpha *= s * s * (3 - 2 * s);
+    }
     out.data[p * 4] = rgb[0] ?? 0;
     out.data[p * 4 + 1] = rgb[1] ?? 0;
     out.data[p * 4 + 2] = rgb[2] ?? 0;

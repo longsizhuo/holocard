@@ -1,8 +1,10 @@
 /**
  * 线稿提取任务：收一张插画，出白底黑线的线稿灰度图和主体遮罩，深浅、只留主体、线条颜色都在前端调（src/lineart/main.ts）。
  *
- * 模型部分在分层线程里做，和分层排同一个队（jobs.ts 的 lineartInWorker），分两次：先出线稿（几秒），做完就算 done、前端先画出来；
- * 再抠主体（二十秒上下），这期间 subject 是 "pending"，前端轮询到 true 才让「只要主体」生效。
+ * 先问显卡机（LINEART_URL，deploy/sam3/serve.py 的 POST /lineart）：线用 MangaLineExtraction，主体用 SAM3 按「人物」找（几个角色都算），
+ * 一次回来，热的时候四五秒。显卡机不通就在本机分层线程里做，和分层排同一个队（jobs.ts 的 lineartInWorker），分两次：
+ * 先出线稿（Anime2Sketch，几秒），做完就算 done、前端先画出来；再抠主体（BiRefNet，二十秒上下），这期间 subject 是 "pending"，
+ * 前端轮询到 true 才让「只要主体」生效。
  * 结果放在产物目录的 .lineart/<id>/ 下：image.png（缩到线稿尺寸的原图）、line.png（灰度线稿）、subject.png（主体遮罩，抠不了时没有）、
  * lineart.json（尺寸、有没有主体）。不进数据库，地址是随机 UUID，24 小时后删。任务状态在内存里，重启后做完的照 lineart.json 认
  */
@@ -12,7 +14,7 @@ import { existsSync } from 'node:fs';
 import { mkdir, readFile, readdir, rm, stat, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import sharp from 'sharp';
-import { MATTE_READY, MODEL_DIR, OUT_DIR } from '../config';
+import { LINEART_URL, MATTE_READY, MODEL_DIR, OUT_DIR } from '../config';
 import { lineartInWorker } from './jobs';
 import { SKETCH_MAX_SIDE } from './sketch';
 
@@ -36,9 +38,35 @@ type JobState = { state: 'queued' } | { state: 'error'; error: string } | ({ sta
 
 const jobs = new Map<string, JobState & { createdAt: number }>();
 
-/** 这台服务能不能提线稿：线稿模型要在；抠图权重没有也能做，只是没有「只要主体」 */
+/** 这台服务能不能提线稿：本机的线稿模型要在（显卡机不通时兜底）；抠图权重没有也能做，只是没有「只要主体」 */
 export function lineartAvailable(): boolean {
   return existsSync(SKETCH_MODEL);
+}
+
+/** 显卡机冷启动要加载 SAM3（约 40 秒）和线稿模型，再加上传图 */
+const GPU_TIMEOUT_MS = 120_000;
+
+/** 问显卡机要线稿和主体（两张灰度 PNG）。不通、出错都回 null，交给本机做 */
+async function lineartOnGpu(png: Buffer): Promise<{ line: Buffer; subject: Buffer | null } | null> {
+  if (!LINEART_URL) return null;
+  try {
+    const health = await fetch(`${LINEART_URL}/health`, { signal: AbortSignal.timeout(5_000) });
+    if (!health.ok || !((await health.json()) as { lineart?: boolean }).lineart) return null;
+    // 发 JPEG：到家里的上行只有约 150KB/s，PNG 要多传好几倍
+    const body = await sharp(png).jpeg({ quality: 92 }).toBuffer();
+    const res = await fetch(`${LINEART_URL}/lineart`, {
+      method: 'POST',
+      body: new Uint8Array(body),
+      headers: { 'content-type': 'image/jpeg' },
+      signal: AbortSignal.timeout(GPU_TIMEOUT_MS),
+    });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const reply = (await res.json()) as { line: string; subject: string | null };
+    return { line: Buffer.from(reply.line, 'base64'), subject: reply.subject ? Buffer.from(reply.subject, 'base64') : null };
+  } catch (error) {
+    console.warn(`[lineart] 显卡机不可用，改在本机做：${error instanceof Error ? error.message : String(error)}`);
+    return null;
+  }
 }
 
 export function lineartInFlight(): number {
@@ -66,6 +94,16 @@ export async function startLineart(image: Buffer): Promise<string> {
 async function run(id: string, dir: string, png: Buffer): Promise<void> {
   const createdAt = jobs.get(id)?.createdAt ?? Date.now();
   try {
+    const gpu = await lineartOnGpu(png);
+    if (gpu) {
+      const { width = 0, height = 0 } = await sharp(png).metadata();
+      await writeFile(join(dir, 'line.png'), gpu.line);
+      if (gpu.subject) await writeFile(join(dir, 'subject.png'), gpu.subject);
+      const result: LineartResult = { width, height, subject: gpu.subject !== null };
+      await writeFile(join(dir, 'lineart.json'), JSON.stringify(result));
+      jobs.set(id, { state: 'done', createdAt, ...result });
+      return;
+    }
     const { line, width, height } = await lineartInWorker(new Uint8Array(png), SKETCH_MODEL, false);
     if (!line) throw new Error('分层线程没回线稿');
     // 不指定色彩空间的话 sharp 把单通道当彩色存成 RGB，文件大两倍

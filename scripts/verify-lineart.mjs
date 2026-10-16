@@ -45,6 +45,8 @@ const server = spawn(process.execPath, [join(ROOT, 'dist-server', 'holocard-serv
     HOLOCARD_MODEL_DIR: MODEL_DIR,
     HOLOCARD_MIN_FREE_GB: '0',
     HOLOCARD_RATE_LIMIT: '1000',
+    // 不连显卡机：核对的是本机兜底那条路（Anime2Sketch + BiRefNet），结果不依赖家里的机器开没开
+    HOLOCARD_LINEART_URL: '',
   },
   stdio: ['ignore', 'pipe', 'pipe'],
 });
@@ -114,7 +116,7 @@ const page404 = await fetch(`${BASE}/lineart?lang=en`);
 assert.equal(page404.status, 200);
 const html = await page404.text();
 assert.match(html, /<title data-i18n="lineart.title">Line art — HoloCard<\/title>/, '英文页面的标题');
-assert.match(html, /data-i18n-html="lineart.creditHtml">Line art by <a href="https:\/\/github.com\/Mukosame\/Anime2Sketch"/, '页脚写的是 Anime2Sketch');
+assert.match(html, /data-i18n-html="lineart.creditHtml">Line art models: <a href="https:\/\/github.com\/ljsabc\/MangaLineExtraction_PyTorch"/, '页脚写的是线稿模型的出处');
 assert.doesNotMatch(html, /pokemon-cards-css/, '页脚不提 pokemon-cards-css');
 
 const outArg = process.argv.indexOf('--out');

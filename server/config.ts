@@ -138,6 +138,12 @@ export const EFFECTS_URLS = (process.env.HOLOCARD_EFFECTS_URLS ?? 'http://127.0.
   .map((url) => url.trim())
   .filter(Boolean);
 
+/**
+ * 线稿提取先问的显卡机服务（同一个 serve.py 的 POST /lineart），默认就是到显卡机的隧道。
+ * 不通就在本机分层线程里做（Anime2Sketch + BiRefNet，见 server/pipeline/lineart.ts）。设成空串就只用本机
+ */
+export const LINEART_URL = process.env.HOLOCARD_LINEART_URL ?? 'http://127.0.0.1:8795';
+
 export const MAX_EXPORT_QUEUE = Number(process.env.HOLOCARD_MAX_EXPORT_QUEUE ?? 6);
 export const EXPORT_RATE_LIMIT = Number(process.env.HOLOCARD_EXPORT_RATE_LIMIT ?? 8);
 

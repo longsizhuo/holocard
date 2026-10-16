@@ -154,7 +154,7 @@ export const zh = {
   'lineart.working': '正在提取…',
   'lineart.matting': '正在抠主体…',
   'lineart.creditHtml':
-    '线稿模型 {anime2sketch}（Xiaoyu Xiang 等，MIT），抠主体 {birefnet}（MIT）。本项目以 GPL-3.0 发布，源码在 {github}。',
+    '线稿模型 {mangaline}、{anime2sketch}（均为 MIT），主体识别 {sam3}、{birefnet}。本项目以 GPL-3.0 发布，源码在 {github}。',
   'lineart.strength': '线条深浅',
   'lineart.color': '线条颜色',
   'lineart.subjectOnly': '只要主体',
@@ -369,7 +369,7 @@ export const en: Messages = {
   'lineart.working': 'Working…',
   'lineart.matting': 'Finding the subject…',
   'lineart.creditHtml':
-    'Line art by {anime2sketch} (Xiaoyu Xiang et al., MIT), subject matting by {birefnet} (MIT). This project is released under GPL-3.0; source on {github}.',
+    'Line art models: {mangaline} and {anime2sketch} (both MIT); subject detection: {sam3} and {birefnet}. This project is released under GPL-3.0; source on {github}.',
   'lineart.strength': 'Line darkness',
   'lineart.color': 'Line colour',
   'lineart.subjectOnly': 'Subject only',
@@ -581,7 +581,7 @@ export const ja: Messages = {
   'lineart.working': '抽出中…',
   'lineart.matting': '被写体を切り抜き中…',
   'lineart.creditHtml':
-    '線画モデルは {anime2sketch}（Xiaoyu Xiang ほか、MIT）、被写体の切り抜きは {birefnet}（MIT）。本プロジェクトは GPL-3.0 で公開しており、ソースは {github} にあります。',
+    '線画モデルは {mangaline}・{anime2sketch}（いずれも MIT）、被写体の検出は {sam3}・{birefnet}。本プロジェクトは GPL-3.0 で公開しており、ソースは {github} にあります。',
   'lineart.strength': '線の濃さ',
   'lineart.color': '線の色',
   'lineart.subjectOnly': '被写体だけ',
