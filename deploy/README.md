@@ -115,7 +115,7 @@ drop-in 挂在 `holocard.service.d/`，最后重启 `holocard`。值要换（泄
 | `/var/lib/holocard/` | 自动发版的状态：构建用的检出 `repo/`、已发的提交 `deployed`、上次试过的 `attempted`、`env.production`（埋点站点 id）、暂停开关 `paused` |
 | `/opt/holocard/node22/` | Node 22 运行时（系统自带的是 18，sharp 要求 ≥20.9） |
 | `/opt/holocard/node_modules/` | transformers.js + onnxruntime-node + sharp，约 483MB |
-| `/srv/holocard-models/` | Depth Anything V2-Small 权重（q8，27MB）；BiRefNet_lite 权重（fp32，214MB，抠主体用；不放就只按深度切层）；`nudenet/320n.onnx` 裸露识别（12MB）；`sam3/` 特效识别的官方 SAM 3 权重（3.4GB）和微调存档（`sam3card-v11soup.pt`，131MB），见「特效识别」 |
+| `/srv/holocard-models/` | Depth Anything V2-Small 权重（q8，27MB）；BiRefNet_lite 权重（fp32，214MB，抠主体用；不放就只按深度切层）；`nudenet/320n.onnx` 裸露识别（12MB）；`sam3/` 特效识别的官方 SAM 3 权重（3.4GB）和微调存档（`sam3card-v11soup.pt`，131MB），见「特效识别」；`anime2sketch/anime2sketch-improved.onnx` 线稿模型（183MB），见「线稿提取」 |
 | `/srv/holocard-web/` | 前端 releases + current 软链 |
 | `/srv/holocard-layers/` | 每张卡一个目录：原图（去掉 EXIF）+ 层 PNG + manifest + 预览图 + 卡册缩略图 `thumb.jpg`（分层完成时做好；早期没存原图的卡在第一次有人要时用各层叠出来现做） |
 | `/srv/holocard-data/holocard.db` | 卡片数据库（SQLite），每张卡的状态、原图地址、结果地址、保留期、删除口令 |
@@ -165,6 +165,23 @@ sudo cp deploy/sam3/holocard-sam3.service /etc/systemd/system/
 sudo systemctl daemon-reload && sudo systemctl enable --now holocard-sam3.service
 curl -s 127.0.0.1:8796/health   # {"ok": true, "device": "cpu", "loaded": false}
 ```
+
+## 线稿提取
+
+`/lineart` 用 Anime2Sketch（MIT）的 improved 版出线稿，在分层线程里用 onnxruntime-node 跑（`server/pipeline/sketch.ts`），4 核上一张 1024 的图约 3 秒。
+模型文件 `/srv/holocard-models/anime2sketch/anime2sketch-improved.onnx`（sha256 `7bfa1950…a590fb`），没有这个文件接口回 503 `lineart_unavailable`，其他功能不受影响。
+
+导出：
+
+```bash
+git clone https://github.com/Mukosame/Anime2Sketch && cd Anime2Sketch
+# 权重在原项目 README 的 Google Drive 链接（improved.bin，192MB），放进 weights/
+cp <本仓库>/deploy/lineart/export_onnx.py . && python3 export_onnx.py --model improved --output anime2sketch-improved.onnx
+```
+
+**别装原仓库的 `requirements.txt`**：2026-09-08 的提交「allow lower versions」（作者账号推送、没有签名）把依赖改成从 git 装，其中
+`requests @ git+https://github.com/pypll/requests.git` 不是官方的 `psf/requests`，`pypll` 账号已经不存在，谁注册回这个名字谁就能在装依赖的机器上执行代码。
+导出只需要 torch 和它的 `model.py`（那次提交没改过）。
 
 ## 数据库
 

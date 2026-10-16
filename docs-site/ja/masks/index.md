@@ -2,7 +2,7 @@
 
 カードマスクは、完成した平面のカード画像をホイル用のマスクに分解します。[pokemon-cards-css](https://github.com/simeydotme/pokemon-cards-css) のように、マスクでホイルの範囲を決めるレンダリング方式で使えます。HoloCard の主な機能とは異なり、入力は写真ではなく枠と文字のある完成したカードで、出力は視差のレイヤーではなくマスク画像です。
 
-[holocard.longsizhuo.com/masks](https://holocard.longsizhuo.com/masks?lang=ja) から開きます。トレーディングカード向けの独立したツールで、トップページにはリンクを置いていません。
+[holocard.longsizhuo.com/masks](https://holocard.longsizhuo.com/masks?lang=ja) から開きます。トレーディングカード向けの独立したツールで、トップページのヘッダーの「ツール」→「カードマスク」から開けます。
 
 ## 使い方
 

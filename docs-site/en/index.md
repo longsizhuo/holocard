@@ -161,7 +161,9 @@ When signed in, the header button shows your avatar and name, and the panel cont
 
 ## Card masks
 
-Card masks is a separate tool for trading cards at `/masks`, with no link on the home page: upload a finished flat card image to get six non-overlapping foil masks (border, frame, text, character, effects, background) and preview the foil for different combinations. See [Card masks](/en/masks/).
+Card masks is a separate tool for trading cards at `/masks`, linked as "Card masks" under "Tools" in the home page header: upload a finished flat card image to get six non-overlapping foil masks (border, frame, text, character, effects, background) and preview the foil for different combinations. See [Card masks](/en/masks/).
+
+Line art is another standalone tool, at `/lineart` and linked as "Line art" under "Tools" in the home page header: upload an illustration to get its line art on a transparent background, with adjustable line darkness and colour and the option to keep only the subject. See [Line art](/en/lineart/).
 
 ## Retention
 

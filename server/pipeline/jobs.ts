@@ -96,10 +96,10 @@ function spawnSegmenter(): Worker {
   return worker;
 }
 
-type FinalReply = Extract<SegmentReply, { type: 'done' | 'cardmask' }>;
+type FinalReply = Extract<SegmentReply, { type: 'done' | 'cardmask' | 'lineart' }>;
 
 /**
- * 交给分层线程做一件事，等它的最终回复。分层和卡面遮罩排同一个队（segmentTail）：
+ * 交给分层线程做一件事，等它的最终回复。分层、卡面遮罩、线稿提取排同一个队（segmentTail）：
  * 线程一次只做一件，同一时刻最多一个大模型在推理，两件叠在一起内存就不够了
  */
 function runInWorker(request: SegmentRequest, onStage: (stage: string) => void = () => undefined): Promise<FinalReply> {
@@ -155,6 +155,17 @@ export async function cardmaskInWorker(
 ): Promise<{ matte: ProbabilityPlane | null; text: ProbabilityPlane }> {
   const reply = await runInWorker({ type: 'cardmask', bytes, region, textModel });
   if (reply.type !== 'cardmask') throw new Error('分层线程回错了消息');
+  return reply;
+}
+
+/** 线稿提取要的模型输出（见 server/pipeline/lineart.ts） */
+export async function lineartInWorker(
+  bytes: Uint8Array<ArrayBuffer>,
+  sketchModel: string,
+  matte: boolean,
+): Promise<{ line: Uint8Array; subject: Uint8Array | null; width: number; height: number }> {
+  const reply = await runInWorker({ type: 'lineart', bytes, sketchModel, matte });
+  if (reply.type !== 'lineart') throw new Error('分层线程回错了消息');
   return reply;
 }
 

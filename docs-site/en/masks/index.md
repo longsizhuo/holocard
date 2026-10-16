@@ -2,7 +2,7 @@
 
 Card masks split a finished flat card image into foil masks for renderers that control the foil area with masks, such as [pokemon-cards-css](https://github.com/simeydotme/pokemon-cards-css). Unlike HoloCard's main feature, the input is a finished card with its frame and text rather than a photo, and the output is a set of mask images rather than parallax layers.
 
-Open it at [holocard.longsizhuo.com/masks](https://holocard.longsizhuo.com/masks?lang=en). It is a separate tool for trading cards and has no link on the home page.
+Open it at [holocard.longsizhuo.com/masks](https://holocard.longsizhuo.com/masks?lang=en). It is a separate tool for trading cards, linked as "Card masks" under "Tools" in the home page header.
 
 ## Usage
 
