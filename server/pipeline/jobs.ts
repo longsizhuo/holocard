@@ -161,10 +161,10 @@ export async function cardmaskInWorker(
 /** 线稿提取要的模型输出（见 server/pipeline/lineart.ts） */
 export async function lineartInWorker(
   bytes: Uint8Array<ArrayBuffer>,
-  sketchModel: string,
+  sketchModel: string | null,
   matte: boolean,
-): Promise<{ line: Uint8Array; subject: Uint8Array | null; width: number; height: number }> {
-  const reply = await runInWorker({ type: 'lineart', bytes, sketchModel, matte });
+): Promise<{ line: Uint8Array | null; subject: Uint8Array | null; width: number; height: number }> {
+  const reply = await runInWorker({ type: 'lineart', bytes, ...(sketchModel ? { sketchModel } : {}), matte });
   if (reply.type !== 'lineart') throw new Error('分层线程回错了消息');
   return reply;
 }

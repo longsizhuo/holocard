@@ -7,6 +7,7 @@
  */
 
 import * as ort from 'onnxruntime-node';
+import { cpuSessionOptions } from '../../src/segmenter/runtime';
 
 /** 长边缩到这么多以内：4 核 ARM 上一张约 3 秒；再大内存和时间都翻倍，线也不会更清楚 */
 export const SKETCH_MAX_SIDE = 1024;
@@ -16,7 +17,8 @@ let session: Promise<ort.InferenceSession> | null = null;
 
 /** rgb 是已经缩到 SKETCH_MAX_SIDE 以内的三通道像素；返回同尺寸的灰度线稿（0 黑 255 白） */
 export async function sketch(rgb: Uint8Array, width: number, height: number, modelPath: string): Promise<Uint8Array> {
-  session ??= ort.InferenceSession.create(modelPath);
+  // 线程数按服务分到的核数（分层线程启动时设好），线上 CPUQuota 只给 2 核，开满 4 个线程反而互相抢
+  session ??= ort.InferenceSession.create(modelPath, cpuSessionOptions());
   const w = Math.ceil(width / MULTIPLE) * MULTIPLE;
   const h = Math.ceil(height / MULTIPLE) * MULTIPLE;
   const plane = w * h;

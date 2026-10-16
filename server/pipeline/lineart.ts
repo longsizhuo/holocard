@@ -1,7 +1,8 @@
 /**
  * 线稿提取任务：收一张插画，出白底黑线的线稿灰度图和主体遮罩，深浅、只留主体、线条颜色都在前端调（src/lineart/main.ts）。
  *
- * 模型部分（线稿、抠主体）在分层线程里做，和分层排同一个队（jobs.ts 的 lineartInWorker）。
+ * 模型部分在分层线程里做，和分层排同一个队（jobs.ts 的 lineartInWorker），分两次：先出线稿（几秒），做完就算 done、前端先画出来；
+ * 再抠主体（二十秒上下），这期间 subject 是 "pending"，前端轮询到 true 才让「只要主体」生效。
  * 结果放在产物目录的 .lineart/<id>/ 下：image.png（缩到线稿尺寸的原图）、line.png（灰度线稿）、subject.png（主体遮罩，抠不了时没有）、
  * lineart.json（尺寸、有没有主体）。不进数据库，地址是随机 UUID，24 小时后删。任务状态在内存里，重启后做完的照 lineart.json 认
  */
@@ -18,7 +19,7 @@ import { SKETCH_MAX_SIDE } from './sketch';
 export const LINEART_DIR = join(OUT_DIR, '.lineart');
 /** 线稿模型（导出见 deploy/lineart/export_onnx.py） */
 const SKETCH_MODEL = join(MODEL_DIR, 'anime2sketch', 'anime2sketch-improved.onnx');
-/** 同时排着和在做的最多几个：一张约半分钟（主要是抠主体），和分层共用一个线程 */
+/** 同时排着和在做的最多几个：一张线稿几秒、抠主体二十秒上下，和分层共用一个线程 */
 export const MAX_LINEART_QUEUE = 4;
 const TTL_MS = 24 * 60 * 60 * 1000;
 
@@ -27,8 +28,8 @@ export const LINEART_FILES = ['image', 'line', 'subject'] as const;
 export interface LineartResult {
   width: number;
   height: number;
-  /** 有没有主体遮罩：这台服务不抠图、或者认不出主体时没有，前端藏起「只要主体」 */
-  subject: boolean;
+  /** 主体遮罩：true 有，"pending" 还在抠，false 没有（这台服务不抠图、或者认不出主体），前端藏起「只要主体」 */
+  subject: boolean | 'pending';
 }
 
 type JobState = { state: 'queued' } | { state: 'error'; error: string } | ({ state: 'done' } & LineartResult);
@@ -42,7 +43,8 @@ export function lineartAvailable(): boolean {
 
 export function lineartInFlight(): number {
   let n = 0;
-  for (const job of jobs.values()) if (job.state === 'queued') n++;
+  // 线稿出了、主体还在抠的也算：它还要占分层线程
+  for (const job of jobs.values()) if (job.state === 'queued' || (job.state === 'done' && job.subject === 'pending')) n++;
   return n;
 }
 
@@ -64,15 +66,28 @@ export async function startLineart(image: Buffer): Promise<string> {
 async function run(id: string, dir: string, png: Buffer): Promise<void> {
   const createdAt = jobs.get(id)?.createdAt ?? Date.now();
   try {
-    const { line, subject, width, height } = await lineartInWorker(new Uint8Array(png), SKETCH_MODEL, MATTE_READY);
+    const { line, width, height } = await lineartInWorker(new Uint8Array(png), SKETCH_MODEL, false);
+    if (!line) throw new Error('分层线程没回线稿');
     // 不指定色彩空间的话 sharp 把单通道当彩色存成 RGB，文件大两倍
     const gray = (plane: Uint8Array): Promise<Buffer> =>
       sharp(plane, { raw: { width, height, channels: 1 } }).toColourspace('b-w').png().toBuffer();
     await writeFile(join(dir, 'line.png'), await gray(line));
-    if (subject) await writeFile(join(dir, 'subject.png'), await gray(subject));
-    const result: LineartResult = { width, height, subject: subject !== null };
-    await writeFile(join(dir, 'lineart.json'), JSON.stringify(result));
-    jobs.set(id, { state: 'done', createdAt, ...result });
+    const finish = async (subject: LineartResult['subject']): Promise<void> => {
+      const result: LineartResult = { width, height, subject };
+      await writeFile(join(dir, 'lineart.json'), JSON.stringify(result));
+      jobs.set(id, { state: 'done', createdAt, ...result });
+    };
+    await finish(MATTE_READY ? 'pending' : false);
+    if (!MATTE_READY) return;
+    // 抠主体失败不算整个失败：线稿已经给出去了，只是没有「只要主体」
+    try {
+      const { subject } = await lineartInWorker(new Uint8Array(png), null, true);
+      if (subject) await writeFile(join(dir, 'subject.png'), await gray(subject));
+      await finish(subject !== null);
+    } catch (error) {
+      console.error(`[lineart] ${id} 抠主体失败`, error);
+      await finish(false);
+    }
   } catch (error) {
     console.error(`[lineart] ${id} 失败`, error);
     jobs.set(id, { state: 'error', error: error instanceof Error ? error.message : String(error), createdAt });

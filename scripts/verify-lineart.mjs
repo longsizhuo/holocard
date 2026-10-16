@@ -3,8 +3,9 @@
  *
  * 自己用临时目录起一个服务端，核对：
  *   - 接口：方法不对 405、不是图片 415、不存在的 id / 文件 404；上传 → 202 → 轮询到 done
- *   - 产物：image、line、subject 三张尺寸一致、长边不超过 1024；line 是灰度、大半是白底、有黑线；放在产物目录的 .lineart/<id>/ 下
- *   - 页面：/lineart 发 lineart.html，?lang=en 时标题是英文；浏览器里上传一张图 → 预览画出线稿，
+ *   - 产物：先出线稿（done，subject 为 pending），主体后到（subject 变成 true）；image、line、subject 三张尺寸一致、长边不超过 1024；
+ *     line 是灰度、大半是白底、有黑线；subject 是灰度，相邻两行差得不多（缩放时通道搞错会变成一行行错开的条纹）；放在产物目录的 .lineart/<id>/ 下
+ *   - 页面：/lineart 发 lineart.html，?lang=en 时标题是英文，页脚写的是 Anime2Sketch；浏览器里上传一张图 → 预览画出线稿，
  *     换线条颜色后线变成那个颜色，关掉「只要主体」后不透明的像素变多，拖深浅滑块后不透明的像素变化，
  *     点下载得到一张透明底的 PNG；全程没有页面报错。截图在 --out（默认临时目录）
  *
@@ -75,6 +76,12 @@ for (let i = 0; ; i++) {
   if (job.state === 'error' || i > 180) throw new Error(`没做出来：${JSON.stringify(job)}\n${log.slice(-2000)}`);
   await sleep(1000);
 }
+for (let i = 0; job.subject === 'pending'; i++) {
+  if (i > 180) throw new Error(`主体一直没抠完：${JSON.stringify(job)}`);
+  assert.ok(!job.files.subject, '主体还在抠时不给 subject 文件');
+  await sleep(1000);
+  job = await (await fetch(`${BASE}/api/lineart/${id}`)).json();
+}
 assert.equal(job.subject, true, '有抠图权重时应当有主体遮罩');
 assert.deepEqual(Object.keys(job.files).sort(), ['image', 'line', 'subject']);
 assert.ok(Math.max(job.width, job.height) <= 1024, `长边不超过 1024：${job.width}×${job.height}`);
@@ -88,18 +95,27 @@ for (const name of ['image', 'line', 'subject']) {
   assert.equal(metas[name].meta.height, job.height, `${name} 高度一致`);
 }
 assert.equal(metas.line.meta.channels, 1, '线稿是单通道灰度');
-const gray = await sharp(metas.line.buffer).raw().toBuffer();
+const gray = await sharp(metas.line.buffer).extractChannel(0).raw().toBuffer();
 const white = gray.filter((v) => v > 230).length / gray.length;
 const dark = gray.filter((v) => v < 128).length / gray.length;
 assert.ok(white > 0.5, `线稿大半是白底：${(white * 100).toFixed(1)}%`);
 assert.ok(dark > 0.002, `线稿上有黑线：${(dark * 100).toFixed(2)}%`);
+assert.equal(metas.subject.meta.channels, 1, '主体遮罩是单通道灰度');
+const subject = await sharp(metas.subject.buffer).extractChannel(0).raw().toBuffer();
+let rowJump = 0;
+for (let y = 1; y < job.height; y++) for (let x = 0; x < job.width; x++) rowJump += Math.abs(subject[y * job.width + x] - subject[(y - 1) * job.width + x]);
+rowJump /= (job.height - 1) * job.width;
+assert.ok(rowJump < 8, `主体遮罩相邻两行平均差 ${rowJump.toFixed(1)}，太大就是错行的条纹`);
 assert.ok(existsSync(join(outDir, '.lineart', id, 'lineart.json')), '结果放在 .lineart/<id>/ 下');
 assert.equal((await fetch(`${BASE}/api/lineart/${id}/nope.png`)).status, 404, '不存在的文件应当 404');
 
 // ---------- 页面 ----------
 const page404 = await fetch(`${BASE}/lineart?lang=en`);
 assert.equal(page404.status, 200);
-assert.match(await page404.text(), /<title data-i18n="lineart.title">Line art — HoloCard<\/title>/, "英文页面的标题");
+const html = await page404.text();
+assert.match(html, /<title data-i18n="lineart.title">Line art — HoloCard<\/title>/, '英文页面的标题');
+assert.match(html, /data-i18n-html="lineart.creditHtml">Line art by <a href="https:\/\/github.com\/Mukosame\/Anime2Sketch"/, '页脚写的是 Anime2Sketch');
+assert.doesNotMatch(html, /pokemon-cards-css/, '页脚不提 pokemon-cards-css');
 
 const outArg = process.argv.indexOf('--out');
 const shots = outArg > 0 ? process.argv[outArg + 1] : join(work, 'shots');
@@ -112,6 +128,8 @@ page.on('pageerror', (e) => errors.push(String(e)));
 await page.goto(`${BASE}/lineart?lang=zh`);
 await page.setInputFiles('#lineart-file', { name: 'test.jpg', mimeType: 'image/jpeg', buffer: IMAGE });
 await page.waitForSelector('#lineart-result:not([hidden])', { timeout: 180_000 });
+// 线稿先出，主体抠好之前「只要主体」是灰的
+await page.waitForSelector('#lineart-subject:not([disabled])', { timeout: 180_000 });
 /** 预览画布上不透明像素的比例，和不透明像素里颜色最多的那种 */
 const inspect = () =>
   page.evaluate(() => {

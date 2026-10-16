@@ -74,11 +74,13 @@ export function translate(
   return template === undefined ? key : format(template, params);
 }
 
-/** 页脚里两个链接：翻译文本里用 {upstream}、{github} 占位 */
+/** 页脚里的链接：翻译文本里用 {upstream}、{github}、{anime2sketch}、{birefnet} 占位（后两个是线稿提取页的） */
 export const FOOT_LINKS: Record<string, string> = {
   upstream:
     '<a href="https://github.com/simeydotme/pokemon-cards-css" target="_blank" rel="noreferrer">pokemon-cards-css</a>',
   github: '<a href="https://github.com/longsizhuo/holocard" target="_blank" rel="noreferrer">GitHub</a>',
+  anime2sketch: '<a href="https://github.com/Mukosame/Anime2Sketch" target="_blank" rel="noreferrer">Anime2Sketch</a>',
+  birefnet: '<a href="https://github.com/ZhengPeng7/BiRefNet" target="_blank" rel="noreferrer">BiRefNet</a>',
 };
 
 function escapeHtml(value: string): string {

@@ -154,7 +154,7 @@ The layering service is one Node process that serves the frontend's static files
 | `pipeline/moderation.ts` | NudeNet nudity detection |
 | `pipeline/eta.ts` | Remaining-time estimate from exponentially averaged per-stage durations |
 | `pipeline/cardmask.ts` | Card mask jobs: normalise the card, find the layout (window or panel), have the worker thread matte the character and detect text, build and write the masks; results live in `.cardmasks/<id>/` and are deleted after 24 hours |
-| `pipeline/lineart.ts` | Line art jobs: scale the image, have the worker thread produce the line art and matte the subject, write the files; results live in `.lineart/<id>/` and are deleted after 24 hours |
+| `pipeline/lineart.ts` | Line art jobs: scale the image, have the worker thread produce the line art first (the job is `done` then) and matte the subject after (`subject` is `pending` meanwhile), write the files; results live in `.lineart/<id>/` and are deleted after 24 hours |
 | `pipeline/sketch.ts` | Line art from Anime2Sketch (improved version, ONNX): scale keeping the aspect ratio, pad to a multiple of 256, crop back afterwards |
 | `pipeline/textdet.ts` | PP-OCRv4 text detection (onnxruntime-node), producing a text probability map only |
 | `render/preview.ts` | Captures share images by opening `/render/<id>` in headless Chromium, keeping the browser warm |

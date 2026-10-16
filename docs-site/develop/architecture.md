@@ -154,7 +154,7 @@ holocard/
 | `pipeline/moderation.ts` | NudeNet 裸露识别 |
 | `pipeline/eta.ts` | 剩余时间估计：按阶段的耗时指数平均 |
 | `pipeline/cardmask.ts` | 卡面遮罩任务：规范化卡图、找版式（画框或内板）、交分层线程抠主角和找文字、拼遮罩写文件；结果在 `.cardmasks/<id>/`，24 小时后删除 |
-| `pipeline/lineart.ts` | 线稿提取任务：缩图、交分层线程出线稿和抠主体、写文件；结果在 `.lineart/<id>/`，24 小时后删除 |
+| `pipeline/lineart.ts` | 线稿提取任务：缩图，交分层线程先出线稿（做完即 done）、再抠主体（期间 `subject` 为 `pending`），写文件；结果在 `.lineart/<id>/`，24 小时后删除 |
 | `pipeline/sketch.ts` | Anime2Sketch（improved 版，ONNX）出线稿：按比例缩放、补边到 256 的倍数，算完裁回 |
 | `pipeline/textdet.ts` | PP-OCRv4 文字检测（onnxruntime-node），只出文字概率图 |
 | `render/preview.ts` | 用无头 Chromium 打开 `/render/<id>` 截分享图，浏览器常驻复用 |

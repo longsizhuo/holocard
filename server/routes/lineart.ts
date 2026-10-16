@@ -1,7 +1,7 @@
 /**
  * 线稿提取的接口（任务本身见 server/pipeline/lineart.ts）：
  *   POST /api/lineart                       请求体是图片字节 → 202 { id }
- *   GET  /api/lineart/<id>                  → { state, error?, width, height, subject, files }
+ *   GET  /api/lineart/<id>                  → { state, error?, width, height, subject, files }；subject 为 "pending" 时主体还在抠
  *   GET  /api/lineart/<id>/<名字>.png        image（缩过的原图）、line（灰度线稿）、subject（主体遮罩）
  * 不要登录、不进数据库；地址是随机 UUID，不公开，24 小时后删。成品（上色、透明底）由前端合成下载
  */
@@ -60,12 +60,13 @@ export async function handleLineart(req: IncomingMessage, res: ServerResponse, u
 
   if (file === undefined) {
     const base = `/api/lineart/${id}`;
-    const files = status.state === 'done' ? LINEART_FILES.filter((name) => name !== 'subject' || status.subject) : [];
+    const files = status.state === 'done' ? LINEART_FILES.filter((name) => name !== 'subject' || status.subject === true) : [];
     json(res, 200, { ...status, ...(files.length ? { files: Object.fromEntries(files.map((name) => [name, `${base}/${name}.png`])) } : {}) });
     return;
   }
 
-  if (!(LINEART_FILES as readonly string[]).includes(file) || (file !== 'image' && status.state !== 'done')) {
+  const ready = file === 'image' || (status.state === 'done' && (file !== 'subject' || status.subject === true));
+  if (!(LINEART_FILES as readonly string[]).includes(file) || !ready) {
     fail(res, 404, 'file_not_found', '文件不存在');
     return;
   }

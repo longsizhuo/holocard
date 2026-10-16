@@ -7,8 +7,8 @@
 ## 使用
 
 1. 点「选择图片」，上传插画。支持 JPEG、PNG、WebP、AVIF、HEIC，不超过 16 MB；长边超过 1024 像素的会先缩小。
-2. 处理约需半分钟，期间页面显示「正在提取」。
-3. 完成后左侧为预览，透明的地方显示为棋盘格。右侧可调整：
+2. 线稿几秒后先显示出来；主体还要再抠二十秒左右，期间页面显示「正在抠主体」，「只要主体」暂时不可用，抠好后自动按主体重画。
+3. 左侧为预览，透明的地方显示为棋盘格。右侧可调整：
 
 | 控件 | 作用 | 取值 |
 |---|---|---|
@@ -37,7 +37,7 @@
 | 请求 | 说明 |
 |---|---|
 | `POST /api/lineart` | 请求体为图片字节，返回 `202 { id }` |
-| `GET /api/lineart/<id>` | 任务状态：`state` 为 `queued`、`done` 或 `error`；完成后另有 `width`、`height`、`subject`（有没有主体遮罩）与 `files` |
+| `GET /api/lineart/<id>` | 任务状态：`state` 为 `queued`、`done` 或 `error`。线稿做好即为 `done`，另有 `width`、`height`、`files` 与 `subject`：`"pending"` 表示主体还在抠，`true` 表示已有主体遮罩，`false` 表示没有 |
 | `GET /api/lineart/<id>/image.png` | 缩小后的原图 |
 | `GET /api/lineart/<id>/line.png` | 灰度线稿（白底黑线，未做色阶调整） |
-| `GET /api/lineart/<id>/subject.png` | 主体遮罩（灰度，白为主体）；`subject` 为 `false` 时没有 |
+| `GET /api/lineart/<id>/subject.png` | 主体遮罩（灰度，白为主体）；`subject` 为 `true` 时才有 |

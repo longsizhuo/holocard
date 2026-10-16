@@ -7,8 +7,8 @@ Address: [holocard.longsizhuo.com/lineart](https://holocard.longsizhuo.com/linea
 ## Usage
 
 1. Click "Choose an image" and upload an illustration. JPEG, PNG, WebP, AVIF and HEIC are supported, up to 16 MB; images with a long side over 1024 pixels are scaled down first.
-2. Processing takes about half a minute; the page shows "Working" meanwhile.
-3. When done, the preview is on the left, with transparent areas shown as a checkerboard. On the right:
+2. The line art appears after a few seconds. Matting the subject takes about twenty seconds more; meanwhile the page shows "Finding the subject" and "Subject only" is unavailable, and the preview is redrawn with the subject once it is ready.
+3. The preview is on the left, with transparent areas shown as a checkerboard. On the right:
 
 | Control | Effect | Values |
 |---|---|---|
@@ -37,7 +37,7 @@ The endpoints used by the page. No sign-in is needed; result addresses are rando
 | Request | Description |
 |---|---|
 | `POST /api/lineart` | Body is the image bytes; returns `202 { id }` |
-| `GET /api/lineart/<id>` | Job status: `state` is `queued`, `done` or `error`; when done, also `width`, `height`, `subject` (whether there is a subject mask) and `files` |
+| `GET /api/lineart/<id>` | Job status: `state` is `queued`, `done` or `error`. It is `done` as soon as the line art is ready, with `width`, `height`, `files` and `subject`: `"pending"` while the subject is still being matted, `true` once the subject mask exists, `false` if there is none |
 | `GET /api/lineart/<id>/image.png` | The scaled-down original |
 | `GET /api/lineart/<id>/line.png` | Greyscale line art (black lines on white, no levels applied) |
-| `GET /api/lineart/<id>/subject.png` | Subject mask (greyscale, white is the subject); absent when `subject` is `false` |
+| `GET /api/lineart/<id>/subject.png` | Subject mask (greyscale, white is the subject); only when `subject` is `true` |

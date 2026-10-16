@@ -59,11 +59,14 @@ export type SegmentRequest =
       textModel: string;
     }
   | {
-      /** 线稿提取（server/pipeline/lineart.ts）：整张图出线稿，能抠图的话顺带抠主体 */
+      /**
+       * 线稿提取（server/pipeline/lineart.ts）分两次来：先只要线稿（几秒），再只要主体（抠图要二十秒上下），
+       * 线稿先给人看。sketchModel 给了就出线稿，matte 为 true 就抠主体
+       */
       type: 'lineart';
       /** 规范化过的图（PNG），长边已经缩到 SKETCH_MAX_SIDE 以内 */
       bytes: Uint8Array<ArrayBuffer>;
-      sketchModel: string;
+      sketchModel?: string;
       matte: boolean;
     };
 
@@ -80,8 +83,8 @@ export type SegmentReply =
   | { type: 'done'; manifest: LayerManifest; images: Uint8Array[] }
   /** 卡面遮罩：matte 是 region 里的主角（认不出主体时为 null），text 是整张卡的文字概率 */
   | { type: 'cardmask'; matte: ProbabilityPlane | null; text: ProbabilityPlane }
-  /** 线稿提取：line 是白底黑线的灰度、subject 是主体（认不出或这台不抠图时为 null），都和收到的图一样大 */
-  | { type: 'lineart'; line: Uint8Array; subject: Uint8Array | null; width: number; height: number }
+  /** 线稿提取：line 是白底黑线的灰度、subject 是主体（没要、认不出时为 null），都和收到的图一样大 */
+  | { type: 'lineart'; line: Uint8Array | null; subject: Uint8Array | null; width: number; height: number }
   | { type: 'error'; message: string };
 
 const port = parentPort;
@@ -130,8 +133,14 @@ async function cardmask(request: Extract<SegmentRequest, { type: 'cardmask' }>):
 /** 线稿提取：模型部分在这里做，存文件在主线程（server/pipeline/lineart.ts） */
 async function lineart(request: Extract<SegmentRequest, { type: 'lineart' }>): Promise<void> {
   const { data, info } = await sharp(request.bytes).removeAlpha().raw().toBuffer({ resolveWithObject: true });
-  const line = await sketch(data, info.width, info.height, request.sketchModel);
+  let line: Uint8Array | null = null;
+  let t = performance.now();
+  if (request.sketchModel) {
+    line = await sketch(data, info.width, info.height, request.sketchModel);
+    console.log(`[lineart] ${info.width}×${info.height} 线稿 ${((performance.now() - t) / 1000).toFixed(1)}s`);
+  }
   let subject: Uint8Array | null = null;
+  t = performance.now();
   if (request.matte) {
     const matte = await estimateMatte(new Blob([request.bytes], { type: 'image/png' })).catch((error: unknown) => {
       console.warn(`[lineart] 认不出主体：${error instanceof Error ? error.message : String(error)}`);
@@ -143,14 +152,17 @@ async function lineart(request: Extract<SegmentRequest, { type: 'lineart' }>): P
       subject = new Uint8Array(
         await sharp(plane, { raw: { width: matte.width, height: matte.height, channels: 1 } })
           .resize(info.width, info.height, { fit: 'fill' })
+          // 不指定的话 sharp 缩放后按 sRGB 出三通道，当单通道读就是一行行错开的条纹
+          .toColourspace('b-w')
           .raw()
           .toBuffer(),
       );
     }
   }
+  if (request.matte) console.log(`[lineart] 抠主体 ${((performance.now() - t) / 1000).toFixed(1)}s`);
   port!.postMessage(
     { type: 'lineart', line, subject, width: info.width, height: info.height } satisfies SegmentReply,
-    [line.buffer as ArrayBuffer, ...(subject ? [subject.buffer as ArrayBuffer] : [])],
+    [...(line ? [line.buffer as ArrayBuffer] : []), ...(subject ? [subject.buffer as ArrayBuffer] : [])],
   );
 }
 

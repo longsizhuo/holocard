@@ -1,6 +1,7 @@
 /**
  * 线稿提取页（lineart.html）：上传插画 → 服务端出白底黑线的灰度线稿和主体遮罩（server/pipeline/lineart.ts）→
  * 在这里调深浅、线条颜色、只要主体，合成透明底的 PNG 下载。
+ * 线稿几秒就有，先画出来；主体遮罩要再抠二十秒上下，抠好之前「只要主体」是灰的，抠好了再按它重画
  *
  * 线稿模型的输出常常偏淡，而且每张图淡的程度不一样，先按这张图自己的亮度定色阶：最暗的 1% 算全黑，中位数（背景）算全白。
  * 深浅滑块再在这之上调伽马：中间是原样，往右线更黑更粗，往左只留最明显的线
@@ -11,7 +12,7 @@ import '../demo/pearl-drift.css';
 import '../masks/masks.css';
 import './lineart.css';
 import { t } from '../i18n';
-import { BASE, failure, need, pixels, setupLang, submitAndWait } from '../tools/page';
+import { BASE, describe, failure, need, pixels, setupLang, submitAndWait } from '../tools/page';
 
 /** 低于这个不透明度的当噪点去掉：背景里淡淡的纹理不该变成一层薄雾 */
 const NOISE = 0.05;
@@ -74,21 +75,42 @@ async function upload(file: File): Promise<void> {
   result.hidden = true;
   status.textContent = t('lineart.working');
   try {
-    const { id, job } = await submitAndWait<{ state: string; error?: string; subject?: boolean }>('lineart', file);
-    const base = `${BASE}api/lineart/${id}`;
-    const line = await pixels(`${base}/line.png`);
-    const subject = job.subject ? (await pixels(`${base}/subject.png`)).data : null;
-    current = { id, width: line.width, height: line.height, line: line.data, subject, black: percentile(line.data, 0.01), white: percentile(line.data, 0.5) };
-    subjectBox.hidden = subject === null;
+    const { id, job } = await submitAndWait<Job>('lineart', file);
+    const line = await pixels(`${BASE}api/lineart/${id}/line.png`);
+    current = { id, width: line.width, height: line.height, line: line.data, subject: null, black: percentile(line.data, 0.01), white: percentile(line.data, 0.5) };
     result.hidden = false;
     render();
-    status.textContent = '';
+    await loadSubject(id, job);
   } catch (error) {
     status.textContent = t('masks.failed', { message: failure(error) });
   } finally {
     fileInput.disabled = false;
     fileInput.value = '';
   }
+}
+
+type Job = { state: string; error?: string; subject?: boolean | 'pending' };
+
+/** 等主体遮罩：抠好了取回来按它重画；没有就把「只要主体」藏起来。期间又传了新图就不管这张了 */
+async function loadSubject(id: string, job: Job): Promise<void> {
+  subjectBox.hidden = job.subject === false;
+  subjectOnly.disabled = true;
+  status.textContent = job.subject === 'pending' ? t('lineart.matting') : '';
+  while (job.subject === 'pending') {
+    await new Promise((r) => setTimeout(r, 1500));
+    if (current?.id !== id) return;
+    const res = await fetch(`${BASE}api/lineart/${id}`);
+    if (!res.ok) throw new Error(await describe(res));
+    job = (await res.json()) as Job;
+  }
+  if (current?.id !== id) return;
+  if (job.subject === true) {
+    current.subject = (await pixels(`${BASE}api/lineart/${id}/subject.png`)).data;
+    subjectOnly.disabled = false;
+    render();
+  }
+  subjectBox.hidden = job.subject !== true;
+  status.textContent = '';
 }
 
 function save(): void {
