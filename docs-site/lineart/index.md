@@ -24,7 +24,7 @@
 
 线稿和主体在识别服务（`deploy/sam3/serve.py`，与[特效识别](/develop/pipeline#服务端识别特效-sam3-card)是同一个服务，跑在有显卡的机器上）里一次算完：
 
-- 线稿：[MangaLineExtraction](https://github.com/ljsabc/MangaLineExtraction_PyTorch)（MIT）。按原比例处理，长边 2048，四周补边到 256 的倍数后裁回；表情头像这类小块在 1024 下线会糊成一团。
+- 线稿：[MangaLineExtraction](https://github.com/ljsabc/MangaLineExtraction_PyTorch)（MIT）。按原比例处理，长边 2048（小图最多放大 2 倍），四周补边到 256 的倍数后裁回；表情头像这类小块在 1024 下线会糊成一团。
 - 主体：SAM 3 按「character」「person」两个词各找一遍，所有角色的遮罩合并。角色设定图里的多个人物、表情、三视图都算主体，文字和边框不算。
 
 识别服务不可用时在本机处理：线稿用 [Anime2Sketch](https://github.com/Mukosame/Anime2Sketch)（MIT）的 improved 版，主体用 BiRefNet_lite（只认一个最显著的主体）。

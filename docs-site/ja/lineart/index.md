@@ -24,7 +24,7 @@
 
 線画と被写体は、GPU のあるマシンで動く検出サービスでまとめて計算します。
 
-- 線画：[MangaLineExtraction](https://github.com/ljsabc/MangaLineExtraction_PyTorch)（MIT）。縦横比を保ったまま長辺 2048 で処理します。
+- 線画：[MangaLineExtraction](https://github.com/ljsabc/MangaLineExtraction_PyTorch)（MIT）。縦横比を保ったまま長辺 2048 で処理します（小さい画像は最大 2 倍まで拡大）。
 - 被写体：SAM 3 で「character」「person」を探し、すべてのキャラクターのマスクを合わせます。キャラクターシートの複数の人物・表情・三面図もすべて被写体になり、文字や枠は含みません。
 
 検出サービスが使えないときはサーバー上で処理します（線画は [Anime2Sketch](https://github.com/Mukosame/Anime2Sketch)（MIT）の improved 版、被写体は最も目立つ 1 つだけを見つける BiRefNet_lite）。

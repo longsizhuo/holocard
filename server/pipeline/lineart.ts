@@ -104,8 +104,10 @@ async function run(id: string, dir: string, image: Buffer): Promise<void> {
   try {
     // 先看显卡机在不在，再定按多大算：image.png、line.png、subject.png 三张始终一样大
     const onGpu = await gpuReady();
-    const side = onGpu ? GPU_MAX_SIDE : SKETCH_MAX_SIDE;
-    let png = await sharp(image).resize({ width: side, height: side, fit: 'inside', withoutEnlargement: true }).png().toBuffer();
+    // 显卡机那条连小图也放大到 2048（最多放大 2 倍）：线是按像素算的，图放大了线才细；本机不放大
+    const { width: w0 = 0, height: h0 = 0 } = await sharp(image).metadata();
+    const side = onGpu ? Math.min(GPU_MAX_SIDE, 2 * Math.max(w0, h0)) : SKETCH_MAX_SIDE;
+    let png = await sharp(image).resize({ width: side, height: side, fit: 'inside', withoutEnlargement: !onGpu }).png().toBuffer();
     await writeFile(join(dir, 'image.png'), png);
     const gpu = onGpu ? await lineartOnGpu(png) : null;
     if (gpu) {

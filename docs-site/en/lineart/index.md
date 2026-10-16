@@ -24,7 +24,7 @@ Results are deleted after 24 hours.
 
 Line art and subject are computed in one go by the detection service (`deploy/sam3/serve.py`, the same service as [effect detection](/en/develop/pipeline#server-side-effect-detection-sam3-card), running on a machine with a GPU):
 
-- Line art: [MangaLineExtraction](https://github.com/ljsabc/MangaLineExtraction_PyTorch) (MIT), with the aspect ratio kept, a long side of 2048, padded to a multiple of 256 and cropped back; at 1024 small parts such as expression heads blur into a tangle.
+- Line art: [MangaLineExtraction](https://github.com/ljsabc/MangaLineExtraction_PyTorch) (MIT), with the aspect ratio kept, a long side of 2048 (small images are enlarged up to 2×), padded to a multiple of 256 and cropped back; at 1024 small parts such as expression heads blur into a tangle.
 - Subject: SAM 3 is asked for "character" and "person", and the masks of all characters are merged. Several people, expressions and turnarounds on a character sheet all count as subject; text and frames do not.
 
 When the detection service is unavailable the server does it itself: the improved version of [Anime2Sketch](https://github.com/Mukosame/Anime2Sketch) (MIT) for the lines and BiRefNet_lite for the subject (which finds only the single most salient subject).
