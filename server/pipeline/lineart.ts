@@ -43,13 +43,19 @@ export function lineartAvailable(): boolean {
   return existsSync(SKETCH_MODEL);
 }
 
-/** 显卡机冷启动要加载 SAM3（约 40 秒）和线稿模型，再加上传图 */
-const GPU_TIMEOUT_MS = 120_000;
+/** 显卡机刚开机、磁盘缓存是冷的时候，加载 SAM3 和线稿模型要两分钟上下（serve.py 带 --preload 一开机就加载），再加上传图 */
+const GPU_TIMEOUT_MS = 180_000;
 /**
  * 显卡机按这个长边算：表情头像这类小块在 1024 下只有一百来像素，线糊成一团；2048 线细、小字认得出，显卡上约 4 秒。
  * 本机兜底还是 SKETCH_MAX_SIDE（CPU 上 2048 要四倍时间）
  */
 const GPU_MAX_SIDE = 2048;
+/**
+ * 发给显卡机的原图长边上限和 JPEG 质量：往家里传的那个方向最慢，2026-10-17 实测 10～50KB/s，
+ * 1024、质量 80 约 120KB；显卡机再放大到 2048 算，线条照样细
+ */
+const SEND_MAX_SIDE = 1024;
+const SEND_QUALITY = 80;
 
 /** 显卡机的线稿接口在不在 */
 async function gpuReady(): Promise<boolean> {
@@ -62,12 +68,18 @@ async function gpuReady(): Promise<boolean> {
   }
 }
 
-/** 问显卡机要线稿和主体（两张灰度 PNG）。出错回 null，交给本机做 */
-async function lineartOnGpu(png: Buffer): Promise<{ line: Buffer; subject: Buffer | null } | null> {
+/**
+ * 问显卡机要线稿和主体，按 width × height 算，回来的线稿是 WebP、主体是 PNG，统一存成灰度 PNG。出错回 null，交给本机做。
+ * 网很慢（往家里传实测 10～50KB/s、回来约 200KB/s，来回一趟 1 秒），要省传输：发过去的是原图（长边超过 SEND_MAX_SIDE 才缩），
+ * 放大到 width × height 由显卡机自己做——放大后的 2048 图要传十几到四十秒，两边从同一张原图放大，结果一样
+ */
+async function lineartOnGpu(image: Buffer, width: number, height: number): Promise<{ line: Buffer; subject: Buffer | null } | null> {
   try {
-    // 发 JPEG：到家里的上行只有约 150KB/s，PNG 要多传好几倍
-    const body = await sharp(png).jpeg({ quality: 92 }).toBuffer();
-    const res = await fetch(`${LINEART_URL}/lineart`, {
+    const body = await sharp(image)
+      .resize({ width: SEND_MAX_SIDE, height: SEND_MAX_SIDE, fit: 'inside', withoutEnlargement: true })
+      .jpeg({ quality: SEND_QUALITY })
+      .toBuffer();
+    const res = await fetch(`${LINEART_URL}/lineart?w=${width}&h=${height}`, {
       method: 'POST',
       body: new Uint8Array(body),
       headers: { 'content-type': 'image/jpeg' },
@@ -75,7 +87,8 @@ async function lineartOnGpu(png: Buffer): Promise<{ line: Buffer; subject: Buffe
     });
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     const reply = (await res.json()) as { line: string; subject: string | null };
-    return { line: Buffer.from(reply.line, 'base64'), subject: reply.subject ? Buffer.from(reply.subject, 'base64') : null };
+    const gray = (b64: string): Promise<Buffer> => sharp(Buffer.from(b64, 'base64')).toColourspace('b-w').png().toBuffer();
+    return { line: await gray(reply.line), subject: reply.subject ? await gray(reply.subject) : null };
   } catch (error) {
     console.warn(`[lineart] 显卡机不可用，改在本机做：${error instanceof Error ? error.message : String(error)}`);
     return null;
@@ -109,9 +122,10 @@ async function run(id: string, dir: string, image: Buffer): Promise<void> {
     const side = onGpu ? Math.min(GPU_MAX_SIDE, 2 * Math.max(w0, h0)) : SKETCH_MAX_SIDE;
     let png = await sharp(image).resize({ width: side, height: side, fit: 'inside', withoutEnlargement: !onGpu }).png().toBuffer();
     await writeFile(join(dir, 'image.png'), png);
-    const gpu = onGpu ? await lineartOnGpu(png) : null;
+    const { width: pw = 0, height: ph = 0 } = await sharp(png).metadata();
+    const gpu = onGpu ? await lineartOnGpu(image, pw, ph) : null;
     if (gpu) {
-      const { width = 0, height = 0 } = await sharp(png).metadata();
+      const [width, height] = [pw, ph];
       await writeFile(join(dir, 'line.png'), gpu.line);
       if (gpu.subject) await writeFile(join(dir, 'subject.png'), gpu.subject);
       const result: LineartResult = { width, height, subject: gpu.subject !== null };
