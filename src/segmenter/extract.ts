@@ -92,6 +92,10 @@ export interface ExtractResult {
   stats: LayerStat[];
   width: number;
   height: number;
+  /** 解码后的原图（输出尺寸），给后面识别特效用 */
+  source: Uint8ClampedArray;
+  /** 每层最终的 alpha（0..1，输出尺寸），和 images 一一对应 */
+  alphas: Float32Array[];
 }
 
 /** 上方的层盖到这个程度，就认为下面的像素看不见，层归属判断以它为界 */
@@ -656,7 +660,7 @@ export async function extractLayers(
     images.push(await opts.images.encodePng({ data: out, width, height }));
   }
 
-  return { images, stats, width, height };
+  return { images, stats, width, height, source: src, alphas: layerAlphas };
 }
 
 /** alpha 低于它的像素几乎透明，颜色是什么都看不出来，不值得算；高于 1 − 它就当不透明 */

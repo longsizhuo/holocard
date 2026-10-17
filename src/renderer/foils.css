@@ -326,6 +326,192 @@
   mix-blend-mode: color-dodge;
 }
 
+/*
+ * ---------- glow：光效（HoloCard 自己的配方，不来自上游） ----------
+ *
+ * 给识别出来的特效层用：光带、光晕、魔法阵、火焰、闪电、闪光点。只有 .hc__flow 一部分：按类型的动画（见下），
+ * 静止和倾斜时都在播。遮罩只取这一层的亮部（highlight.ts 的 brightMask），光只落在特效本身，不会把旁边的暗处也提亮。
+ *
+ * 倾斜时不另上箔：以前这里有一层彩虹渐变 + 闪粉，color-dodge 加上提亮、加对比度，叠在本来就亮的特效上，
+ * 整块冲成纯白、纯青，像贴纸一样。特效层的画面就是原图，下面那层的箔面在倾斜时照常从特效上扫过就够了
+ */
+
+.hc__shine[data-foil='glow'] {
+  display: none;
+}
+
+.hc__flow[data-foil='glow'][data-ready] {
+  display: block;
+  opacity: var(--hc-foil-intensity, 1);
+  /* screen 是「加亮」：光带上推到白，晕开的那一点点余量里是一圈淡光。color-dodge 在已经很亮的细线上几乎没变化 */
+  mix-blend-mode: screen;
+  background-repeat: no-repeat;
+}
+
+/*
+ * 平时的动法按特效类型（manifest 的 effect，card.ts 写到 data-effect 上）：动的是光，形状不动。
+ * 类型定节奏（火苗快、光晕慢、闪电一阵一阵），形状定走向（光带顺着自己的长轴流，魔法阵绕着中心转）。
+ * 长轴角度 --hc-fx-angle、中心 --hc-fx-x/y 由 highlight.ts 的 brightMask 按亮部算出来。
+ * 动画走注册过的自定义属性，渐变里的位置、透明度、角度才能平滑插值
+ */
+@property --hc-fx-p {
+  syntax: '<percentage>';
+  inherits: false;
+  initial-value: 0%;
+}
+@property --hc-fx-a {
+  syntax: '<number>';
+  inherits: false;
+  initial-value: 0;
+}
+@property --hc-fx-spin {
+  syntax: '<angle>';
+  inherits: false;
+  initial-value: 0deg;
+}
+
+/* 光带（也是没标类型时的默认）：一颗亮脉冲顺着长轴从一头跑到另一头 */
+.hc__flow[data-foil='glow'][data-ready] {
+  background-image: linear-gradient(
+    var(--hc-fx-angle, 100deg),
+    transparent calc(var(--hc-fx-p) - 16%),
+    hsla(48, 100%, 90%, 0.5) calc(var(--hc-fx-p) - 5%),
+    hsla(0, 0%, 100%, 1) var(--hc-fx-p),
+    hsla(48, 100%, 90%, 0.5) calc(var(--hc-fx-p) + 5%),
+    transparent calc(var(--hc-fx-p) + 16%)
+  );
+  animation: hc-fx-sweep 2.8s linear infinite;
+}
+
+/* 光晕：整片慢慢一明一暗，像在呼吸 */
+.hc__flow[data-foil='glow'][data-ready][data-effect='glow'] {
+  background-image: none;
+  background-color: hsla(45, 100%, 92%, var(--hc-fx-a));
+  animation: hc-fx-breathe 3.6s ease-in-out infinite;
+}
+
+/* 魔法阵：一道亮弧绕着中心转 */
+.hc__flow[data-foil='glow'][data-ready][data-effect='circle'] {
+  background-image: conic-gradient(
+    from var(--hc-fx-spin) at var(--hc-fx-x, 50%) var(--hc-fx-y, 50%),
+    transparent 0deg 240deg,
+    hsla(270, 100%, 88%, 0.55) 320deg,
+    hsla(0, 0%, 100%, 1) 356deg,
+    transparent 360deg
+  );
+  animation: hc-fx-spin 3.2s linear infinite;
+}
+
+/* 火焰：一层层亮带往上窜，亮度忽高忽低 */
+.hc__flow[data-foil='glow'][data-ready][data-effect='fire'] {
+  background-image: linear-gradient(0deg, transparent 10%, hsla(38, 100%, 82%, 0.95) 50%, transparent 90%);
+  background-size: 100% 40%;
+  background-repeat: repeat-y;
+  animation:
+    hc-fx-rise 1.1s linear infinite,
+    hc-fx-flicker 0.9s steps(1) infinite;
+}
+
+/* 闪电：大半时间暗着，隔一会儿连闪两下 */
+.hc__flow[data-foil='glow'][data-ready][data-effect='lightning'] {
+  background-image: none;
+  background-color: hsla(210, 100%, 94%, var(--hc-fx-a));
+  animation: hc-fx-strike 2.6s linear infinite;
+}
+
+/* 闪光点：两层疏密不同的光点网格朝不同方向慢慢挪，扫过哪个星点哪个就闪一下，此起彼伏 */
+.hc__flow[data-foil='glow'][data-ready][data-effect='sparkles'] {
+  background-image:
+    radial-gradient(circle, hsla(0, 0%, 100%, 1) 0 16%, transparent 42%),
+    radial-gradient(circle, hsla(50, 100%, 90%, 1) 0 14%, transparent 38%);
+  background-size: 9% 7%, 13% 11%;
+  background-repeat: repeat;
+  animation: hc-fx-twinkle 6s linear infinite;
+}
+
+@keyframes hc-fx-sweep {
+  from {
+    --hc-fx-p: -20%;
+  }
+  to {
+    --hc-fx-p: 120%;
+  }
+}
+@keyframes hc-fx-breathe {
+  0%,
+  100% {
+    --hc-fx-a: 0.1;
+  }
+  50% {
+    --hc-fx-a: 0.5;
+  }
+}
+@keyframes hc-fx-spin {
+  to {
+    --hc-fx-spin: 360deg;
+  }
+}
+/* 背景高 40%、竖着平铺：位置 66.67% 正好往下错一格（(100% − 40%) × 66.67% = 40%），挪回 0 就是往上走了一格，循环接得上 */
+@keyframes hc-fx-rise {
+  from {
+    background-position: 0 66.667%;
+  }
+  to {
+    background-position: 0 0%;
+  }
+}
+@keyframes hc-fx-flicker {
+  0% {
+    filter: brightness(1);
+  }
+  20% {
+    filter: brightness(0.65);
+  }
+  35% {
+    filter: brightness(1.2);
+  }
+  55% {
+    filter: brightness(0.8);
+  }
+  75% {
+    filter: brightness(1.1);
+  }
+}
+@keyframes hc-fx-strike {
+  0%,
+  70% {
+    --hc-fx-a: 0;
+  }
+  72% {
+    --hc-fx-a: 1;
+  }
+  75% {
+    --hc-fx-a: 0.15;
+  }
+  78% {
+    --hc-fx-a: 0.95;
+  }
+  84%,
+  100% {
+    --hc-fx-a: 0;
+  }
+}
+/* ponytail: 挪的距离不是整格，循环那一下光点会跳一次；闪光点本来就在闪，看不出来 */
+@keyframes hc-fx-twinkle {
+  from {
+    background-position: 0 0, 0 0;
+  }
+  to {
+    background-position: 60% 40%, -45% 70%;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .hc__flow[data-foil='glow'][data-ready] {
+    display: none;
+  }
+}
+
 /* ---------- 整卡高光（base.css 的 .card__glare） ---------- */
 
 .hc__glare {

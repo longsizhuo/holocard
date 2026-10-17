@@ -115,7 +115,7 @@ drop-in 挂在 `holocard.service.d/`，最后重启 `holocard`。值要换（泄
 | `/var/lib/holocard/` | 自动发版的状态：构建用的检出 `repo/`、已发的提交 `deployed`、上次试过的 `attempted`、`env.production`（埋点站点 id）、暂停开关 `paused` |
 | `/opt/holocard/node22/` | Node 22 运行时（系统自带的是 18，sharp 要求 ≥20.9） |
 | `/opt/holocard/node_modules/` | transformers.js + onnxruntime-node + sharp，约 483MB |
-| `/srv/holocard-models/` | Depth Anything V2-Small 权重（q8，27MB）；BiRefNet_lite 权重（fp32，214MB，抠主体用；不放就只按深度切层）；`nudenet/320n.onnx` 裸露识别（12MB） |
+| `/srv/holocard-models/` | Depth Anything V2-Small 权重（q8，27MB）；BiRefNet_lite 权重（fp32，214MB，抠主体用；不放就只按深度切层）；`nudenet/320n.onnx` 裸露识别（12MB）；`sam3/` 特效识别的官方 SAM 3 权重（3.4GB）和微调存档（`sam3card-v11soup.pt`，131MB），见「特效识别」；`anime2sketch/anime2sketch-improved.onnx` 线稿模型（183MB），见「线稿提取」 |
 | `/srv/holocard-web/` | 前端 releases + current 软链 |
 | `/srv/holocard-layers/` | 每张卡一个目录：原图（去掉 EXIF）+ 层 PNG + manifest + 预览图 + 卡册缩略图 `thumb.jpg`（分层完成时做好；早期没存原图的卡在第一次有人要时用各层叠出来现做） |
 | `/srv/holocard-data/holocard.db` | 卡片数据库（SQLite），每张卡的状态、原图地址、结果地址、保留期、删除口令 |
@@ -138,6 +138,54 @@ Environment=PLAYWRIGHT_BROWSERS_PATH=/opt/holocard/browsers
 服务侧：单并发（`HOLOCARD_CONCURRENCY=1`），队列上限 12，满了直接返回 503 而不是让人排十分钟。
 上传上限 16MB，按魔数校验图片格式，拒绝解压炸弹。
 按 IP 限流：10 分钟 10 次，取 `cf-connecting-ip`。
+
+## 特效识别
+
+分层时识别画里的特效（SAM3-Card，原理见文档站「分层流水线」）。模型太大不进分层服务，是单独的 Python 服务（`deploy/sam3/serve.py`），
+分层服务按 `HOLOCARD_EFFECTS_URLS`（默认 `http://127.0.0.1:8795,http://127.0.0.1:8796`）的顺序问，前一个不通问下一个，都不通就不出特效层：
+
+| 地址 | 是什么 | 每张 |
+|---|---|---|
+| `127.0.0.1:8795` | 到家里显卡机的 ssh 隧道（本机 systemd 单元 `holocard-sam3-tunnel.service`，单元文件不进仓库），显卡机 WSL 里跑 `serve.py --device cuda --port 8796`（`D:/cardmask/train/sam3serve.sh`） | 约 0.5 秒 |
+| `127.0.0.1:8796` | 本机 CPU 兜底，`holocard-sam3.service`（`deploy/sam3/holocard-sam3.service`） | 约 1.5 分钟，冷启动再加 1 分钟 |
+
+- 显卡机关机、打游戏（`D:/cardmask/train/pause.sh` 会把显卡机上的服务一起停掉）时自动退到 CPU 兜底，分层多等一两分钟（阶段 `finding-effects`）
+- staging 的出站防火墙（`deploy/staging/firewall.nft`）放行了这两个端口，staging 和线上共用
+- 换权重：新存档放进 `/srv/holocard-models/sam3/`，改 `holocard-sam3.service` 和显卡机 `sam3serve.sh` 里的 `--ckpt`，两边各重启一次。存档只要 `model` 一项（训练存档里的优化器状态去掉），不含冻结的主干
+- 内存：CPU 兜底常驻约 6GB，和线上分层服务（抠主体峰值约 7GB）同时跑时整机要 13GB 以上。卡在 `MemoryMax=8G`，超了只杀它自己
+
+安装（一次）：
+
+```bash
+# sam3 代码（官方仓库，打 CPU 补丁：两处写死 device="cuda" 的缓存、一处 pin_memory）和 venv（torch 2.11 CPU 版）手装在 ~/sam3、~/sam3venv
+sudo mkdir -p /opt/holocard/sam3 /srv/holocard-models/sam3
+sudo cp deploy/sam3/serve.py /opt/holocard/sam3/
+# 官方 sam3.pt（modelscope 下）和微调存档放进 /srv/holocard-models/sam3/
+sudo cp deploy/sam3/holocard-sam3.service /etc/systemd/system/
+sudo systemctl daemon-reload && sudo systemctl enable --now holocard-sam3.service
+curl -s 127.0.0.1:8796/health   # {"ok": true, "device": "cpu", "loaded": false}
+```
+
+## 线稿提取
+
+`/lineart` 先问显卡机（`HOLOCARD_LINEART_URL`，默认 `http://127.0.0.1:8795`，和特效识别是同一个 `serve.py`）：线用 MangaLineExtraction（MIT，
+权重 `erika.pth`，显卡机上在 `D:/cardmask/lineart/weights/`，`sam3serve.sh` 第一次启动时从 hf-mirror 下），主体用已经在显存里的 SAM3 按「人物」找，按长边 2048 算（切成 1024 的块、带 64 像素重叠，显存只要整张的四分之一），热的时候一张约 3 秒、来回约 8 秒；每次算完 `torch.cuda.empty_cache()`，显卡同时在训练时别把显存攒满。
+`serve.py` 带 `--manga <erika.pth>` 才有 `/lineart`，`GET /health` 里 `lineart: true`。
+
+显卡机不通时在本机做：Anime2Sketch（MIT）的 improved 版出线稿，在分层线程里用 onnxruntime-node 跑（`server/pipeline/sketch.ts`），4 核上一张 1024 的图约 3 秒；主体用 BiRefNet。
+本机的模型文件 `/srv/holocard-models/anime2sketch/anime2sketch-improved.onnx`（sha256 `7bfa1950…a590fb`），没有这个文件接口回 503 `lineart_unavailable`，其他功能不受影响。
+
+导出：
+
+```bash
+git clone https://github.com/Mukosame/Anime2Sketch && cd Anime2Sketch
+# 权重在原项目 README 的 Google Drive 链接（improved.bin，192MB），放进 weights/
+cp <本仓库>/deploy/lineart/export_onnx.py . && python3 export_onnx.py --model improved --output anime2sketch-improved.onnx
+```
+
+**别装原仓库的 `requirements.txt`**：2026-09-08 的提交「allow lower versions」（作者账号推送、没有签名）把依赖改成从 git 装，其中
+`requests @ git+https://github.com/pypll/requests.git` 不是官方的 `psf/requests`，`pypll` 账号已经不存在，谁注册回这个名字谁就能在装依赖的机器上执行代码。
+导出只需要 torch 和它的 `model.py`（那次提交没改过）。
 
 ## 数据库
 

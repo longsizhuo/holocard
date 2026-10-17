@@ -2,12 +2,15 @@
 
 import {
   DEFAULT_HALO_LIGHT,
+  EFFECT_KINDS,
+  EFFECTS_FOIL,
   FOIL_TYPES,
   LAYERS_FORMAT_VERSION,
   PARALLAX_MAX,
   defaultFoilFor,
   defaultHalo,
   type BBox,
+  type EffectKind,
   type FoilType,
   type LayerEntry,
   type LayerFoil,
@@ -80,6 +83,8 @@ function parseLayer(raw: unknown, index: number): Omit<LayerEntry, 'foil'> & { f
     parallax: isFiniteNumber(o['parallax']) ? o['parallax'] : o['depth'],
     bbox: parseBBox(o['bbox'], index),
     inpainted: o['inpainted'] === true,
+    ...(o['role'] === 'effects' ? { role: 'effects' as const } : {}),
+    ...(o['role'] === 'effects' && EFFECT_KINDS.includes(o['effect'] as EffectKind) ? { effect: o['effect'] as EffectKind } : {}),
     foil: parseFoil(o['foil']),
   };
 }
@@ -113,7 +118,7 @@ export function parseManifest(raw: unknown): LayerManifest {
   // 层序定下来之后才能补默认箔面：最远层上箔、最近层哑光
   const layers: LayerEntry[] = parsed.map((layer, i) => ({
     ...layer,
-    foil: layer.foil ?? defaultFoilFor(i, parsed.length),
+    foil: layer.foil ?? (layer.role === 'effects' ? { ...EFFECTS_FOIL } : defaultFoilFor(i, parsed.length)),
   }));
 
   const fallback = defaultHalo();

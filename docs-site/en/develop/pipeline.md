@@ -14,6 +14,7 @@ photo
                      └→ per-layer alpha (also that layer's foil mask)
                           └→ per-layer completion + mirrored texture fill + soft-edge background removal
                                └→ .layers ──→ renderer
+ └→ SAM3-Card effect detection (server only, alongside the steps above) ──→ one layer per kind of effect, right after the layer it sits on
 ```
 
 `segmentToLayerSet` (`index.ts`) reports these stages, which the server stores as the job's `stage` and uses for time estimates:
@@ -25,6 +26,7 @@ photo
 | `analyzing` | Edge evidence and cut selection on the histogram | `slice.ts` |
 | `finding-subject` | Subject matting and cut refitting (only when the caller provides `findSubject`) | `matte.ts`, `slice.ts` |
 | `extracting` | Alpha and colour for each layer | `extract.ts`, `refine.ts`, `morph.ts` |
+| `finding-effects` | Wait for effect detection and build effect layers (only when the caller provides `findEffects`) | `index.ts`, `server/pipeline/effects.ts` |
 
 ## Two kinds of information
 
@@ -228,6 +230,26 @@ Comparison on staging, 16 images, against the full model, 4-core ARM:
 All three share the same training data; lite only has a smaller backbone. Half precision is 40% slower on ARM CPUs, and quantising lite to int8 is only 10% faster with identical results, so fp32 is kept.
 
 To switch models, change `MATTE_MODEL_ID` and the input size in `src/segmenter/matte.ts`. For experiments no code change is needed: set `HOLOCARD_MATTE_MODEL`, `HOLOCARD_MATTE_SIZE` and `HOLOCARD_MATTE_DTYPE`, and evaluate with the [blind comparison](/en/develop/#blind-comparison-scripts-blind) scripts.
+
+## Server-side effect detection (SAM3-Card)
+
+Effects in the artwork (light trails, halos, magic circles, fire, lightning, sparkles) get layers of their own and, at rest, play a light animation chosen by their kind (see [Renderer](/en/develop/renderer#animated-effects)). The website panel switches them with "Animated effects".
+
+The detector is SAM3-Card: Meta's SAM 3 fine-tuned on trading-card art and illustrations. It knows six kinds and is asked once per text prompt (`light energy`, `glow`, `magic circle`, `fire`, `lightning`, `sparkles`), returning one mask per kind. Training data comes from an offline loop of Claude labelling, SAM 3 masks from the labelled boxes, and several review rounds; the weights are not in the repository. The current weights (v11, an average of four checkpoints) on three held-out sets:
+
+| Metric | Value |
+|---|---|
+| Recall (Pokémon cards / new cards / illustrations), threshold 0.5 | 67.2% / 77.1% / 66.1% |
+| Precision (share of reported effects that Claude review confirms, counting a card's fixed background pattern as acceptable) | 92.0% |
+
+The model is too large for the layering service, so it runs as a separate Python service (`deploy/sam3/serve.py`): `POST /effects` takes an image and returns a mask per kind. `server/pipeline/effects.ts` sends the image (long side scaled to 1008) as soon as layering starts, so detection runs alongside depth estimation and subject matting; the result is collected after the layers are cut (stage `finding-effects`). Addresses in `HOLOCARD_EFFECTS_URLS` are tried in order, moving on when one does not answer; if none answers there are no effect layers and the card is made as usual:
+
+| Where | Per image | Notes |
+|---|---|---|
+| A machine with a GPU (`--device cuda`) | About 0.5 s on an RTX 5080, plus some ten seconds on a cold start | bf16; unloads the model after a while idle |
+| CPU fallback on the layering server (`--device cpu`) | About 1.5 minutes on 4 ARM cores, plus about a minute on a cold start | fp32, about 6 GB resident, unloads after a while idle |
+
+The returned masks are scaled up to the layer size (bilinear), and each pixel goes to the layer visible there (the nearest layer whose alpha is at least 0.5). Each kind of effect on each depth layer becomes its own layer, placed right after that depth layer with the same `depth` and `parallax`; its image is the original picture and `effect` records the kind (see [File format](/en/format/#effect-layers)). The subject layer can have effect layers too: matting often takes the light rings around a character into the subject, and that glow should move with the subject.
 
 ## Output
 

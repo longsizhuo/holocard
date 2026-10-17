@@ -54,6 +54,7 @@ export const TAP_SLOP = 8;
 export const FLASH: Record<FoilType, string> = {
   sunpillar: 'conic-gradient(from 90deg, #ffb3c7, #ffe8a3, #b8f5c9, #a8e6ff, #c9b8ff, #ffb3c7)',
   rainbow: 'conic-gradient(from 0deg, #ff9ec4, #ffd36e, #8ef0b0, #7fd4ff, #b69cff, #ff9ec4)',
+  glow: 'conic-gradient(from 0deg, #ff9ec4, #ffd36e, #8ef0b0, #7fd4ff, #b69cff, #ff9ec4)',
   holo: 'radial-gradient(circle, #ffffff, #cfe3ff)',
   none: 'radial-gradient(circle, #ffffff, #f1ecff)',
 };

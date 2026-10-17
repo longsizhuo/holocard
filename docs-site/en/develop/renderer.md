@@ -12,6 +12,7 @@ The structure mirrors how real holographic cards are printed: the base is foil, 
 |---|---|---|---|---|
 | Depth layers | Each layer's own image | Yes, by each layer's coefficient | Always | `layers[].parallax` |
 | Per-layer foil | Only within that layer's alpha | Yes, with its layer | As soon as the pointer hovers | `layers[].foil` |
+| Animated effects | The brighter parts of an effect layer | Yes, with its layer | Always playing | `layers[].effect` |
 | Card-wide halo | Whole card | Mask follows its parallax group; the light itself does not move | Only at certain tilt angles | `effects.halo` |
 | Card-wide glare | Whole card | Same as above | Follows the pointer | `effects.glare` |
 
@@ -22,7 +23,7 @@ The structure mirrors how real holographic cards are printed: the base is foil, 
 | `card.ts` | The `HoloCard` class: DOM structure, parallax, spring-driven interaction, halo angle model, gyroscope control |
 | `card.css` | Structural styles, per-layer foil masks, halo and glare, reduced motion |
 | `foils.css` | Foil recipes |
-| `highlight.ts` | Highlight-protection masks |
+| `highlight.ts` | Highlight-protection masks; the bright-area mask and shape (center, long axis) for animated effects |
 | `spring.ts` | Spring integration |
 | `gyro.ts` | Device tilt → pointer position with an auto-recentering baseline |
 | `textures.ts` | Procedural grain and glitter textures |
@@ -60,7 +61,8 @@ The renderer does not read `effects.parallax` itself; callers set `amplitude` fr
     └ .hc__stack
       ├ .hc__plane       one per layer: translate + scale
       │ ├ .hc__art       the layer image
-      │ └ .hc__shine     the layer's foil; data-foil selects the recipe, --hc-mask is its mask
+      │ ├ .hc__shine     the layer's foil; data-foil selects the recipe, --hc-mask is its mask
+      │ └ .hc__flow      the glow foil's animation; data-effect is the effect kind, --hc-flow-mask the bright-area mask
       └ .hc__fx          one per parallax group, above that group
         ├ .hc__halo      card-wide halo
         └ .hc__glare     card-wide glare (when effects.glare is true)
@@ -83,10 +85,30 @@ The foil mask (`--hc-mask`) is the layer image itself, so foil appears only with
 | `holo` | Classic holo | `regular-holo.css` |
 | `sunpillar` | V-card sun pillar | `v-regular.css` |
 | `rainbow` | Rainbow glitter | `rainbow-holo.css` |
+| `glow` | Glow, for effect layers | — (own recipe, see "Animated effects" below) |
 
 The gradients, blend modes and filter values in `foils.css` match upstream; there are four changes: selectors become `.hc__shine[data-foil=…]`; the upstream `clip-path` limiting foil to the art window is removed; `rainbow` omits the `:before` that depends on a per-card etch image; and the `sunpillar` diagonal layer is positioned at `100% - x` instead of `-x`, removing a vertical seam. CSS variable names (`--pointer-x`, `--background-x`, `--card-opacity` and so on) match upstream, so other recipes can be pasted in.
 
 Grain and glitter textures are generated at runtime by `textures.ts` from a fixed seed (mulberry32); the repository contains no binary assets. Until they are ready, foils work without grain and glitter; environments without OffscreenCanvas fall back to plain gradients.
+
+## Animated effects
+
+Effects found during layering get layers of their own (see [Layering pipeline](/en/develop/pipeline#server-side-effect-detection-sam3-card)) with the `glow` foil by default. Glow has a single part, `.hc__flow`: the animation for the effect kind, brightening with `mix-blend-mode: screen`, playing both at rest and while tilted.
+
+Effect layers get no extra foil when tilted (`.hc__shine[data-foil='glow']` is hidden). An earlier version laid a rainbow gradient with glitter here, and `color-dodge` plus extra brightness and contrast on top of an already bright effect blew it out into flat white or cyan, like a sticker. An effect layer's image is the original picture, so the foil of the layer below still sweeps across the effect when tilted.
+
+The light moves, not the shape: an effect layer's image is the original picture, and the animation is only a brightening on top. The kind sets the rhythm and the shape sets the direction:
+
+| `effect` | Animation | Direction |
+|---|---|---|
+| `energy` (default) | A bright pulse runs from one end to the other, one pass every 2.8 s | Along the long axis of the bright area |
+| `glow` | The whole area brightens and dims every 3.6 s | — |
+| `circle` | A bright arc turns once every 3.2 s | Around the center of the bright area |
+| `fire` | Bright bands rise with irregular flicker | Upward |
+| `lightning` | Mostly dark, flashing twice every 2.6 s | — |
+| `sparkles` | Two dot grids of different spacing drift in different directions, so the points they pass twinkle one after another | — |
+
+The `.hc__flow` mask (`brightMask` in `highlight.ts`) keeps only the parts of the layer brighter than its median, spread outward by about 0.2% of the card width: an effect layer has a darker rim, and without this the brightening would land beside the effect. While computing the mask it also takes the center and long axis from the second moments of the bright area and writes them to `--hc-fx-x`, `--hc-fx-y` and `--hc-fx-angle`. The animations drive registered custom properties (`--hc-fx-p`, `--hc-fx-a` and `--hc-fx-spin`, declared with `@property`) so that positions, opacity and angles inside gradients interpolate smoothly; browsers without `@property` step between keyframes. The mask is computed only for layers that use glow, and the animation stays hidden until it is ready.
 
 ## Parallax
 
@@ -173,4 +195,4 @@ In `HoloCard`, the gyroscope yields while a finger is on the card or `preview()`
 
 ## Reduced motion
 
-Under `prefers-reduced-motion: reduce` the foils stay and geometric motion goes: `transform` on `.hc`, `.hc__rotator` and `.hc__plane` is locked, and halo masks return to their unscaled alignment; the foils' `background-position` still follows the pointer as an in-place shimmer. `card.ts` also skips the spring loop so that the card settles immediately without overshoot. The preference is read live, so changing the system setting needs no reload.
+Under `prefers-reduced-motion: reduce` the foils stay and geometric motion and animated effects go: `transform` on `.hc`, `.hc__rotator` and `.hc__plane` is locked, and halo masks return to their unscaled alignment; the foils' `background-position` still follows the pointer as an in-place shimmer. `card.ts` also skips the spring loop so that the card settles immediately without overshoot. The preference is read live, so changing the system setting needs no reload.

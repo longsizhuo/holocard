@@ -30,6 +30,14 @@
         <div class="page__actions">
         <!-- 个人中心：没登录写「登录」，登录了是头像和名字；卡册的入口在里面，见 src/demo/account-ui.ts -->
         <!-- 文档：按当前语言进 /docs/ 下对应的那份（main.ts 里跟着语言改地址） -->
+        <!-- 独立的工具页收在一个下拉里：卡面遮罩（masks.html）、线稿提取（lineart.html）。点别处收起，见 main.ts -->
+        <details class="tools">
+          <summary class="head-btn" data-i18n="head.tools">工具</summary>
+          <div class="tools__menu">
+            <a href="/masks" data-i18n="head.masks">卡面遮罩</a>
+            <a href="/lineart" data-i18n="head.lineart">线稿提取</a>
+          </div>
+        </details>
         <a class="head-btn" id="docs-link" href="/docs/" data-i18n="head.docs">文档</a>
         <button type="button" class="head-btn account-open" id="account-open" hidden></button>
         <a
@@ -145,8 +153,22 @@
               <input type="checkbox" id="ctl-parallax" role="switch" checked />
             </label>
 
+            <!--
+              特效动效开关：分层时识别出的特效（manifest 里 role 为 effects 的层）按类型动起来，关掉就是原图。
+              没有特效的卡隐藏，强度在下面的折叠面板里。逻辑见 main.ts 的 buildEffectControls
+            -->
+            <label class="toggle" id="fx-box" hidden>
+              <span class="toggle__text" data-i18n="panel.effects">特效动效</span>
+              <input type="checkbox" id="ctl-fx" role="switch" checked />
+            </label>
+
             <details class="more">
-              <summary class="more__head" data-i18n="panel.more">景深与炫光</summary>
+              <summary class="more__head" data-i18n="panel.more">景深、炫光与特效</summary>
+
+              <label class="field" id="fx-strength-box" hidden>
+                <span class="field__label"><span data-i18n="panel.effectsStrength">特效强度</span> <output id="out-fx">1</output></span>
+                <input id="ctl-fx-strength" type="range" min="0" max="1" step="0.05" value="1" />
+              </label>
 
               <label class="field">
                 <span class="field__label"><span data-i18n="panel.amp">视差振幅</span> <output id="out-amp">2%</output></span>
