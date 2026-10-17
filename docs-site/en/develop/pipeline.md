@@ -247,7 +247,7 @@ The model is too large for the layering service, so it runs as a separate Python
 | Where | Per image | Notes |
 |---|---|---|
 | A machine with a GPU (`--device cuda`) | About 0.5 s on an RTX 5080, plus some ten seconds on a cold start | bf16; unloads the model after a while idle |
-| CPU fallback on the layering server (`--device cpu`) | About 1.5 minutes on 4 ARM cores, plus about a minute on a cold start | fp32, about 6 GB resident, unloads after a while idle |
+| CPU fallback on the layering server (`--device cpu`, optional) | About 1.5 minutes on 4 ARM cores, plus about a minute on a cold start | fp32, about 8 GB resident, unloads after a while idle; memory gets tight when it shares a machine with the layering service, so it can be left off |
 
 The returned masks are scaled up to the layer size (bilinear), and each pixel goes to the layer visible there (the nearest layer whose alpha is at least 0.5). Each kind of effect on each depth layer becomes its own layer, placed right after that depth layer with the same `depth` and `parallax`; its image is the original picture and `effect` records the kind (see [File format](/en/format/#effect-layers)). The subject layer can have effect layers too: matting often takes the light rings around a character into the subject, and that glow should move with the subject.
 
