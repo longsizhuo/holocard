@@ -45,6 +45,8 @@ const server = spawn(process.execPath, [join(ROOT, 'dist-server', 'holocard-serv
     HOLOCARD_MODEL_DIR: MODEL_DIR,
     HOLOCARD_MIN_FREE_GB: '0',
     HOLOCARD_RATE_LIMIT: '1000',
+    // 不连识别服务：核对的是规则那条路，结果不依赖家里的显卡机开没开
+    HOLOCARD_EFFECTS_URLS: '',
   },
   stdio: ['ignore', 'pipe', 'pipe'],
 });
@@ -83,6 +85,7 @@ for (let i = 0; ; i++) {
 assert.ok(job.width > 0 && job.height > 0);
 assert.deepEqual(Object.keys(job.files).sort(), ['background', 'border', 'card', 'character', 'effects', 'frame', 'labels', 'text']);
 assert.ok('panel' in job && Array.isArray(job.lines), '带版式和每行字');
+assert.equal(job.effectsSource, 'rules', '没有识别服务时特效遮罩按规则出');
 for (const line of job.lines) assert.ok(['name', 'hp', 'body', 'footer', 'art'].includes(line.role), `字的角色 ${line.role}`);
 const MASKS = ['border', 'frame', 'text', 'character', 'effects', 'background'];
 const sum = new Uint16Array(job.width * job.height);

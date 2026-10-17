@@ -23,7 +23,7 @@ Each mask has the same size as the card image and is a grayscale-plus-alpha PNG 
 | Frame | The card outside the art window and inside the border: name bar, text box, bottom bar. On full-art cards, the area outside the inner panel; with neither a window nor a panel, the plates printed over the artwork (name bar, type line, text box) |
 | Text | Detected text, including text inside the window and text printed over the artwork |
 | Character | The subject inside the art window; on full-art cards, inside the inner panel; otherwise the whole card |
-| Effects | Bright, saturated areas touching the character (flames, energy balls and the like), plus a band just inside the character's outline |
+| Effects | Light trails, halos, magic circles, fire, lightning and sparkles in the artwork (as found by the detection model), plus a band just inside the character's outline |
 | Background | The part of the window (or panel) outside the character, effects and text |
 
 Where regions overlap, the pixel goes to the first in the order text > effects > character > border > frame; the background takes the rest.
@@ -39,7 +39,7 @@ A region overview, `labels.png` (RGB), colours each pixel by the mask with the l
 | Purple | 168, 85, 247 | Effects |
 | Green | 34, 197, 94 | Background |
 
-When the job is done, `GET /api/cardmask/<id>` also returns the layout: `window` is the art window and `panel` the inner panel of a full-art card (both normalized to the card size, `null` when absent); `lines` lists each detected line of text with its position and role: `name` (left of the name bar), `hp` (right of the name bar), `body` (attacks and effect text), `footer` (bottom bar, number, copyright) or `art` (text inside the artwork).
+When the job is done, `GET /api/cardmask/<id>` also returns the layout: `window` is the art window and `panel` the inner panel of a full-art card (both normalized to the card size, `null` when absent); `lines` lists each detected line of text with its position and role: `name` (left of the name bar), `hp` (right of the name bar), `body` (attacks and effect text), `footer` (bottom bar, number, copyright) or `art` (text inside the artwork); `effectsSource` says where the effects mask came from: `model` for the detection model, `rules` when the detection service was unavailable and rules were used.
 
 ## Combinations
 
@@ -64,7 +64,7 @@ The elements of a trading card sit in roughly fixed places, and detection relies
 - **Text**: the PaddleOCR PP-OCRv4 text detector, which locates text without reading it. Detected lines get a role by position: above the window (or panel) is the name bar, below it the text box, at the very bottom the bottom bar; on full-art cards, text in the upper half is treated as part of the artwork.
 - **Character**: BiRefNet_lite matting. On full-art cards the matting model often takes the attack boxes or energy balls in the lower half as the subject, while the character on a real card rarely extends into the text box, so the character fades out downwards from the topmost line of attack text. On busy artwork, most of the image may still be taken as the subject.
 - **Border**: the connected area near the edges whose colour is close to the median colour of the image edges. Borders whose colour varies strongly (holographic silver, for example) may be picked up only in part.
-- **Effects**: rules, no model. When the background itself is bright and saturated (a sheet of flames, for example), too much or too little may be included.
+- **Effects**: SAM3-Card finds six kinds of effects inside the art window (or inner panel) — the same detection service as the main site's [effect layers](/en/develop/pipeline#server-side-effect-detection-sam3-card) — merged into one mask, excluding text. It does not know anything outside those six kinds, such as glass shards or ordinary highlights, and the fixed colourful swirl behind Pokémon VMAX cards is often counted as an effect. When the detection service is unavailable it falls back to rules: bright, saturated areas touching the character (flames, energy balls), which may include too much or too little when the background itself is bright and saturated (a sheet of flames, for example).
 
 Evaluation results on public card images are described under `cardmask-eval` in [Local development](/en/develop/).
 
