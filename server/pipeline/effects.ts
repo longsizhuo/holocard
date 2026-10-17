@@ -10,12 +10,17 @@ import sharp from 'sharp';
 import { EFFECT_KINDS, type EffectKind } from '../../src/format/types';
 import type { EffectMask } from '../../src/segmenter';
 
-/** 发过去的图缩到这么大：模型输入就是 1008，再大也是白传（Oracle 到家里的上行只有约 150KB/s） */
+/** 发过去的图缩到这么大：模型输入就是 1008，再大也是白传（往家里传的那个方向实测只有 10～50KB/s） */
 const SEND_SIZE = 1008;
+/** JPEG 质量：80 约 120KB，识别结果和 90 看不出差别 */
+const SEND_QUALITY = 80;
 /** 先问一声在不在。隧道还连着但显卡机已经关机时，请求会一直挂着，不先问就要等到下面的总超时 */
 const HEALTH_TIMEOUT_MS = 5_000;
-/** CPU 兜底最慢：冷启动加载一分钟 + 识别一分半，机器忙时更久 */
-const DETECT_TIMEOUT_MS = 5 * 60_000;
+/**
+ * 一个地址最多等这么久：显卡机热的时候一两秒，加上传图十几秒；网太差、或者走到 CPU 兜底（冷启动一分钟 + 识别一分半），
+ * 宁可这张不出特效层，也别让卡一直卡在「正在识别特效」
+ */
+const DETECT_TIMEOUT_MS = 90_000;
 
 interface Reply {
   effects: { type: string; score: number; mask: string }[];
@@ -28,7 +33,7 @@ export async function detectEffects(image: Blob, urls: readonly string[]): Promi
   const body = await sharp(Buffer.from(await image.arrayBuffer()))
     .rotate()
     .resize(SEND_SIZE, SEND_SIZE, { fit: 'inside', withoutEnlargement: true })
-    .jpeg({ quality: 90 })
+    .jpeg({ quality: SEND_QUALITY })
     .toBuffer();
   for (const url of urls) {
     let reply: Reply;

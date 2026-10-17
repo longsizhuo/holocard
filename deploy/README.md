@@ -147,9 +147,11 @@ Environment=PLAYWRIGHT_BROWSERS_PATH=/opt/holocard/browsers
 | 地址 | 是什么 | 每张 |
 |---|---|---|
 | `127.0.0.1:8795` | 到家里显卡机的 ssh 隧道（本机 systemd 单元 `holocard-sam3-tunnel.service`，单元文件不进仓库），显卡机 WSL 里跑 `serve.py --device cuda --port 8796`（`D:/cardmask/train/sam3serve.sh`） | 约 0.5 秒 |
-| `127.0.0.1:8796` | 本机 CPU 兜底，`holocard-sam3.service`（`deploy/sam3/holocard-sam3.service`） | 约 1.5 分钟，冷启动再加 1 分钟 |
+| `127.0.0.1:8796` | 本机 CPU 兜底，`holocard-sam3.service`（`deploy/sam3/holocard-sam3.service`）。**默认停用**：加载后常驻 8GB，2026-10-16 和 staging、验证脚本叠在一起把整机内存挤爆，systemd-oomd 杀了别的登录会话（它设了 `MemorySwapMax=0`，oomd 按交换分区挑人，反而挑不中它）。显卡机不在时新卡就不出特效层 | 约 1.5 分钟，冷启动再加 1 分钟 |
 
-- 显卡机关机、打游戏（`D:/cardmask/train/pause.sh` 会把显卡机上的服务一起停掉）时自动退到 CPU 兜底，分层多等一两分钟（阶段 `finding-effects`）
+- 显卡机上 `sam3serve.sh` 带 `--preload --idle 7200`：一启动就加载模型（刚开机磁盘缓存是冷的，第一次加载要两分钟以上），闲两小时才卸。打游戏时 `D:/cardmask/train/pause.sh` 会把服务一起停掉，玩完要重新起 `sam3serve.sh`
+- 显卡机关机、打游戏时不出特效层（CPU 兜底默认停用），每个地址最多等 90 秒
+- **网是瓶颈**：往家里传的方向（Oracle → 家里）很慢且波动大，2026-10-17 实测 10～50KB/s，回来约 200KB/s，来回一趟 1 秒。所以发给显卡机的图都尽量小：识别 1008、JPEG 质量 80；线稿原图最大 1024、质量 80，到显卡机再放大到 2048 算，线稿用 WebP 传回
 - staging 的出站防火墙（`deploy/staging/firewall.nft`）放行了这两个端口，staging 和线上共用
 - 换权重：新存档放进 `/srv/holocard-models/sam3/`，改 `holocard-sam3.service` 和显卡机 `sam3serve.sh` 里的 `--ckpt`，两边各重启一次。存档只要 `model` 一项（训练存档里的优化器状态去掉），不含冻结的主干
 - 内存：CPU 兜底常驻约 6GB，和线上分层服务（抠主体峰值约 7GB）同时跑时整机要 13GB 以上。卡在 `MemoryMax=8G`，超了只杀它自己

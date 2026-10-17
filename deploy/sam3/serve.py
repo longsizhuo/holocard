@@ -4,8 +4,9 @@ SAM3-Card 特效识别服务。分层服务（server/pipeline/effects.ts）把�
   POST /effects  请求体是一张图（JPEG/PNG），回
                  {"width": w, "height": h, "effects": [{"type": "fire", "score": 0.83, "mask": "<PNG base64>"}]}
                  每类一张遮罩（同类的几个实例并成一张），和收到的图一样大；分数不到 SCORE 的不回
-  POST /lineart  线稿提取（server/pipeline/lineart.ts）：请求体是一张图，回
-                 {"width": w, "height": h, "line": "<灰度 PNG base64，白底黑线>", "subject": "<灰度 PNG base64>" 或 null}
+  POST /lineart  线稿提取（server/pipeline/lineart.ts）：请求体是一张图，?w=&h= 给了就先放大到这个尺寸再算（省得放大后的图走慢网传过来），回
+                 {"width": w, "height": h, "line": "<灰度 WebP base64，白底黑线>", "subject": "<黑白 PNG base64>" 或 null}
+                 线稿用有损 WebP：2048 的灰度 PNG 要 1MB 以上，家里往外的网只有一两百 KB/s，WebP 小五六倍，深浅本来就是网页上再调
                  线用 MangaLineExtraction（manga_line.py，--manga 给权重才有这个接口），主体用同一个 SAM3 按「人物」找，几个角色都算
   GET  /health   {"ok": true, "device": "cuda", "loaded": false, "lineart": true}
 
@@ -24,6 +25,7 @@ import json
 import threading
 import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from urllib.parse import parse_qs, urlparse
 
 import numpy as np
 import torch
@@ -50,6 +52,7 @@ args.add_argument("--host", default="127.0.0.1")
 args.add_argument("--port", type=int, default=8796)
 args.add_argument("--idle", type=float, default=900, help="闲这么多秒卸掉模型，0 表示常驻")
 args.add_argument("--manga", help="MangaLineExtraction 的权重 erika.pth；不给就没有 /lineart")
+args.add_argument("--preload", action="store_true", help="一启动就加载模型：机器刚开机时磁盘缓存是冷的，第一次加载要两分钟以上，别让第一个用户等")
 opt = args.parse_args()
 
 lock = threading.Lock()
@@ -139,20 +142,26 @@ def manga_tiled(gray, F):
     return out
 
 
+def load_all():
+    """在锁里调：SAM3 和（给了 --manga 时）线稿模型，缺哪个加载哪个"""
+    global proc, manga
+    if proc is None:
+        proc = load()
+    if manga is None and opt.manga:
+        from manga_line import res_skip
+
+        net = res_skip()
+        state = torch.load(opt.manga, map_location="cpu", weights_only=True)
+        net.load_state_dict({k.replace("module.", ""): v for k, v in state.items()})
+        manga = net.to(opt.device).eval()
+
+
 def lineart(image):
-    global proc, manga, last_used
+    global last_used
     import torch.nn.functional as F
 
     with lock:
-        if proc is None:
-            proc = load()
-        if manga is None:
-            from manga_line import res_skip
-
-            net = res_skip()
-            state = torch.load(opt.manga, map_location="cpu", weights_only=True)
-            net.load_state_dict({k.replace("module.", ""): v for k, v in state.items()})
-            manga = net.to(opt.device).eval()
+        load_all()
         t0 = time.time()
         gray = torch.from_numpy(np.asarray(image.convert("L"), np.float32)).to(opt.device)[None, None]
         h, w = gray.shape[-2:]
@@ -169,7 +178,14 @@ def lineart(image):
         last_used = time.time()
         print(f"lineart {w}x{h} {last_used - t0:.1f}s subject={subject.mean():.2f}", flush=True)
         release()
-    return {"width": w, "height": h, "line": png_b64(line), "subject": png_b64(subject.astype(np.uint8) * 255) if subject.any() else None}
+    buf = io.BytesIO()
+    Image.fromarray(line).save(buf, "WEBP", quality=92)
+    return {
+        "width": w,
+        "height": h,
+        "line": base64.b64encode(buf.getvalue()).decode(),
+        "subject": png_b64(subject.astype(np.uint8) * 255) if subject.any() else None,
+    }
 
 
 def unload_when_idle():
@@ -200,7 +216,8 @@ class Handler(BaseHTTPRequestHandler):
         self.reply(200, {"ok": True, "device": opt.device, "loaded": proc is not None, "lineart": bool(opt.manga)})
 
     def do_POST(self):
-        if self.path not in ("/effects", "/lineart") or (self.path == "/lineart" and not opt.manga):
+        route = urlparse(self.path).path
+        if route not in ("/effects", "/lineart") or (route == "/lineart" and not opt.manga):
             return self.reply(404, {"error": "not found"})
         size = int(self.headers.get("content-length") or 0)
         if not 0 < size <= MAX_BODY:
@@ -209,7 +226,13 @@ class Handler(BaseHTTPRequestHandler):
             image = Image.open(io.BytesIO(self.rfile.read(size))).convert("RGB")
         except Exception as error:
             return self.reply(400, {"error": f"bad image: {error}"})
-        self.reply(200, detect(image) if self.path == "/effects" else lineart(image))
+        if route == "/lineart":
+            q = parse_qs(urlparse(self.path).query)
+            w, h = int(q.get("w", ["0"])[0]), int(q.get("h", ["0"])[0])
+            if 0 < w <= 4096 and 0 < h <= 4096 and (w, h) != image.size:
+                image = image.resize((w, h), Image.LANCZOS)
+            return self.reply(200, lineart(image))
+        self.reply(200, detect(image))
 
     def log_message(self, *_):
         pass
@@ -217,5 +240,14 @@ class Handler(BaseHTTPRequestHandler):
 
 if opt.idle > 0:
     threading.Thread(target=unload_when_idle, daemon=True).start()
+if opt.preload:
+
+    def preload():
+        global last_used
+        with lock:
+            load_all()
+            last_used = time.time()
+
+    threading.Thread(target=preload, daemon=True).start()
 print(f"listening {opt.host}:{opt.port} device={opt.device}", flush=True)
 ThreadingHTTPServer((opt.host, opt.port), Handler).serve_forever()
