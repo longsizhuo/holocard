@@ -260,7 +260,7 @@ ssh oracle 'cd /opt/holocard && node22/bin/node db.mjs perf 30'   # 最近 30 �
 | | 做法 |
 |---|---|
 | `robots.txt` | 服务端按 `PUBLIC_ORIGIN` 现生成。允许所有爬虫（包括 AI 的），只挡 `/render/`（截分享图的内部页）、`/api/jobs`、`/api/cards` 和 `/models/`（27MB 的权重） |
-| `sitemap.xml` | 同上，首页的中、英、日三个版本，每条都用 `xhtml:link` 列出全部语言版本；`lastmod` 取 index.html 的修改时间。robots.txt 里还登记了文档的 `/docs/sitemap.xml`，VitePress 构建时生成，同一页的各语言版本同样互相标注 |
+| `sitemap.xml` | 同上，首页的中、英、日三个版本，每条都用 `xhtml:link` 列出全部语言版本；`lastmod` 取 index.html 的修改时间。官方站的 robots.txt 里还登记了文档的 `/docs/sitemap.xml`，VitePress 构建时生成，同一页的各语言版本同样互相标注；里面的地址写死官方站，所以自托管和 staging 不登记它 |
 | `llms.txt` | 给 AI 读的说明，静态文件 `public/llms.txt`，中英日三段，内容摘自 README |
 | 首页 | 每种语言一个规范地址（`/`、`/?lang=en`、`/?lang=ja`）+ hreflang（`x-default` 指向不带参数、按浏览器语言自动选的 `/`）+ JSON-LD（`WebApplication` + `SoftwareSourceCode`）。结构化数据里的描述直接读页面的 meta description，不另写一份 |
 | 卡片页 `/c/<id>` | `noindex, nofollow`，不进 sitemap |
