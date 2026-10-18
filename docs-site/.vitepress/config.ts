@@ -51,6 +51,9 @@ export default defineConfig({
   base: '/docs/',
   // 地址不带 .html（服务端在 /docs/ 下找不到文件时补上 .html，见 server/routes/static.ts 的 serveStatic）
   cleanUrls: true,
+  // 生成 /docs/sitemap.xml，同一页的中英日版本互相标成 hreflang；robots.txt 里登记了它。
+  // 地址写死官方站：自托管的文档也是这一份，让搜索引擎只收官方那份，免得成了重复页
+  sitemap: { hostname: 'https://holocard.longsizhuo.com/docs/' },
   outDir: '../dist/docs',
   title: 'HoloCard',
   head: [['link', { rel: 'icon', href: '/favicon.svg', type: 'image/svg+xml' }]],
