@@ -89,18 +89,71 @@ Deletes all files of the card immediately and returns `{"deleted": true}`. Queue
 - Results are screened for nudity before delivery; fully nude images are rejected (`nsfw_rejected`).
 - Website users are served first; API jobs are queued behind them.
 
+## Card masks
+
+Splits a finished flat card image into six non-overlapping masks, so that different areas of the card can take different foil effects (the same as the site's [card masks](https://holocard.longsizhuo.com/masks)). Authentication, image requirements and the 24-hour deletion rule are the same as above.
+
+```bash
+curl -X POST https://holocard.longsizhuo.com/v1/masks \
+  -H "Authorization: Bearer hc_xxx" \
+  -H "Content-Type: image/png" --data-binary @card.png
+# Response: 202 {"id":"9b2e…","status":"queued","url":"…"}
+
+curl https://holocard.longsizhuo.com/v1/masks/9b2e… -H "Authorization: Bearer hc_xxx"
+curl -O https://holocard.longsizhuo.com/v1/masks/9b2e…/files/character.png -H "Authorization: Bearer hc_xxx"
+```
+
+A card usually takes 20–40 seconds.
+
+### `POST /v1/masks` Submit a card image
+
+The request body is the same as for `POST /v1/cards`. Card images whose long side exceeds 1400 pixels are scaled down proportionally, and the masks match the scaled image. On success the response is `202 Accepted`: `{ "id", "status": "queued", "url" }`.
+
+### `GET /v1/masks/{id}` Status and result
+
+| Field | Description |
+|---|---|
+| `status` | `queued`, `running`, `done`, `failed` |
+| `width`, `height` | Mask size in pixels; returned only when done |
+| `window` | Art window position `{x, y, w, h}`, normalized to 0–1 by width and height; `null` for full-art cards |
+| `panel` | Inner panel of a full-art card, same format as `window`; `null` for cards with an art window |
+| `lines` | Position and role of each text line (`name`, `hp`, `body`, `footer`, `art`) |
+| `effectsSource` | Where the effects mask came from: `model` for the detection model, `rules` when the detection service was unavailable and rules were used |
+| `files` | Map from file name to download URL; returned only when done |
+| `error.code` | `processing_failed` on failure |
+
+Unfinished jobs are lost when the server restarts; polling then returns `404 masks_not_found`. Submit the image again.
+
+### `GET /v1/masks/{id}/files/{name}.png` Download a mask
+
+| File | Content |
+|---|---|
+| `card.png` | The scaled card image |
+| `border.png` | Card border |
+| `frame.png` | Frame |
+| `text.png` | Text |
+| `character.png` | Main character |
+| `effects.png` | Effects: light trails, halos, magic circles, fire, lightning and sparkles in the artwork, plus a band just inside the character's outline |
+| `background.png` | Background |
+| `labels.png` | Region overview, each pixel colored by its region |
+
+Masks are grayscale-plus-alpha PNGs with identical values in both channels, usable directly as a CSS `mask-image`. The six masks do not overlap and together cover the whole card.
+
+Mask jobs do not count toward the 24-hour quota. At most 2 mask jobs from all keys are processed at a time; when they are full the response is `503 queue_full`, so retry later. The submission rate limit is the same as for cards.
+
 ## Quotas and error codes
 
 | Status | code | Description |
 |---|---|---|
 | 401 | — | Missing, invalid or revoked API key |
-| 404 | `card_not_found` / `file_not_found` | The card does not exist, belongs to another key, or has been deleted or expired |
+| 404 | `card_not_found` / `masks_not_found` / `file_not_found` | The card or masks do not exist, belong to another key, or have been deleted or expired |
 | 413 | `too_large` | The image exceeds 16 MB |
 | 415 | `unsupported_image` | Unrecognized image format |
 | 429 | `quota_exceeded` | 24-hour quota exceeded: 20 cards per account for self-service keys, counted across all of the account's keys (requesting a new key does not reset it) |
 | 429 | `too_many_in_flight` | At most 3 jobs per key may be uploading, queued or processing at the same time |
 | 429 | `rate_limited` | More than 30 submissions within 10 minutes |
 | 503 | `api_daily_limit` / `queue_full` / `busy` | The daily API capacity is exhausted or the queue is full; retry later |
+| 503 | `cardmask_unavailable` | The server does not have the models required for card masks |
 | 507 | `disk_full` | Insufficient server storage; retry later |
 
 For a higher quota, contact the site administrator.
