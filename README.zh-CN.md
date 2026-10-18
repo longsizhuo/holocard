@@ -1,12 +1,12 @@
 # HoloCard
 
-中文 | [English](README.en.md)
+[English](README.md) | 中文
 
 [![npm @holocard/player](https://img.shields.io/npm/v/@holocard/player?label=npm%20%40holocard%2Fplayer)](https://www.npmjs.com/package/@holocard/player)
 
-[![HoloCard](public/og.jpg)](https://holocard.longsizhuo.com)
+[![HoloCard](public/og.jpg)](https://holocard.longsizhuo.com/?lang=zh)
 
-HoloCard 将照片自动分层，渲染为可交互的全息卡片：服务端估计照片深度并切分为前、中、后景若干层，每层配置独立的箔面，卡片随指针或设备倾斜转动。线上地址：https://holocard.longsizhuo.com
+HoloCard 将照片自动分层，渲染为可交互的全息卡片：服务端估计照片深度并切分为前、中、后景若干层，每层配置独立的箔面，卡片随指针或设备倾斜转动。线上地址：https://holocard.longsizhuo.com/?lang=zh
 
 箔面效果与交互手感移植自 [pokemon-cards-css](https://github.com/simeydotme/pokemon-cards-css)（Simon Goellner，GPL-3.0）。该项目的每张卡片需要手工绘制箔面遮罩，HoloCard 使用分层算法自动生成遮罩，使任意照片都可以制作成卡片。
 
