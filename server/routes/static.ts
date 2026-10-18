@@ -30,6 +30,8 @@ export function robotsTxt(): string {
     'Disallow: /models/',
     '',
     `Sitemap: ${PUBLIC_ORIGIN}/sitemap.xml`,
+    // 文档的 sitemap 由 VitePress 构建时生成（docs-site/.vitepress/config.ts）
+    `Sitemap: ${PUBLIC_ORIGIN}/docs/sitemap.xml`,
     '',
   ].join('\n');
 }
