@@ -191,3 +191,7 @@ Shared cards are kept according to their total views:
 - Because cards are shared automatically when finished, cards made on the website are normally in the shared state; a card counts as not shared only if automatic sharing failed and it was never shared manually.
 - A deleted card is removed immediately, regardless of the table above.
 - Self-hosted deployments can change the base retention with the `HOLOCARD_TTL_MS` environment variable (default 7 days).
+
+## Use for training
+
+Images uploaded on the home page may be selected as training data for HoloCard's image recognition models (currently the effects recognition model, SAM3-Card), as the page footer states. A selected image is copied, and Claude (Anthropic) labels the effects in it. The copy is not cleared when the card expires, but it is removed when the card is deleted. Images submitted to the card mask and line art tools or through the API are not used for training.
