@@ -16,7 +16,7 @@ import { join } from 'node:path';
 import sharp from 'sharp';
 import { findLayout, type Box } from '../../src/cardmask/frame';
 import type { TextLine } from '../../src/cardmask/layout';
-import { CLASSES, cardMasks, type MaskClass } from '../../src/cardmask/masks';
+import { CLASSES, cardMasks, resample, type MaskClass } from '../../src/cardmask/masks';
 import { EFFECTS_URLS, MATTE_READY, MODEL_DIR, OUT_DIR } from '../config';
 import { detectEffects } from './effects';
 import { cardmaskInWorker } from './jobs';
@@ -103,8 +103,9 @@ async function run(id: string, dir: string, card: Buffer): Promise<void> {
     let detected: { data: Float32Array; width: number; height: number } | null = null;
     for (const e of effects ?? []) {
       detected ??= { data: new Float32Array(e.width * e.height), width: e.width, height: e.height };
-      if (e.width !== detected.width || e.height !== detected.height) continue;
-      for (let i = 0; i < e.data.length; i++) detected.data[i] = Math.max(detected.data[i] ?? 0, e.data[i] ?? 0);
+      // 服务现在各类回的尺寸都一样；万一不一样就缩到第一类的尺寸再并，别把这一类丢掉
+      const plane = e.width === detected.width && e.height === detected.height ? e.data : resample(e, detected.width, detected.height);
+      for (let i = 0; i < plane.length; i++) detected.data[i] = Math.max(detected.data[i] ?? 0, plane[i] ?? 0);
     }
     // 识别服务回了「没有特效」也算模型的结果：一张空遮罩，不退回规则
     if (effects && !detected) detected = { data: new Float32Array(1), width: 1, height: 1 };
