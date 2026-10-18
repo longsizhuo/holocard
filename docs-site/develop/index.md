@@ -115,7 +115,7 @@ pnpm og --export gif       # 导出动图：gif / motion / apng，写到 out/exp
 | 陀螺仪（`src/renderer/gyro.ts`） | `node scripts/verify-gyro.mjs` | 无 |
 | 作者配置的校验（`src/format/config.ts`） | `node scripts/verify-config.mjs` | 无 |
 | 性能埋点（`web/site/perf.ts`、`server/store/perf.ts`） | `node scripts/verify-perf.mjs [--url …] [--browser chromium\|webkit\|firefox]` | `pnpm dev` 与 `pnpm dev:server` |
-| 对外接口 `/v1`（`server/routes/v1.ts`、`server/account/apikeys.ts`） | `HOLOCARD_DB=out/data/holocard.db HOLOCARD_OUT_DIR=out/layers node scripts/verify-api.mjs http://127.0.0.1:8791` | `pnpm dev:server`，且 `.models/` 下有 NudeNet 权重 |
+| 对外接口 `/v1`（`server/routes/v1.ts`、`server/account/apikeys.ts`），服务端的路由表（`server/index.ts`） | `HOLOCARD_DB=out/data/holocard.db HOLOCARD_OUT_DIR=out/layers node scripts/verify-api.mjs http://127.0.0.1:8791` | `pnpm dev:server`，且 `.models/` 下有 NudeNet 权重 |
 | 登录、卡片归属与认领、个人中心的 API key（`server/account/auth.ts` 及相关路由） | `pnpm build:server && HOLOCARD_MODEL_DIR=.models node scripts/verify-auth.mjs` | 深度模型权重。脚本自行启动模拟 IH 与临时服务端，不需要开发服务 |
 | 卡面遮罩的接口与页面（`server/pipeline/cardmask.ts`、`server/routes/cardmask.ts`、`web/masks.html`） | `pnpm build && pnpm build:server && node scripts/verify-cardmask.mjs` | 抠图与文字检测的权重，`HOLOCARD_MODEL_DIR` 指定模型目录（默认 `/srv/holocard-models`）。脚本自行启动临时服务端 |
 | 线稿提取的接口与页面（`server/pipeline/lineart.ts`、`server/pipeline/sketch.ts`、`server/routes/lineart.ts`、`web/lineart.html`），以及两个工具页共用的 `web/tools/page.ts`、`server/routes/image-upload.ts`（改了这两个，`verify-cardmask` 也要跑） | `pnpm build && pnpm build:server && node scripts/verify-lineart.mjs [--out 截图目录]` | 线稿模型（`anime2sketch/anime2sketch-improved.onnx`）与抠图权重，`HOLOCARD_MODEL_DIR` 指定模型目录（默认 `/srv/holocard-models`）。脚本自行启动临时服务端 |
@@ -134,7 +134,7 @@ pnpm og --export gif       # 导出动图：gif / motion / apng，写到 out/exp
 - `verify-gyro`：转动后指针偏移、静止数秒后回正、持续慢转不累积偏移、越过竖直位置的读数跳变、横屏轴对调。
 - `verify-config`：合法配置原样合并、其余字段不变；层数不符、未知箔面类型、数值越界、试图修改文件名等一律拒收或忽略。
 - `verify-perf`：页面静置后上报一条埋点、服务端收到；畸形数据被拒。
-- `verify-api`：鉴权、私有性（接口卡在 `/api`、分享、导出、删除路由上视同不存在）、交付与缓存头、配额、吊销、处理途中删除、网页任务优先、畸形请求行与超限请求的处理；卡面遮罩接口 `/v1/masks` 的归属、缓存头、`effectsSource` 与并发上限（服务端没装遮罩模型时跳过这一段）。每张卡实际分层，耗时 30–60 秒。
+- `verify-api`：鉴权、私有性（接口卡在 `/api`、分享、导出、删除路由上视同不存在）、交付与缓存头、配额、吊销、处理途中删除、网页任务优先、畸形请求行与超限请求的处理；路由表上各接口（`/v1`、`/auth`、`/api/me`、健康检查、埋点、卡面遮罩、线稿、`robots.txt`）由各自的处理函数回答，没被最后的网站页面吞掉；卡面遮罩接口 `/v1/masks` 的归属、缓存头、`effectsSource` 与并发上限（服务端没装遮罩模型时跳过这一段）。每张卡实际分层，耗时 30–60 秒。
 - `verify-effects`：假识别服务给合成图回魔法阵和火焰两类遮罩，服务端地址表里的第一个地址不通时改问下一个；合成图分出两个特效层，类型、箔面、深度与视差正确，遮罩按比例放大到层图；识别服务说没有特效的图不出特效层；卡片页逐层箔面不列特效层，「特效动效」开关默认开，动效元素按类型标好、魔法阵的转动中心落在圆环上，关掉开关特效层不上光效，强度滑块生效，没有特效的卡不显示开关，页面无报错。
 - `verify-lineart`：线稿提取接口的错误码（405、415、404）、上传到完成（先出线稿、主体后到）、原图与线稿和主体遮罩的尺寸一致且长边不超过 1024、线稿是单通道灰度且大半是白底并有黑线、主体遮罩没有错行的条纹、结果目录；`/lineart` 页面的语言与页脚出处、浏览器中上传后预览画出线稿、换颜色后线变成该颜色、关掉「只要主体」和拉深浅后线变多、下载得到同尺寸的透明底 PNG、页面无报错。
 - `verify-cardmask`：卡面遮罩接口的错误码（405、415、404）、上传到完成、卡图与六张遮罩和分区总览的尺寸与通道、六张遮罩互不重叠（每个像素相加正好 255）、状态里的版式与文字角色、特效遮罩的来源（脚本自起假识别服务：服务不在时按规则出，`effectsSource` 为 `rules`；回「没有特效」时仍为 `model`；两类尺寸不同的遮罩合并后两类区域都计入特效，文字不被特效占用）、下载头、结果目录；`/masks` 页面的语言、浏览器中上传后出现预览与六张遮罩和分区总览、切换区域后预览仍正常、页面无报错。
@@ -168,7 +168,7 @@ pnpm og --export gif       # 导出动图：gif / motion / apng，写到 out/exp
 
 ### 双盲对比（`scripts/blind/`）
 
-用于比较两种服务端配置（例如两种抠图模型）的输出：同一批原图用两种配置各出一张卡，评审在对比页上逐对选择，事后按答案还原各配置的胜负。对比页源码为 `web/lab/blind/index.html` 与 `src/lab/blind.ts`，使用与站点相同的渲染器，A、B 两张卡姿态同步。
+用于比较两种服务端配置（例如两种抠图模型）的输出：同一批原图用两种配置各出一张卡，评审在对比页上逐对选择，事后按答案还原各配置的胜负。对比页源码为 `web/lab/blind/index.html` 与 `web/lab/blind/blind.ts`，使用与站点相同的渲染器，A、B 两张卡姿态同步。
 
 ```bash
 # 1. 两种配置各运行一遍（须先后运行：抠图峰值约 7 GB，同时运行会耗尽内存）

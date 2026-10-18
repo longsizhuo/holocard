@@ -95,8 +95,9 @@ if [ -f "$STATE_DIR/env.production" ]; then cp "$STATE_DIR/env.production" "$TRE
   cd "$TREE"
   corepack pnpm install --frozen-lockfile --reporter=silent
   corepack pnpm build >/dev/null
-  # 走 package.json 的脚本，不写配置文件路径：这份脚本装在 /usr/local/lib，要能构建新旧两种目录结构的提交
-  corepack pnpm build:server >/dev/null
+  # 走 package.json 的脚本，不写配置文件路径：这份脚本装在 /usr/local/lib，要能构建新旧两种目录结构的提交。
+  # 不丢 stdout：脚本里先跑的 tsc 把类型错误打在 stdout 上，丢了发版失败也看不出原因
+  corepack pnpm build:server --logLevel error
 )
 
 RELEASE="$(date +%Y%m%d-%H%M%S)-$SHORT"
