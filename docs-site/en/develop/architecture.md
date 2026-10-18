@@ -6,35 +6,47 @@ The HoloCard repository produces four things: the frontend of the public site, t
 
 ```text
 holocard/
-├── index.html            frontend page (shared by all three routes)
-├── src/
+├── web/                  pages (an HTML file's location is its URL)
+│   ├── index.html        home page (shared by all three routes)
+│   ├── masks.html        card mask page /masks
+│   ├── lineart.html      line art page /lineart
+│   ├── site/             site frontend (holocard.longsizhuo.com)
+│   ├── masks/            script of the card mask page
+│   ├── lineart/          script of the line art page
+│   ├── tools/            script shared by the two tool pages
+│   ├── lab/blind/        blind comparison page
+│   └── public/           static assets (sample card samples/demo, icons, share images)
+├── src/                  libraries imported by the pages and the server; they never import pages
+│   ├── api/              response shapes of the web API /api (types shared by frontend and server)
 │   ├── format/           .layers format: types, reading and validation, author config
 │   ├── segmenter/        layering pipeline (shared by server and browser)
 │   ├── renderer/         holographic card renderer
-│   ├── demo/             site frontend (holocard.longsizhuo.com)
+│   ├── cardmask/         card mask detection rules
 │   ├── player/           <holo-card> custom element, entry of the npm package
-│   ├── i18n/             UI strings and language detection (shared by frontend and server)
-│   └── lab/              blind comparison page
+│   └── i18n/             UI strings and language detection (shared by frontend and server)
 ├── server/               layering service (single Node process)
 ├── packages/player/      publish directory of @holocard/player
 ├── scripts/              verification and operations scripts, see Local development
-├── lab/blind/            HTML of the blind comparison page
 ├── docs-site/            this documentation site (VitePress)
 ├── deploy/               production and staging deployment configuration
-├── public/               static assets (sample card public/samples/demo, icons, share images)
-└── vite*.config.ts       build configuration for each output
+├── vite.config.ts        build config of the site frontend (read by pnpm dev by default, so it stays at the root)
+└── config/               build configs of the other outputs
 ```
 
 | Build config | Command | Output |
 |---|---|---|
 | `vite.config.ts` | `pnpm dev` / `pnpm build` | `dist/` (site frontend); dev port 5273 |
-| `vite.server.config.ts` | `pnpm build:server` / `pnpm dev:server` | `dist-server/` |
-| `vite.player.config.ts` | `pnpm build:player` | `packages/player/dist/holocard.js` |
-| `vite.og.config.ts` | `pnpm og` | `.og-cache/bin/og-preview.mjs` |
-| `vite.lab.config.ts` | invoked by `scripts/blind/pack.mjs` | `dist-lab/blind/` |
+| `config/vite.server.config.ts` | `pnpm build:server` / `pnpm dev:server` | `dist-server/` |
+| `config/vite.player.config.ts` | `pnpm build:player` | `packages/player/dist/holocard.js` |
+| `config/vite.og.config.ts` | `pnpm og` | `.og-cache/bin/og-preview.mjs` |
+| `config/vite.lab.config.ts` | invoked by `scripts/blind/pack.mjs` | `dist-lab/blind/` |
 | `docs-site/.vitepress/config.ts` | `pnpm build` / `pnpm docs:dev` | `dist/docs/` |
 
 ## Modules
+
+### `src/api`
+
+Response shapes of the web API `/api`, types only. The server checks each response against them with `satisfies` and the frontend (`web/site/api.ts`, `export.ts`) parses with them, so changing a field on one side fails type checking on the other. The public API `/v1` is defined by the [API documentation](/en/api/), not here. The card mask endpoints `/api/cardmask` are not covered yet.
 
 ### `src/format`
 
@@ -76,13 +88,19 @@ The renderer takes a `LayerSet` and produces an interactive card, with no framew
 | `gyro.ts` | Device tilt → pointer position, with an auto-recentering baseline |
 | `textures.ts` | Grain and glitter textures for the foils, generated procedurally at runtime from a fixed seed |
 
-### `src/demo`
+### `web/site`
 
 The site frontend, i.e. holocard.longsizhuo.com.
 
 | File | Responsibility |
 |---|---|
-| `main.ts` | Page entry: upload, layering, tuning panel, share, delete, export, language switch, and setup for the three routes |
+| `main.ts` | Page entry: creates the deck, wires the panel parts to the current card, switches language, and loads the first screen for the three routes |
+| `tuning.ts` | The page's single HoloCard and the tuning panel (parallax, halo, animated effects, per-layer foils); saves the owner's changes to the server and tracks which card the panel shows |
+| `actions.ts` | Actions on the current card: share, delete, export animation |
+| `upload.ts` | Upload area: shrinks oversized images in the browser, sends them to the server for layering, falls back to the in-browser pipeline when there is no server |
+| `progress.ts` | Progress bar and remaining time while a card is being made |
+| `render-page.ts` | Render page `/render/<id>`: adds the background and copy, waits for images and textures, sets the pose, exposes hooks for server screenshots and frame-by-frame export |
+| `text.ts` | Shared by the modules: element lookup, text rewritten on language change, turning errors into a readable sentence |
 | `route.ts` | Route parsing and share links |
 | `api.ts` | Client of the layering service: submit and poll, delete-token records, share, author config, account and key endpoints. Decides when to fall back to the in-browser pipeline |
 | `deck.ts` | The card strip on the home page: cards made in this visit, a pack shown while uploading, replaced by the new card after opening |
@@ -108,7 +126,7 @@ The site frontend, i.e. holocard.longsizhuo.com.
 | `core.ts` | Shared by frontend and server: language detection (`?lang=` → cookie `hc_lang` → `Accept-Language` → English), `translate`, `localizeHtml` |
 | `index.ts` | Frontend: current language, `t()`, and in-place replacement of page text when switching languages |
 
-Static text in `index.html` is marked with `data-i18n`, `data-i18n-html`, `data-i18n-title` and `data-i18n-aria`. The server replaces it per language when serving the page, and the frontend rewrites it in place on a language switch without reloading.
+Static text in `web/index.html` is marked with `data-i18n`, `data-i18n-html`, `data-i18n-title` and `data-i18n-aria`. The server replaces it per language when serving the page, and the frontend rewrites it in place on a language switch without reloading.
 
 ### `src/cardmask`
 
@@ -120,15 +138,15 @@ The rule-based half of [card masks](/en/masks/), which runs no model:
 | `layout.ts` | Layout prior: assigns detected text lines a role by position (name, HP, text box, bottom bar, text in the artwork) and gives the top of the text box, from which the character fades out on full-art cards |
 | `masks.ts` | Builds six non-overlapping masks (border, frame, text, character, effects, background) and the region overview from the layout, the character probability map and the text probability map |
 
-The page is `masks.html` with `src/masks/main.ts`: upload, polling, and a two-layer LayerSet built from the selected regions for the renderer's preview. See `cardmask-eval` in [Local development](/en/develop/) for evaluation.
+The page is `web/masks.html` with `web/masks/main.ts`: upload, polling, and a two-layer LayerSet built from the selected regions for the renderer's preview. See `cardmask-eval` in [Local development](/en/develop/) for evaluation.
 
-Card masks are for trading cards only and kept apart from the main flow (photo → layers → holo card): nothing in `src/segmenter/` or `src/demo/` imports `src/cardmask/`, the page is a separate entry linked from the "Tools" menu in the home page header, and the server shares only the segmentation worker thread and the matting model (the model stays resident in memory and is not loaded twice), with jobs in the same queue. To remove card masks entirely, delete `src/cardmask/`, `src/masks/`, `masks.html`, `server/routes/cardmask.ts`, `server/pipeline/cardmask.ts` and `server/pipeline/textdet.ts`, then remove the route and the periodic cleanup in `server/index.ts`, `cardmaskInWorker` in `jobs.ts`, the `cardmask` message in the worker thread and the `masks` entry in `vite.config.ts`.
+Card masks are for trading cards only and kept apart from the main flow (photo → layers → holo card): nothing in `src/segmenter/` or `web/site/` imports `src/cardmask/`, the page is a separate entry linked from the "Tools" menu in the home page header, and the server shares only the segmentation worker thread and the matting model (the model stays resident in memory and is not loaded twice), with jobs in the same queue. To remove card masks entirely, delete `src/cardmask/`, `web/masks/`, `web/masks.html`, `server/routes/cardmask.ts`, `server/pipeline/cardmask.ts` and `server/pipeline/textdet.ts`, then remove the route and the periodic cleanup in `server/index.ts`, `cardmaskInWorker` in `jobs.ts`, the `cardmask` message in the worker thread and the `masks` entry in `vite.config.ts`.
 
-[Line art](/en/lineart/) is a standalone tool page in the same way: the page is `lineart.html` with `src/lineart/` (styles reuse `src/masks/masks.css`), sharing `src/tools/page.ts` with the card mask page (element lookup, language switching, error translation, reading pixels, submit-and-poll); the server side is `server/routes/lineart.ts`, `server/pipeline/lineart.ts`, `server/pipeline/sketch.ts` and the `lineart` message in the worker thread, in the same queue as layering and sharing the matting model. Darkness, colour and subject-only are composed on a canvas in the browser; the server only produces the unadjusted greyscale line art and the subject mask.
+[Line art](/en/lineart/) is a standalone tool page in the same way: the page is `web/lineart.html` with `web/lineart/` (styles reuse `web/masks/masks.css`), sharing `web/tools/page.ts` with the card mask page (element lookup, language switching, error translation, reading pixels, submit-and-poll); the server side is `server/routes/lineart.ts`, `server/pipeline/lineart.ts`, `server/pipeline/sketch.ts` and the `lineart` message in the worker thread, in the same queue as layering and sharing the matting model. Darkness, colour and subject-only are composed on a canvas in the browser; the server only produces the unadjusted greyscale line art and the subject mask.
 
-### `src/lab`
+### `web/lab`
 
-`blind.ts` is the script of the blind comparison page; `scripts/blind/pack.mjs` builds it together with `lab/blind/index.html`. See [Local development](/en/develop/#blind-comparison-scripts-blind).
+`blind.ts` is the script of the blind comparison page; `scripts/blind/pack.mjs` builds it together with `web/lab/blind/index.html`. See [Local development](/en/develop/#blind-comparison-scripts-blind).
 
 ### `server`
 
@@ -136,12 +154,13 @@ The layering service is one Node process that serves the frontend's static files
 
 | File | Responsibility |
 |---|---|
-| `index.ts` | Entry: request dispatch, health check `/api/health`, performance beacon `POST /api/perf`, periodic sweep, startup (resuming interrupted jobs, backfilling share images and nudity scores) |
+| `index.ts` | Entry: route table (path prefix → handler in `routes/`), periodic sweep, startup (resuming interrupted jobs, backfilling share images and nudity scores) |
 | `config.ts` | Environment variables and derived settings (port, directories, quotas, retention, sign-in, matting model); other modules read from here |
 | `http.ts` | JSON and error responses, reading request bodies, client IP, request language, rate limiting, same-origin checks, HTML escaping |
 | `umami.ts` | Sends public API activity to umami from the server |
 | `routes/cards.ts` | Card endpoints for the website: upload, job status, sharing, export, author config, deletion, layer files and thumbnails, `/models/` weights |
-| `routes/static.ts` | Frontend static files: pages in the request language, OG tags for the home and share pages, `robots.txt`, `sitemap.xml` |
+| `routes/static.ts` | Last entry of the route table, the site itself: pages in the request language, OG tags for the home and share pages, `robots.txt`, `sitemap.xml`, trailing slash for documentation directories |
+| `routes/service.ts` | Health check `GET /api/health`, performance beacon `POST /api/perf` |
 | `routes/account.ts` | `/auth/*` sign-in and sign-out; `/api/me/*` current account, claiming and API keys in the account panel |
 | `routes/v1.ts` | The public API `/v1` |
 | `routes/cardmask.ts` | Card masks `/api/cardmask`: upload, status, mask files |
@@ -185,7 +204,7 @@ Install scripts, systemd units and release scripts for production (`deploy/produ
 
 ### Page routes
 
-All three routes share one `index.html` (`src/demo/route.ts`):
+All three routes share one `web/index.html` (`web/site/route.ts`):
 
 | Path | Mode | Description |
 |---|---|---|
@@ -293,8 +312,8 @@ Usage, quotas and error codes are documented in [API](/en/api/).
 
 | Source | Destination | Content |
 |---|---|---|
-| `src/demo/track.ts` | self-hosted umami | Page views and events: `upload`, `segment-ok`, `segment-fail`, `pack-open`, `parallax`, `share`, `share-copy`, `delete`, `export`, `export-share`, `export-fail`, `lang`, `login`, `card-view`, `claim`, `api-key`, `api-key-revoke` |
+| `web/site/track.ts` | self-hosted umami | Page views and events: `upload`, `segment-ok`, `segment-fail`, `pack-open`, `parallax`, `share`, `share-copy`, `delete`, `export`, `export-share`, `export-fail`, `lang`, `login`, `card-view`, `claim`, `api-key`, `api-key-revoke` |
 | `server/umami.ts` | the same umami site | Public API activity: `api-submit`, `api-reject`, `api-fetch`, `api-done`, `api-fail`, with the visitor identified by account or key id |
-| `src/demo/perf.ts` | this service, `POST /api/perf` | Frame-time distribution over 10 idle seconds; at most one per visit, no id, the server stores no IP |
+| `web/site/perf.ts` | this service, `POST /api/perf` | Frame-time distribution over 10 idle seconds; at most one per visit, no id, the server stores no IP |
 
 The umami site id is injected at build time from `VITE_UMAMI_ID`; without it neither frontend nor server sends anything, and nothing is sent from localhost or private-network origins. `/render/<id>` loads no analytics script.

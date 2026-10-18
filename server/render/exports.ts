@@ -1,3 +1,4 @@
+import type { ExportStatus } from '../../src/api';
 import { join } from 'node:path';
 import { OUT_DIR, PORT } from '../config';
 import { exportFiles, exportReady, runExport, type ExportFormat } from './export';
@@ -40,13 +41,6 @@ export function pumpExports(): void {
       pumpExports();
     });
 }
-
-type ExportStatus =
-  | { state: 'none' }
-  | { state: 'queued'; position: number }
-  | { state: 'running' }
-  | { state: 'error'; error: string }
-  | { state: 'done'; files: Array<{ url: string; name: string; type: string }> };
 
 /** 某张卡某种格式的导出现在到哪一步了 */
 export async function exportStatus(job: ExportJob): Promise<ExportStatus> {

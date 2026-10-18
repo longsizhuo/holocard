@@ -113,7 +113,7 @@ The animation only affects the parts of an effect layer brighter than the layer'
 
 ## Example
 
-The sample card on the website's home page (`public/samples/demo/manifest.json`), with two layers and no saved parallax setting:
+The sample card on the website's home page (`web/public/samples/demo/manifest.json`), with two layers and no saved parallax setting:
 
 ```json
 {

@@ -1,5 +1,5 @@
 /**
- * 线稿提取任务：收一张插画，出白底黑线的线稿灰度图和主体遮罩，深浅、只留主体、线条颜色都在前端调（src/lineart/main.ts）。
+ * 线稿提取任务：收一张插画，出白底黑线的线稿灰度图和主体遮罩，深浅、只留主体、线条颜色都在前端调（web/lineart/main.ts）。
  *
  * 先问显卡机（LINEART_URL，deploy/sam3/serve.py 的 POST /lineart）：线用 MangaLineExtraction，主体用 SAM3 按「人物」找（几个角色都算），
  * 一次回来，热的时候四五秒。显卡机不通就在本机分层线程里做，和分层排同一个队（jobs.ts 的 lineartInWorker），分两次：

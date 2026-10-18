@@ -113,7 +113,7 @@ mycard.layers/
 
 ## 示例
 
-网站首页的示例卡（`public/samples/demo/manifest.json`），两层，没有保存过视差设置：
+网站首页的示例卡（`web/public/samples/demo/manifest.json`），两层，没有保存过视差设置：
 
 ```json
 {

@@ -13,6 +13,7 @@
  *   - 分享：只有拿着删除口令的人能分享
  *   - 卡面遮罩（/v1/masks）：只有提交它的 key 能看，网页路由上当作不存在，文件不让缓存，带特效的来源；并发提交越不过上限，慢慢传的上传不占位，接口排满时网页照样能交。服务端没装遮罩模型时跳过这段
  *   - 健壮：畸形请求行回 400 而不是把进程打崩；超过 16MB 回 413；路径和方法不对回 404 / 405
+ *   - 路由表：/v1、/auth、/api/me、健康检查、埋点、卡面遮罩、线稿、robots.txt 都由各自的接口回答，没被网站页面吞掉
  *   - sitemap：首页、/masks、/lineart 各三个语言版本，英文不带 ?lang=，x-default 是不带参数的地址
  *
  * 用法：
@@ -88,6 +89,25 @@ assert.equal((await call('/v1/cards', { key: a.key })).headers.get('allow'), 'PO
 assert.equal((await (await call('/v1/nope', { key: a.key })).json()).code, 'not_found');
 const huge = await call('/v1/cards', { key: a.key, method: 'POST', body: Buffer.alloc(17 * 1024 * 1024), headers: { 'content-type': 'image/jpeg' } });
 assert.equal(huge.status, 413, `超过 16MB 应当 413，实际 ${huge.status}`);
+
+// ---------- 路由表 ----------
+// server/index.ts 从上往下找第一个对得上的；排在最后的网站会把 GET 都当页面发，前面的接口排错了位置就被它吞掉
+const code = async (res) => (res.headers.get('content-type')?.includes('json') ? (await res.json()).code : undefined);
+for (const [method, path, status, expected] of [
+  ['GET', '/v1/nope', 401, 'unauthorized'],
+  ['GET', '/auth/nope', 404, 'not_found'],
+  ['GET', '/api/me', 200, undefined],
+  ['POST', '/api/health', 405, 'method_not_allowed'],
+  ['GET', '/api/perf', 405, 'method_not_allowed'],
+  ['GET', '/api/cardmask/00000000-0000-0000-0000-000000000000', 404, 'cardmask_not_found'],
+  ['GET', '/api/lineart/00000000-0000-0000-0000-000000000000', 404, 'lineart_not_found'],
+  ['GET', '/api/nope', 404, undefined],
+]) {
+  const res = await call(path, { method });
+  assert.equal(res.status, status, `${method} ${path} 应当 ${status}，实际 ${res.status}`);
+  assert.equal(await code(res), expected, `${method} ${path} 应当由对应的接口回答`);
+}
+assert.match((await (await call('/robots.txt')).text()), /^Sitemap: /m, 'robots.txt 是现生成的');
 
 // ---------- sitemap ----------
 const sitemap = await (await call('/sitemap.xml')).text();

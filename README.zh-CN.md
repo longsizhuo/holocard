@@ -4,7 +4,7 @@
 
 [![npm @holocard/player](https://img.shields.io/npm/v/@holocard/player?label=npm%20%40holocard%2Fplayer)](https://www.npmjs.com/package/@holocard/player)
 
-[![HoloCard](public/og.jpg)](https://holocard.longsizhuo.com/?lang=zh)
+[![HoloCard](web/public/og.jpg)](https://holocard.longsizhuo.com/?lang=zh)
 
 HoloCard 将照片自动分层，渲染为可交互的全息卡片：服务端估计照片深度并切分为前、中、后景若干层，每层配置独立的箔面，卡片随指针或设备倾斜转动。线上地址：https://holocard.longsizhuo.com/?lang=zh
 

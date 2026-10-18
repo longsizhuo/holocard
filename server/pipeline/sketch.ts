@@ -2,7 +2,7 @@
  * 线稿：Anime2Sketch（MIT，https://github.com/Mukosame/Anime2Sketch）的 improved 版——反卷积换成「放大 + 卷积」，
  * 没有原版的棋盘格伪影。原仓库的 PyTorch 模型用 deploy/lineart/export_onnx.py 导出成 ONNX（宽高可变）。
  *
- * 输入 [-1, 1] 的 RGB，宽高须是 256 的倍数；输出白底黑线的灰度，线常常偏淡，深浅交给前端按滑块拉（src/lineart/main.ts）。
+ * 输入 [-1, 1] 的 RGB，宽高须是 256 的倍数；输出白底黑线的灰度，线常常偏淡，深浅交给前端按滑块拉（web/lineart/main.ts）。
  * 原仓库把图压成 512 的正方形再算，竖长的图线条会变形；这里按比例缩到长边 1024，四周复制边缘像素补到 256 的倍数，算完裁回来
  */
 

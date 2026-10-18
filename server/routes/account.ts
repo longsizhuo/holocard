@@ -2,6 +2,7 @@
  * 账号相关的路由：/auth/*（登录、回调、退出）和 /api/me/*（当前账号、认领、个人中心的 API key）
  */
 
+import type { Claimed, KeyCreated, Me, MyKeys } from '../../src/api';
 import { randomUUID } from 'node:crypto';
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import { LANG_TAG, translate } from '../../src/i18n/core';
@@ -170,7 +171,7 @@ export async function handleMe(req: IncomingMessage, res: ServerResponse, url: U
       login: LOGIN_ENABLED,
       user: session ? { id: session.user_id, name: session.name, avatar: session.avatar } : null,
       cards: session ? db.userCards(session.user_id) : [],
-    });
+    } satisfies Me);
     return;
   }
   if (req.method === 'POST' && url.pathname === '/api/me/claim') {
@@ -199,7 +200,7 @@ export async function handleMe(req: IncomingMessage, res: ServerResponse, url: U
       if (db.claim(id, session.user_id, card.delete_token, randomUUID())) claimed.push(id);
     }
     console.log(`[claim] 账号 ${session.user_id} 认领了 ${claimed.length} 张`);
-    json(res, 200, { claimed });
+    json(res, 200, { claimed } satisfies Claimed);
     return;
   }
   if (url.pathname === '/api/me/keys' || url.pathname.startsWith('/api/me/keys/')) {
@@ -237,7 +238,7 @@ async function handleMyKeys(
       keys: db.userApiKeys(session.user_id).map((key) => ({ id: key.id, createdAt: new Date(key.created_at).toISOString() })),
       used: db.apiUsedSince(since, { id: '', user_id: session.user_id }),
       dailyLimit: db.isAdmin(session.user_id) ? null : SELF_SERVE_DAILY_LIMIT,
-    });
+    } satisfies MyKeys);
     return;
   }
 
@@ -258,7 +259,7 @@ async function handleMyKeys(
     };
     db.insertApiKey(row);
     console.log(`[keys] 账号 ${session.user_id} 申请了 key ${row.id}`);
-    json(res, 201, { id: row.id, key });
+    json(res, 201, { id: row.id, key } satisfies KeyCreated);
     return;
   }
 

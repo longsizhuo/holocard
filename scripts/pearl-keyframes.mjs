@@ -1,5 +1,5 @@
 /**
- * 生成珠光底的漂移动画：src/demo/pearl-drift.css（动画声明 + 关键帧，不要手改）
+ * 生成珠光底的漂移动画：web/site/pearl-drift.css（动画声明 + 关键帧，不要手改）
  *
  * 为什么要生成：珠光底是两层铺满屏幕、带 60px 模糊的渐变，漂移靠 background-position，
  * 每变一次就要整层重新光栅化。原来按屏幕刷新率每帧都变（60～240 次/秒），而漂移一圈要 34/47 秒，
@@ -9,7 +9,7 @@
  * 直接写 steps() 不行：它会替掉 ease-in-out，变成匀速。
  *
  * 用法：
- *   node scripts/pearl-keyframes.mjs          改完下面的配置后重新生成 src/demo/pearl-drift.css
+ *   node scripts/pearl-keyframes.mjs          改完下面的配置后重新生成 web/site/pearl-drift.css
  *   node scripts/pearl-keyframes.mjs --check  只核对不写：生成结果和已提交的文件是否一致、
  *                                             每层的渐变数和 style.css 是否对得上。pnpm build 会先跑它
  */
@@ -19,8 +19,8 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
-const OUT = join(ROOT, 'src/demo/pearl-drift.css');
-const STYLE = join(ROOT, 'src/demo/style.css');
+const OUT = join(ROOT, 'web/site/pearl-drift.css');
+const STYLE = join(ROOT, 'web/site/style.css');
 
 /** 每秒刷新几次。每步的画面变化最多 4/255，和每帧本来就有的渐变抖动噪声同一量级 */
 export const HZ = 12;
@@ -148,7 +148,7 @@ function check(css) {
   } catch {
     problems.push(`${OUT} 不存在`);
   }
-  if (committed && committed !== css) problems.push('src/demo/pearl-drift.css 和生成结果不一致：改了配置忘了重新生成，或者有人手改了它');
+  if (committed && committed !== css) problems.push('web/site/pearl-drift.css 和生成结果不一致：改了配置忘了重新生成，或者有人手改了它');
 
   const style = readFileSync(STYLE, 'utf8');
   for (const anim of ANIMATIONS) {

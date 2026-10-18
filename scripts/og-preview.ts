@@ -1,7 +1,7 @@
 /**
  * 预览分享图（OG）
  *
- * 调分享图样式用的：改完 src/demo/style.css 或 main.ts 里渲染模式那段，跑一下就能看到结果，
+ * 调分享图样式用的：改完 web/site/style.css 或 render-page.ts，跑一下就能看到结果，
  * 不用部署、不用真的去微信里分享。
  *
  * 用法：
@@ -236,7 +236,7 @@ function startServer(): Promise<{ server: Server; base: string }> {
 
 async function buildFrontend(): Promise<void> {
   const started = Date.now();
-  await build({ root: ROOT, logLevel: 'error' });
+  await build({ configFile: join(ROOT, 'vite.config.ts'), logLevel: 'error' });
   console.log(`前端：构建完成（${Date.now() - started}ms）`);
 }
 

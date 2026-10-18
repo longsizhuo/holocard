@@ -106,7 +106,7 @@ function runInWorker(request: SegmentRequest, onStage: (stage: string) => void =
   const run = segmentTail.then(
     () =>
       new Promise<FinalReply>((resolve, reject) => {
-        // 这段打包进 holocard-server.mjs，和 segment-worker.mjs 在同一个目录，见 vite.server.config.ts
+        // 这段打包进 holocard-server.mjs，和 segment-worker.mjs 在同一个目录，见 config/vite.server.config.ts
         const worker = (segmenter ??= spawnSegmenter());
         const finish = (): void => {
           worker.off('message', onMessage);
