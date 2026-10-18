@@ -94,7 +94,7 @@ Changes made by the card's owner are saved to the server automatically about one
 
 A share link is created automatically when a card is finished and appears in the panel; click "Copy" to copy it. If automatic creation fails, the "Create share link" button stays in the panel for creating it manually.
 
-- Links look like `https://holocard.longsizhuo.com/c/<id>`. Links created in the English or Japanese interface carry `?lang=en` or `?lang=ja`, so the title, description and preview image shown in chat apps are in the sharer's language.
+- Links look like `https://holocard.longsizhuo.com/c/<id>`. Links created in the Chinese or Japanese interface carry `?lang=zh` or `?lang=ja`, so the title, description and preview image shown in chat apps are in the sharer's language.
 - Only the card's owner can share it: the device holding the card's delete key, or the signed-in account the card belongs to.
 - When the owner opens their own share link, they can keep adjusting, sharing and deleting. Other viewers can tilt and export the card; their adjustments are not saved.
 - After sharing, retention is extended by views; see "Retention" below.

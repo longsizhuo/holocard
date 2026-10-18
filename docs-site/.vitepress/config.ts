@@ -53,7 +53,15 @@ export default defineConfig({
   cleanUrls: true,
   // 生成 /docs/sitemap.xml，同一页的中英日版本互相标成 hreflang；robots.txt 里登记了它。
   // 地址写死官方站：自托管的文档也是这一份，让搜索引擎只收官方那份，免得成了重复页
-  sitemap: { hostname: 'https://holocard.longsizhuo.com/docs/' },
+  sitemap: {
+    hostname: 'https://holocard.longsizhuo.com/docs/',
+    // x-default 指向英文版：站点以英文为主，三种语言以外的读者给英文那份
+    transformItems: (items) =>
+      items.map((item) => {
+        const en = item.links?.find((link) => link.lang === 'en');
+        return en ? { ...item, links: [...(item.links ?? []), { lang: 'x-default', url: en.url }] } : item;
+      }),
+  },
   outDir: '../dist/docs',
   title: 'HoloCard',
   head: [['link', { rel: 'icon', href: '/favicon.svg', type: 'image/svg+xml' }]],

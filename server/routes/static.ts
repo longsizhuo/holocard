@@ -5,11 +5,11 @@
 import { readFile, stat } from 'node:fs/promises';
 import type { ServerResponse } from 'node:http';
 import { basename, dirname, extname, join, resolve, sep } from 'node:path';
-import { LANGS, LANG_TAG, localizeHtml, translate, type Lang } from '../../src/i18n/core';
+import { DEFAULT_LANG, LANGS, LANG_TAG, localizeHtml, translate, type Lang } from '../../src/i18n/core';
 import { OUT_DIR, PUBLIC_ORIGIN, WEB_DIR } from '../config';
 import { escapeAttr, json } from '../http';
 import { PREVIEW_HEIGHT, PREVIEW_WIDTH } from '../render/preview';
-import { previewFile, queuePreview } from '../render/previews';
+import { anyPreview, previewFile, queuePreview } from '../render/previews';
 import { db } from '../store';
 import { recordHit } from '../store/cards';
 
@@ -37,29 +37,40 @@ export function robotsTxt(): string {
   ].join('\n');
 }
 
+/** 进 sitemap 的页面和它的 html：首页、卡面遮罩、线稿提取。用户的卡片页是 noindex 的，不放 */
+const SITEMAP_PAGES = [
+  ['/', 'index.html'],
+  ['/masks', 'masks.html'],
+  ['/lineart', 'lineart.html'],
+] as const;
+
 /**
- * sitemap.xml。只有首页的三个语言版本：用户的卡片页是 noindex 的，不该出现在这里。
- * 每一条都列出所有语言版本（xhtml:link），搜索引擎据此把它们认成同一页的不同语言。
- * lastmod 取 index.html 的修改时间，也就是最近一次发版。
+ * sitemap.xml。每个页面的三个语言版本各一条，每一条都列出所有语言版本（xhtml:link），
+ * 搜索引擎据此把它们认成同一页的不同语言；x-default 是不带参数、按浏览器语言自动选的那个，
+ * 三种都不沾边时是英文。lastmod 取对应 html 的修改时间，也就是最近一次发版。
  */
 export async function sitemapXml(): Promise<string> {
-  const index = WEB_DIR ? await stat(join(WEB_DIR, 'index.html')).catch(() => null) : null;
-  const lastmod = index ? new Date(index.mtimeMs).toISOString().slice(0, 10) : null;
-  const url = (lang: Lang): string => `${PUBLIC_ORIGIN}/${lang === 'zh' ? '' : `?lang=${lang}`}`;
-  const alternates = [
-    ...LANGS.map((l) => `    <xhtml:link rel="alternate" hreflang="${LANG_TAG[l]}" href="${url(l)}" />`),
-    `    <xhtml:link rel="alternate" hreflang="x-default" href="${PUBLIC_ORIGIN}/" />`,
-  ];
+  const pages = await Promise.all(
+    SITEMAP_PAGES.map(async ([path, file]) => {
+      const info = WEB_DIR ? await stat(join(WEB_DIR, file)).catch(() => null) : null;
+      const lastmod = info ? new Date(info.mtimeMs).toISOString().slice(0, 10) : null;
+      const alternates = [
+        ...LANGS.map((l) => `    <xhtml:link rel="alternate" hreflang="${LANG_TAG[l]}" href="${langUrl(path, l)}" />`),
+        `    <xhtml:link rel="alternate" hreflang="x-default" href="${PUBLIC_ORIGIN}${path}" />`,
+      ];
+      return LANGS.flatMap((lang) => [
+        '  <url>',
+        `    <loc>${langUrl(path, lang)}</loc>`,
+        ...(lastmod ? [`    <lastmod>${lastmod}</lastmod>`] : []),
+        ...alternates,
+        '  </url>',
+      ]);
+    }),
+  );
   return [
     '<?xml version="1.0" encoding="UTF-8"?>',
     '<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9" xmlns:xhtml="http://www.w3.org/1999/xhtml">',
-    ...LANGS.flatMap((lang) => [
-      '  <url>',
-      `    <loc>${url(lang)}</loc>`,
-      ...(lastmod ? [`    <lastmod>${lastmod}</lastmod>`] : []),
-      ...alternates,
-      '  </url>',
-    ]),
+    ...pages.flat(),
     '</urlset>',
     '',
   ].join('\n');
@@ -99,9 +110,9 @@ const SPA_ROUTES = [
   /^\/render\/[0-9a-f-]{36}\/?$/,
 ];
 
-/** 各语言版本的地址：中文就是本来的地址，别的语言带 ?lang= */
+/** 各语言版本的地址：英文（DEFAULT_LANG）就是本来的地址，别的语言带 ?lang= */
 function langUrl(path: string, lang: Lang): string {
-  return `${PUBLIC_ORIGIN}${path}${lang === 'zh' ? '' : `?lang=${lang}`}`;
+  return `${PUBLIC_ORIGIN}${path}${lang === DEFAULT_LANG ? '' : `?lang=${lang}`}`;
 }
 
 const OG_LOCALE: Record<Lang, string> = { zh: 'zh_CN', en: 'en_US', ja: 'ja_JP' };
@@ -145,7 +156,7 @@ function socialTags(o: {
  * 直接决定别人点不点。标签里的 URL 必须是绝对地址。
  *
  * 标题、描述按分享链接上的语言出（分享人的语言）。分享图优先用同一语言的那张；
- * 那张还没渲染出来时先用中文那张顶上——有图总比没图强，卡片本身才是主角。
+ * 那张还没渲染出来时先用别的语言那张顶上（默认语言优先，见 anyPreview）——有图总比没图强，卡片本身才是主角。
  * 图的地址带文件 mtime 当版本号：预览图在 CDN 上按 immutable 缓存，
  * 重新出图之后不换 URL 的话抓取方和边缘都还拿着旧图。
  */
@@ -184,22 +195,23 @@ function injectShareMeta(
  * 别人自托管时地址自然就对。
  */
 function injectHomeMeta(html: string, lang: Lang, image: { file: string; version: number } | null): string {
+  const imageUrl = image ? `${PUBLIC_ORIGIN}/${image.file}?v=${image.version}` : null;
   const tags = [
     ...socialTags({
       url: langUrl('/', lang),
       title: translate(lang, 'home.ogTitle'),
       description: translate(lang, 'home.ogDescription'),
-      image: image ? `${PUBLIC_ORIGIN}/${image.file}?v=${image.version}` : null,
+      image: imageUrl,
       lang,
     }),
     // 每种语言一个规范地址；带别的参数（?utm=…、?pose=…）的都算同一页
     `<link rel="canonical" href="${escapeAttr(langUrl('/', lang))}" />`,
-    // 各语言版本在哪；x-default 是不带参数、按浏览器语言自动选的那个入口
+    // 各语言版本在哪；x-default 是不带参数、按浏览器语言自动选的那个入口（都不沾边时是英文）
     ...LANGS.map(
       (l) => `<link rel="alternate" hreflang="${LANG_TAG[l]}" href="${escapeAttr(langUrl('/', l))}" />`,
     ),
     `<link rel="alternate" hreflang="x-default" href="${escapeAttr(`${PUBLIC_ORIGIN}/`)}" />`,
-    `<script type="application/ld+json">${structuredData(html, lang)}</script>`,
+    `<script type="application/ld+json">${structuredData(html, lang, imageUrl)}</script>`,
   ].join('\n    ');
 
   return html.replace('</head>', `  ${tags}\n  </head>`);
@@ -212,7 +224,7 @@ function injectHomeMeta(html: string, lang: Lang, image: { file: string; version
  * 不用从一堆按钮文字里猜。描述直接取页面上（已经换成当前语言的）meta description，
  * 不在这里另写一份——改页面描述时这里自动跟着变。
  */
-function structuredData(html: string, lang: Lang): string {
+function structuredData(html: string, lang: Lang, image: string | null): string {
   const description =
     /<meta name="description" content="([^"]*)"/.exec(html)?.[1] ?? '';
   const repo = 'https://github.com/longsizhuo/holocard';
@@ -228,7 +240,8 @@ function structuredData(html: string, lang: Lang): string {
         name: 'HoloCard',
         url: langUrl('/', lang),
         description,
-        image: `${PUBLIC_ORIGIN}/og.jpg`,
+        // 和分享标签同一张：这个语言的分享图，没有就用中文那张
+        image: image ?? `${PUBLIC_ORIGIN}/og.jpg`,
         inLanguage: LANG_TAG[lang],
         applicationCategory: 'MultimediaApplication',
         operatingSystem: 'Any',
@@ -346,9 +359,9 @@ export async function serveStatic(
     const id = cardPath[1];
     const dir = join(OUT_DIR, id);
     const own = await fileVersion(join(dir, previewFile(lang)));
-    const fallback = own === null && lang !== 'zh' ? await fileVersion(join(dir, previewFile('zh'))) : null;
+    const other = own === null ? await anyPreview(id) : null;
     const preview =
-      own !== null ? { lang, version: own } : fallback !== null ? { lang: 'zh' as Lang, version: fallback } : null;
+      own !== null ? { lang, version: own } : other ? { lang: other.lang, version: Math.floor(other.mtimeMs) } : null;
     body = Buffer.from(injectShareMeta(body.toString('utf8'), id, lang, preview), 'utf8');
 
     // 这个语言的分享图还没有（渲染失败过、或者是新语言），趁有人打开时补一张

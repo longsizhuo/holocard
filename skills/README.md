@@ -1,7 +1,7 @@
 # skills
 
-给编程智能体（Claude Code、Comfy Agent 等支持 SKILL.md 的工具）用的 skill，教它们调用 HoloCard 的对外接口。
+Skills for coding agents (Claude Code, Comfy Agent and other tools that read SKILL.md) that teach them to call the HoloCard API.
 
-- `holocard-card-masks/`：把平面卡图拆成边框、文字、主角、特效、背景等遮罩（`/v1/masks`）
+- `holocard-card-masks/`: split a finished card image into border, frame, text, character, effects and background masks (`/v1/masks`)
 
-skill 面向外部用户，正文用英文写；接口细节以 [docs-site/api/index.md](../docs-site/api/index.md) 为准，接口改了这里同步改。
+The skills are written for external users. The API reference is [docs-site/en/api/index.md](../docs-site/en/api/index.md) (source: [docs-site/api/index.md](../docs-site/api/index.md)); update the skills whenever the API changes.

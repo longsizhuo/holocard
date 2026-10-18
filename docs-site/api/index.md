@@ -30,7 +30,7 @@ curl -O https://holocard.longsizhuo.com/v1/cards/3f1c…/files/layer-0.webp -H "
 
 ## 获取 API Key
 
-1. 访问 [HoloCard](https://holocard.longsizhuo.com/)，点击右上角「登录」，使用 involutionhell 账号登录（可通过 GitHub 注册）。
+1. 访问 [HoloCard](https://holocard.longsizhuo.com/?lang=zh)，点击右上角「登录」，使用 involutionhell 账号登录（可通过 GitHub 注册）。
 2. 点击右上角头像进入个人中心，在「对外接口（API）」中点击「申请 API key」。
 3. API Key 以 `hc_` 开头，仅在创建时显示一次，请妥善保存；如遗失，可直接再申请一个，并吊销不再使用的。
 
@@ -91,7 +91,7 @@ API Key 代表账号身份，请仅在服务端使用，切勿写入前端代码
 
 ## 卡面遮罩
 
-把一张做好的平面卡图拆成六张互不重叠的遮罩，用于给卡面不同区域套用不同的箔面效果（与网站的[卡面遮罩](https://holocard.longsizhuo.com/masks)相同）。鉴权、图片要求和 24 小时后删除的规则与上文相同。
+把一张做好的平面卡图拆成六张互不重叠的遮罩，用于给卡面不同区域套用不同的箔面效果（与网站的[卡面遮罩](https://holocard.longsizhuo.com/masks?lang=zh)相同）。鉴权、图片要求和 24 小时后删除的规则与上文相同。
 
 ```bash
 curl -X POST https://holocard.longsizhuo.com/v1/masks \

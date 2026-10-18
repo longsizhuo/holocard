@@ -105,7 +105,7 @@ The site frontend, i.e. holocard.longsizhuo.com.
 | File | Responsibility |
 |---|---|
 | `messages.ts` | Chinese, English and Japanese UI strings. Chinese is the source; the other two are typed from it, so a missing or extra key fails type-checking |
-| `core.ts` | Shared by frontend and server: language detection (`?lang=` → cookie `hc_lang` → `Accept-Language` → Chinese), `translate`, `localizeHtml` |
+| `core.ts` | Shared by frontend and server: language detection (`?lang=` → cookie `hc_lang` → `Accept-Language` → English), `translate`, `localizeHtml` |
 | `index.ts` | Frontend: current language, `t()`, and in-place replacement of page text when switching languages |
 
 Static text in `index.html` is marked with `data-i18n`, `data-i18n-html`, `data-i18n-title` and `data-i18n-aria`. The server replaces it per language when serving the page, and the frontend rewrites it in place on a language switch without reloading.

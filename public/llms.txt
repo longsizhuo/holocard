@@ -1,33 +1,33 @@
 # HoloCard
 
-> 把任意照片自动切成前中后景，每层各上各的箔面，渲染成可交互的全息闪卡。在网页上直接用，免费，无需注册，开源（GPL-3.0）。
+> Turn any photo into an interactive holographic card: it is split into foreground, midground and background layers, each with its own foil. Use it right in the browser; free, no sign-up, open source (GPL-3.0).
 
-HoloCard 是一个网页工具。上传一张照片，服务端用单目深度估计把画面分成 2～4 层；每一层同时是一层带视差的画面，和这一层箔面的遮罩。前端把它渲染成宝可梦闪卡那样的全息卡片：转动卡片时，箔面和炫光随角度变化，各层之间有视差。
+HoloCard is a web tool. Upload a photo and the server splits it into 2–4 layers with monocular depth estimation; each layer is both a parallax image and the mask for that layer's foil. The front end renders it as a holographic card in the style of a Pokémon holo: as the card turns, the foils and glare change with the angle and the layers move in parallax.
 
-- 在线使用：https://holocard.longsizhuo.com/
-- 做好的卡可以生成分享链接，别人打开就能转着看
-- 支持 JPG、PNG、WebP、AVIF、HEIC，单张最大 16MB
-- 做好的卡可以存成动图：iPhone 上是 GIF，安卓上是动态照片，电脑上是 APNG
-- 界面有中文、英文、日文：https://holocard.longsizhuo.com/?lang=en 、https://holocard.longsizhuo.com/?lang=ja
-- 作者：longsizhuo（https://github.com/longsizhuo）
+- Use it online: https://holocard.longsizhuo.com/
+- Finished cards get a share link; anyone who opens it can tilt the card
+- Accepts JPG, PNG, WebP, AVIF and HEIC, up to 16 MB per image
+- Finished cards can be saved as animations: GIF on iPhone, Motion Photo on Android, APNG on desktop
+- Interface in English, Chinese and Japanese: https://holocard.longsizhuo.com/ , https://holocard.longsizhuo.com/?lang=zh , https://holocard.longsizhuo.com/?lang=ja
+- Author: longsizhuo (https://github.com/longsizhuo)
 
-## 原理
+## How it works
 
-- 深度估计：Depth Anything V2-Small（ONNX，8 位量化），在服务端运行，浏览器不用下载模型
-- 分层：在深度直方图的谷底切层，层数自适应；只在画面上看得见、且深度上确实有遮挡台阶的地方切，不会把一个物体切成两半
-- 边缘：深度边缘先吸附成台阶，再用引导滤波把层边界吸附到原图里真实的物体边缘上
-- 补全：被前景挡住的区域，以最近的可见像素为镜面，把边界另一侧的真实纹理镜像过来，不用生成式模型
-- 渲染：箔面效果和交互手感移植自 pokemon-cards-css（Simon Goellner，GPL-3.0），每一层用自己的 alpha 当箔面遮罩
+- Depth estimation: Depth Anything V2-Small (ONNX, 8-bit quantized) runs on the server, so the browser downloads no model
+- Layering: layers are cut at the valleys of the depth histogram, and their number adapts to the photo; a cut is made only where the boundary is visible in the image and there is a real occlusion step in depth, so no object is split in two
+- Edges: depth edges are first snapped into steps, then a guided filter snaps the layer boundaries to the real object edges in the photo
+- Filling: regions hidden behind the foreground are filled by mirroring the real texture from the other side of the boundary, with the nearest visible pixel as the mirror; no generative model is used
+- Rendering: the foil effects and interaction are ported from pokemon-cards-css (Simon Goellner, GPL-3.0); each layer uses its own alpha as its foil mask
 
-## 链接
+## Links
 
-- [源码](https://github.com/longsizhuo/holocard)：GitHub 仓库，GPL-3.0
-- [README](https://github.com/longsizhuo/holocard#readme)：分层流水线、边缘精修、渲染器和 .layers 格式的详细说明
-- [pokemon-cards-css](https://github.com/simeydotme/pokemon-cards-css)：箔面效果的来源
+- [Source code](https://github.com/longsizhuo/holocard): GitHub repository, GPL-3.0
+- [Documentation](https://holocard.longsizhuo.com/docs/en/): usage, the HTTP API, the layering pipeline, edge refinement, the renderer and the .layers format
+- [pokemon-cards-css](https://github.com/simeydotme/pokemon-cards-css): the origin of the foil effects
 
-## English
+## 中文
 
-HoloCard is a free, open-source (GPL-3.0) web tool that turns any photo into an interactive holographic trading card. It estimates depth with Depth Anything V2-Small, splits the photo into 2–4 layers (foreground, midground, background), and gives each layer its own holographic foil; tilting the card shifts the foils and the layers in parallax. Foil effects are ported from pokemon-cards-css by Simon Goellner. Finished cards can be saved as a GIF on iPhone, an Android Motion Photo, or an animated PNG on desktop. The site is available in English at https://holocard.longsizhuo.com/?lang=en (also Chinese and Japanese). Source code: https://github.com/longsizhuo/holocard.
+HoloCard 是一个免费、开源（GPL-3.0）的网页工具，把任意照片自动切成前中后景，每层各上各的箔面，渲染成可交互的全息闪卡，无需注册。服务端用 Depth Anything V2-Small 估计深度，把照片分成 2～4 层；转动卡片时，箔面和炫光随角度变化，各层之间有视差。箔面效果移植自 Simon Goellner 的 pokemon-cards-css。做好的卡可以生成分享链接，也可以存成动图：iPhone 上是 GIF，安卓上是动态照片，电脑上是 APNG。中文版：https://holocard.longsizhuo.com/?lang=zh ，文档：https://holocard.longsizhuo.com/docs/ ，源码：https://github.com/longsizhuo/holocard
 
 ## 日本語
 

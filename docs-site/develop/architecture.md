@@ -105,7 +105,7 @@ holocard/
 | 文件 | 职责 |
 |---|---|
 | `messages.ts` | 中文、英文、日文界面文字。中文为源头，另外两份的类型由其推导，键缺失或多余时类型检查失败 |
-| `core.ts` | 前后端共用：语言判定（`?lang=` → cookie `hc_lang` → `Accept-Language` → 中文）、`translate`、`localizeHtml` |
+| `core.ts` | 前后端共用：语言判定（`?lang=` → cookie `hc_lang` → `Accept-Language` → 英文）、`translate`、`localizeHtml` |
 | `index.ts` | 前端：当前语言、`t()`、切换语言时原地替换页面文字 |
 
 `index.html` 中的静态文字用 `data-i18n`、`data-i18n-html`、`data-i18n-title`、`data-i18n-aria` 标记。服务端发送页面时按语言替换，前端切换语言时原地重写，不刷新页面。
