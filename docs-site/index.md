@@ -194,4 +194,4 @@ HoloCard 支持使用 [involutionhell](https://involutionhell.com) 账号登录�
 
 ## 用于训练
 
-在首页上传的图片可能被选入 HoloCard 图像识别模型（目前是特效识别模型 SAM3-Card）的训练数据，页脚注明了这一点。选入的图片会另存一份，由 Claude（Anthropic）标注其中的特效；这份副本不随卡片到期清除，但卡片被删除时一并移除。卡面遮罩、线稿提取和 API 提交的图片不用于训练。
+在网站上做卡时上传的图片可能被选入 HoloCard 图像识别模型（目前是特效识别模型 SAM3-Card）的训练数据，页脚注明了这一点。选入的图片由 Claude（Anthropic）标注其中的特效。卡面遮罩、线稿提取和 API 提交的图片不用于训练。

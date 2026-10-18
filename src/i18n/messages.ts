@@ -28,7 +28,7 @@ export const zh = {
   'panel.foilStrength': '这一层的箔面强度',
   'foot.creditHtml':
     '箔面配方与交互手感移植自 {upstream}（Simon Goellner，GPL-3.0）。本项目同样以 GPL-3.0 发布，源码在 {github}。',
-  'foot.training': '上传图片即默认您同意我们将其用于图像识别模型的训练。',
+  'foot.training': '上传图片即默认您同意我们可能将其用于图像识别模型的训练。',
 
   'foil.none': '哑光（不上箔）',
   'foil.holo': '经典闪卡 holo',
@@ -461,7 +461,7 @@ export const ja: Messages = {
   'panel.foilStrength': 'このレイヤーのホイルの強さ',
   'foot.creditHtml':
     'ホイルの表現と操作感は {upstream}（Simon Goellner、GPL-3.0）から移植しています。本プロジェクトも GPL-3.0 で公開しており、ソースは {github} にあります。',
-  'foot.training': '画像をアップロードすると、画像認識モデルの学習への利用に同意したものとみなされます。',
+  'foot.training': '画像をアップロードすると、画像認識モデルの学習に利用される場合があることに同意したものとみなされます。',
 
   'foil.none': 'マット（ホイルなし）',
   'foil.holo': 'クラシックホロ',

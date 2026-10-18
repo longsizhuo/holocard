@@ -194,4 +194,4 @@ Shared cards are kept according to their total views:
 
 ## Use for training
 
-Images uploaded on the home page may be selected as training data for HoloCard's image recognition models (currently the effects recognition model, SAM3-Card), as the page footer states. A selected image is copied, and Claude (Anthropic) labels the effects in it. The copy is not cleared when the card expires, but it is removed when the card is deleted. Images submitted to the card mask and line art tools or through the API are not used for training.
+Images uploaded to make a card on the site may be selected as training data for HoloCard's image recognition models (currently the effects recognition model, SAM3-Card), as the page footer states. Claude (Anthropic) labels the effects in selected images. Images submitted to the card mask and line art tools or through the API are not used for training.
