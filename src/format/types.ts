@@ -31,10 +31,30 @@ export type BBox = readonly [x: number, y: number, width: number, height: number
  *   holo       经典闪卡：斜向彩虹 + 细扫描线 + 竖向光栅（原 rare holo）
  *   sunpillar  V 卡那种斜向日柱彩虹，带金属颗粒（原 rare holo v）
  *   rainbow    彩虹稀有：闪粉 + 多色渐变（原 rare rainbow）
+ *   glow       光效：给特效层（光带、光弧）用，倾斜时整条亮起、颜色流动（HoloCard 自己的配方）
  */
-export type FoilType = 'none' | 'holo' | 'sunpillar' | 'rainbow';
+export type FoilType = 'none' | 'holo' | 'sunpillar' | 'rainbow' | 'glow';
 
-export const FOIL_TYPES: readonly FoilType[] = ['none', 'holo', 'sunpillar', 'rainbow'];
+export const FOIL_TYPES: readonly FoilType[] = ['none', 'holo', 'sunpillar', 'rainbow', 'glow'];
+
+/** 层的用途，见 LayerEntry.role */
+export type LayerRole = 'effects';
+
+/**
+ * 特效层是哪类特效，见 LayerEntry.effect。识别模型（SAM3-Card）认的就是这六类：
+ *   energy     光带、光束、光弧、能量流
+ *   glow       光晕、柔光
+ *   circle     魔法阵、光圈
+ *   fire       火焰
+ *   lightning  闪电、电弧
+ *   sparkles   闪光点、星点
+ */
+export type EffectKind = 'energy' | 'glow' | 'circle' | 'fire' | 'lightning' | 'sparkles';
+
+export const EFFECT_KINDS: readonly EffectKind[] = ['energy', 'glow', 'circle', 'fire', 'lightning', 'sparkles'];
+
+/** 特效层的默认箔面 */
+export const EFFECTS_FOIL: LayerFoil = { type: 'glow', intensity: 1 };
 
 export interface LayerFoil {
   type: FoilType;
@@ -74,6 +94,15 @@ export interface LayerEntry {
 
   /** 该层被遮挡区域是否已经做过补洞。未补洞的层大幅位移时会露出空洞 */
   inpainted: boolean;
+
+  /**
+   * 这一层是什么。缺省是普通的景深层；'effects' 是从画里识别出来的特效，
+   * 紧跟在它所在的那层后面、视差相同，默认上光效（glow）。面板上不列进逐层箔面，单独给开关和强度
+   */
+  role?: LayerRole;
+
+  /** 特效层是哪类特效，决定光效怎么动（见 renderer/foils.css）。只有 role 为 'effects' 的层有，缺省按光带（energy） */
+  effect?: EffectKind;
 
   /**
    * 这一层的箔面。箔只出现在该层自己的 alpha 形状里，并随该层一起做视差位移。

@@ -17,8 +17,9 @@ import { join } from 'node:path';
 import sharp from 'sharp';
 import { findLayout, type Box } from '../../src/cardmask/frame';
 import type { TextLine } from '../../src/cardmask/layout';
-import { CLASSES, cardMasks, type MaskClass } from '../../src/cardmask/masks';
-import { MATTE_READY, MODEL_DIR, OUT_DIR } from '../config';
+import { CLASSES, cardMasks, resample, type MaskClass } from '../../src/cardmask/masks';
+import { EFFECTS_URLS, MATTE_READY, MODEL_DIR, OUT_DIR } from '../config';
+import { detectEffects } from './effects';
 import { cardmaskInWorker } from './jobs';
 
 export const CARDMASK_DIR = join(OUT_DIR, '.cardmasks');
@@ -54,6 +55,8 @@ export interface CardmaskResult {
   panel: Box | null;
   /** 每行字的位置（归一化）和角色：name、hp、body、footer、art */
   lines: TextLine[];
+  /** 特效遮罩怎么来的：model＝识别服务（SAM3-Card）认出来的；rules＝识别服务不可用，按规则找的 */
+  effectsSource: 'model' | 'rules';
 }
 
 type JobState = { state: 'queued' | 'running' } | { state: 'error'; error: string } | ({ state: 'done' } & CardmaskResult);
@@ -98,7 +101,20 @@ async function run(id: string, dir: string, card: Buffer): Promise<void> {
     const layout = findLayout(data, info.width, info.height);
     const region = layout.window ?? layout.panel ?? { x: 0, y: 0, w: 1, h: 1 };
     jobs.set(id, { state: 'running', createdAt, ...keep });
+    // 特效识别在显卡机上，和分层线程里的抠主角、找文字同时跑
+    const found = detectEffects(new Blob([new Uint8Array(card)]), EFFECTS_URLS).catch(() => null);
     const { matte, text } = await cardmaskInWorker(new Uint8Array(card), region, TEXT_MODEL);
+    // 各类特效并成一张：卡面遮罩只分「是不是特效」，不分类型
+    const effects = await found;
+    let detected: { data: Float32Array; width: number; height: number } | null = null;
+    for (const e of effects ?? []) {
+      detected ??= { data: new Float32Array(e.width * e.height), width: e.width, height: e.height };
+      // 服务现在各类回的尺寸都一样；万一不一样就缩到第一类的尺寸再并，别把这一类丢掉
+      const plane = e.width === detected.width && e.height === detected.height ? e.data : resample(e, detected.width, detected.height);
+      for (let i = 0; i < plane.length; i++) detected.data[i] = Math.max(detected.data[i] ?? 0, plane[i] ?? 0);
+    }
+    // 识别服务回了「没有特效」也算模型的结果：一张空遮罩，不退回规则
+    if (effects && !detected) detected = { data: new Float32Array(1), width: 1, height: 1 };
     // 抠图的结果只覆盖 region，铺回整张卡的尺寸；认不出主角就是全空
     const character = new Float32Array(info.width * info.height);
     if (matte) {
@@ -114,7 +130,7 @@ async function run(id: string, dir: string, card: Buffer): Promise<void> {
         }
       }
     }
-    const masks = cardMasks(data, info.width, info.height, layout, { data: character, width: info.width, height: info.height }, text);
+    const masks = cardMasks(data, info.width, info.height, layout, { data: character, width: info.width, height: info.height }, text, detected);
     /*
      * 灰度 + alpha 两个通道，都等于遮罩值。CSS 的 mask-image 默认按 alpha 用（pokemon-cards-css 的遮罩就是带 alpha 的），
      * 按亮度用（mask-mode: luminance）、在看图软件里看也对
@@ -141,6 +157,7 @@ async function run(id: string, dir: string, card: Buffer): Promise<void> {
       window: layout.window ? round(layout.window) : null,
       panel: layout.panel ? round(layout.panel) : null,
       lines: masks.lines.map((line) => ({ ...round(line), role: line.role })),
+      effectsSource: detected ? 'model' : 'rules',
     };
     await writeFile(join(dir, 'masks.json'), JSON.stringify(result));
     jobs.set(id, { state: 'done', createdAt, ...keep, ...result });

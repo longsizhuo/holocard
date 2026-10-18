@@ -15,8 +15,8 @@
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
-import { MAX_UPLOAD, PUBLIC_ORIGIN, RATE_LIMIT, RATE_WINDOW_MS } from '../config';
-import { clientIp, fail, json, makeLimiter, methodNotAllowed, readBody } from '../http';
+import { PUBLIC_ORIGIN, RATE_LIMIT, RATE_WINDOW_MS } from '../config';
+import { fail, json, makeLimiter, methodNotAllowed } from '../http';
 import {
   CARDMASK_DIR,
   CARDMASK_FILES,
@@ -26,10 +26,9 @@ import {
   cardmaskStatus,
   startCardmask,
 } from '../pipeline/cardmask';
-import { sniffImage } from '../pipeline/jobs';
-import { ImageError, normalizeOriginal } from '../pipeline/images';
 import type { ApiKeyRow } from '../store/db';
 import { trackApi } from '../umami';
+import { normalizeImage, readImage, tooFrequent } from './image-upload';
 
 /** 和上传分层分开计数，限额相同 */
 const cardmaskLimited = makeLimiter(RATE_LIMIT, RATE_WINDOW_MS);
@@ -50,11 +49,7 @@ export async function handleCardmask(req: IncomingMessage, res: ServerResponse, 
       methodNotAllowed(res, 'POST');
       return;
     }
-    if (cardmaskLimited(clientIp(req))) {
-      const minutes = Math.round(RATE_WINDOW_MS / 60000);
-      fail(res, 429, 'rate_limited', `提交太频繁了，${minutes} 分钟内最多 ${RATE_LIMIT} 次`, { minutes, limit: RATE_LIMIT });
-      return;
-    }
+    if (tooFrequent(req, res, cardmaskLimited)) return;
     const id = await acceptCardmask(req, res);
     if (id) json(res, 202, { id });
     return;
@@ -141,6 +136,7 @@ export async function handleV1Masks(req: IncomingMessage, res: ServerResponse, u
             window: status.window,
             panel: status.panel,
             lines: status.lines,
+            effectsSource: status.effectsSource,
             files: Object.fromEntries(CARDMASK_FILES.map((name) => [name, `${base}/files/${name}.png`])),
           }
         : {}),
@@ -163,34 +159,16 @@ async function acceptCardmask(req: IncomingMessage, res: ServerResponse, owner?:
   }
   // 读请求体之前只粗查、不占位：传多慢由对方决定，占着位慢慢传就能把队列堵死
   if (queueFull(res, owner)) return null;
-  const limitMb = Math.round(MAX_UPLOAD / 1024 / 1024);
-  let bytes: Buffer;
-  try {
-    if (Number(req.headers['content-length'] ?? 0) > MAX_UPLOAD) throw new Error('too large');
-    bytes = await readBody(req, MAX_UPLOAD, res);
-  } catch {
-    res.setHeader('connection', 'close');
-    fail(res, 413, 'too_large', `图片超过 ${limitMb}MB 上限`, { limitMb });
-    return null;
-  }
-  if (!sniffImage(bytes)) {
-    fail(res, 415, 'unsupported_image', '不是可识别的图片（支持 JPEG / PNG / WebP / AVIF / HEIC）');
-    return null;
-  }
+  const bytes = await readImage(req, res);
+  if (!bytes) return null;
   // 读完再查一次并占位，检查和计数之间没有 await：同时读完的一批只能一个个过。占着的只有规范化和写盘，快慢由本机定
   if (queueFull(res, owner)) return null;
   const api = owner === undefined ? 0 : 1;
   uploading.all++;
   uploading.api += api;
   try {
-    let image: Buffer;
-    try {
-      image = (await normalizeOriginal(bytes)).data;
-    } catch (error) {
-      if (error instanceof ImageError) fail(res, 415, error.code, error.message, error.params);
-      else fail(res, 415, 'unsupported_image', '无法识别的图片');
-      return null;
-    }
+    const image = await normalizeImage(res, bytes);
+    if (!image) return null;
     // 写盘出错要在这里接住：外面虽有兜底，但那样回的是 500 而不是能翻译的错误码
     try {
       return await startCardmask(image, owner);

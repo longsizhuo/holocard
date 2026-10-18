@@ -3,7 +3,8 @@
  * 每个像素六张加起来正好 255，所以任意几张直接相加就是它们的并集，边上不留缝、不重复：
  *
  *   text        文字：检测到的字，画里压的字也算
- *   effects     特效：贴着主角的火焰、光弹这类又亮又艳的东西，加上主角轮廓内侧一圈（头发、身体的边）
+ *   effects     特效：画里的光带、光晕、魔法阵、火焰、闪电、闪光点（调用方给的识别结果，SAM3-Card）；没给的时候按规则找
+ *               贴着主角的火焰、光弹这类又亮又艳的东西。都加上主角轮廓内侧一圈（头发、身体的边）
  *   character   主角：抠图模型在画框里（全图卡是内板里，再没有就是整张）抠出来的主体，减去上面两样
  *   border      卡边：最外圈和卡边颜色一样的那一条（宝可梦的黄边、银边）
  *   frame       框架：画框（或内板）以外、卡边以内的卡面：名字栏、说明区、底栏。都没有的全图卡是压在画上的底板（textPlates）
@@ -188,6 +189,8 @@ export function cardMasks(
   layout: Layout,
   character: Plane,
   text: Plane,
+  /** 识别出的特效（各类并在一起，0..1）。null 表示识别服务不可用，按规则找 */
+  detected: Plane | null = null,
 ): CardMasks {
   const n = width * height;
   const { window, panel } = layout;
@@ -268,6 +271,11 @@ export function cardMasks(
     if ((toBody[i] ?? Infinity) > limit) vivid[i] = 0;
   }
   const attached = grow(near, vivid, width);
+  // 有识别结果就用它代替上面的规则：规则只认贴着主角的亮艳色块，背景里的光带、魔法阵、闪光点都漏掉，又常把衣服的亮色当特效
+  if (detected) {
+    const fx = resample(detected, width, height);
+    for (let i = 0; i < n; i++) attached[i] = inRegion(i) && !textMask[i] && (fx[i] ?? 0) > 0.5 ? 1 : 0;
+  }
 
   // 分到六张里：按 text > effects > character > border > frame 的顺序，每张只拿前面剩下的，背景兜底，加起来正好 255
   const out = {

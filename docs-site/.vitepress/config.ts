@@ -17,7 +17,7 @@ const nav = (prefix: string, t: { guide: string; api: string; player: string; de
 /** 侧边栏：使用者看的在前，开发、部署在后（日文版只有前一组） */
 const sidebar = (
   prefix: string,
-  t: { use: string; guide: string; player: string; masks: string; format: string },
+  t: { use: string; guide: string; player: string; masks: string; lineart: string; format: string },
   dev?: { title: string; local: string; arch: string; pipeline: string; renderer: string; deploy: string },
 ) => [
   {
@@ -27,6 +27,7 @@ const sidebar = (
       { text: 'API', link: `${prefix}/api/` },
       { text: t.player, link: `${prefix}/player/` },
       { text: t.masks, link: `${prefix}/masks/` },
+      { text: t.lineart, link: `${prefix}/lineart/` },
       { text: t.format, link: `${prefix}/format/` },
     ],
   },
@@ -50,6 +51,9 @@ export default defineConfig({
   base: '/docs/',
   // 地址不带 .html（服务端在 /docs/ 下找不到文件时补上 .html，见 server/routes/static.ts 的 serveStatic）
   cleanUrls: true,
+  // 生成 /docs/sitemap.xml，同一页的中英日版本互相标成 hreflang；robots.txt 里登记了它。
+  // 地址写死官方站：自托管的文档也是这一份，让搜索引擎只收官方那份，免得成了重复页
+  sitemap: { hostname: 'https://holocard.longsizhuo.com/docs/' },
   outDir: '../dist/docs',
   title: 'HoloCard',
   head: [['link', { rel: 'icon', href: '/favicon.svg', type: 'image/svg+xml' }]],
@@ -72,7 +76,7 @@ export default defineConfig({
       description: '用 HTTP 接口把照片做成分层闪卡，再用 @holocard/player 放进你的网页',
       themeConfig: {
         nav: nav('', { guide: '指南', api: 'API', player: '播放器', develop: '开发' }),
-        sidebar: sidebar('', { use: '使用', guide: '介绍与使用', player: '播放器', masks: '卡面遮罩', format: '文件格式' }, { title: '开发与部署', local: '本地开发', arch: '架构与模块', pipeline: '分层流水线', renderer: '渲染器', deploy: '自托管部署' }),
+        sidebar: sidebar('', { use: '使用', guide: '介绍与使用', player: '播放器', masks: '卡面遮罩', lineart: '线稿提取', format: '文件格式' }, { title: '开发与部署', local: '本地开发', arch: '架构与模块', pipeline: '分层流水线', renderer: '渲染器', deploy: '自托管部署' }),
         outline: { level: [2, 3], label: '本页目录' },
         docFooter: { prev: '上一页', next: '下一页' },
         darkModeSwitchLabel: '外观',
@@ -86,7 +90,7 @@ export default defineConfig({
       description: 'Turn photos into layered holographic cards over HTTP and play them on your page with @holocard/player',
       themeConfig: {
         nav: nav('/en', { guide: 'Guide', api: 'API', player: 'Player', develop: 'Development' }),
-        sidebar: sidebar('/en', { use: 'Using HoloCard', guide: 'Guide', player: 'Player', masks: 'Card masks', format: 'File format' }, { title: 'Development', local: 'Local development', arch: 'Architecture', pipeline: 'Layering pipeline', renderer: 'Renderer', deploy: 'Self-hosting' }),
+        sidebar: sidebar('/en', { use: 'Using HoloCard', guide: 'Guide', player: 'Player', masks: 'Card masks', lineart: 'Line art', format: 'File format' }, { title: 'Development', local: 'Local development', arch: 'Architecture', pipeline: 'Layering pipeline', renderer: 'Renderer', deploy: 'Self-hosting' }),
       },
     },
     ja: {
@@ -95,7 +99,7 @@ export default defineConfig({
       description: 'HTTP で写真をレイヤーカードにして、@holocard/player でページに載せる',
       themeConfig: {
         nav: nav('/ja', { guide: 'ガイド', api: 'API', player: 'プレーヤー' }),
-        sidebar: sidebar('/ja', { use: '使い方', guide: 'ガイド', player: 'プレーヤー', masks: 'カードマスク', format: 'ファイル形式' }),
+        sidebar: sidebar('/ja', { use: '使い方', guide: 'ガイド', player: 'プレーヤー', masks: 'カードマスク', lineart: '線画抽出', format: 'ファイル形式' }),
         outline: { level: [2, 3], label: '目次' },
         docFooter: { prev: '前へ', next: '次へ' },
       },

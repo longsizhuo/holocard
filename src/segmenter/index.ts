@@ -6,6 +6,8 @@
  *   analyzeDepth   在深度直方图的谷底切层，层数自适应
  *   findSubject    （仅服务端）抠出主体，主体单独一层、不被切开，深度切点只留主体身后的
  *   extractLayers  深度边缘吸附、引导滤波精修边界、逐层补全
+ *   findEffects    （仅服务端）识别画里的特效（光带、光晕、魔法阵、火焰、闪电、闪光点），按类型单独成层，
+ *                  紧跟在它所在的那层后面，默认上光效。识别模型 SAM3-Card 跑在单独的服务上，和前面几步同时进行
  *
  * 产出的每一层同时承担两个角色：带视差的画面，以及这一层箔面的遮罩——
  * 参考项目里那张靠手工准备的 --mask 图，在这里是自动生成的。
@@ -13,7 +15,9 @@
  */
 
 import {
+  EFFECTS_FOIL,
   LAYERS_FORMAT_VERSION,
+  type EffectKind,
   defaultFoilFor,
   defaultHalo,
   type LayerEntry,
@@ -36,6 +40,7 @@ export type SegmentStage =
   | 'analyzing'
   | 'finding-subject'
   | 'extracting'
+  | 'finding-effects'
   | 'done';
 
 export interface SegmentProgress {
@@ -59,6 +64,16 @@ export interface SegmentOptions {
   findSubject: (image: Blob) => Promise<Matte | null>;
   /** 抠图用的模型名，写进 manifest 的 generator，事后排查、对比实验时分得清是哪个模型做的 */
   subjectModel: string;
+  /**
+   * 识别画里的特效，每类一张遮罩（大小不必和原图一样，按比例缩放后用）。返回 null 或空数组表示没有特效
+   * （或识别服务不可用），不出特效层。只有服务端给，见 server/pipeline/effects.ts
+   */
+  findEffects: (image: Blob) => Promise<EffectMask[] | null>;
+}
+
+/** 一类特效在图上的位置：0..1 的遮罩 */
+export interface EffectMask extends Matte {
+  kind: EffectKind;
 }
 
 const STAGE_TEXT: Record<SegmentStage, string> = {
@@ -67,6 +82,7 @@ const STAGE_TEXT: Record<SegmentStage, string> = {
   analyzing: '正在分析深度分布',
   'finding-subject': '正在识别主体',
   extracting: '正在切层与补洞',
+  'finding-effects': '正在识别特效',
   done: '完成',
 };
 
@@ -119,12 +135,83 @@ function toParallax(depths: number[], rigid: boolean[]): number[] {
  * 生成者标识，把切层决策也写进去。
  * 排查「为什么这张图切成两层 / 为什么切在这个位置」时，看这一行就够了。
  */
-function buildGeneratorTag(cuts: number[], prominences: number[], subject: string | null): string {
+function buildGeneratorTag(cuts: number[], prominences: number[], subject: string | null, effects: number): string {
   const detail = cuts
     .map((c, i) => `${c.toFixed(3)}@${(prominences[i] ?? 0).toFixed(3)}`)
     .join(',');
   const layers = cuts.length + 1 + (subject ? 1 : 0);
-  return `holocard-web/0.1.0 depth-anything-v2-small${subject ? ` ${subject}` : ''} layers=${layers} cuts=[${detail}]${subject ? ' +subject' : ''}`;
+  return `holocard-web/0.1.0 depth-anything-v2-small${subject ? ` ${subject}` : ''} layers=${layers} cuts=[${detail}]${subject ? ' +subject' : ''}${effects ? ` +effects=${effects}` : ''}`;
+}
+
+/** 遮罩在输出尺寸 (x, y) 处的值，双线性插值：遮罩是识别服务按缩小的图出的，直接取最近的像素边缘是锯齿 */
+function sampleMask(mask: EffectMask, x: number, y: number, width: number, height: number): number {
+  const fx = Math.min(mask.width - 1, Math.max(0, ((x + 0.5) * mask.width) / width - 0.5));
+  const fy = Math.min(mask.height - 1, Math.max(0, ((y + 0.5) * mask.height) / height - 0.5));
+  const x0 = Math.floor(fx);
+  const y0 = Math.floor(fy);
+  const x1 = Math.min(mask.width - 1, x0 + 1);
+  const y1 = Math.min(mask.height - 1, y0 + 1);
+  const at = (mx: number, my: number): number => mask.data[my * mask.width + mx] ?? 0;
+  const top = at(x0, y0) + (at(x1, y0) - at(x0, y0)) * (fx - x0);
+  const bottom = at(x0, y1) + (at(x1, y1) - at(x0, y1)) * (fx - x0);
+  return top + (bottom - top) * (fy - y0);
+}
+
+interface EffectLayer {
+  /** 跟在第几层后面 */
+  owner: number;
+  kind: EffectKind;
+  blob: Blob;
+  bbox: readonly [number, number, number, number];
+}
+
+/**
+ * 特效层：特效像素归给「此处看得见的那一层」（由近及远第一个盖到一半的层）。
+ * 主体层也算：抠图常把角色手边绕着的光环一起抠进主体，这些光环就该跟着主体动。每层每类一份，
+ * 紧跟在那一层后面、深度和视差相同，于是两者一起移动、排序时也挨着（parseManifest 按深度稳定排序）。
+ * 画面就是原图：静止时和下面那层叠出来一模一样，只多一份按特效形状的光效
+ */
+async function buildEffectLayers(
+  extracted: { source: Uint8ClampedArray; alphas: Float32Array[]; width: number; height: number },
+  masks: EffectMask[],
+  encode: (image: { data: Uint8ClampedArray; width: number; height: number }) => Promise<Blob>,
+): Promise<EffectLayer[]> {
+  const { source, alphas, width, height } = extracted;
+  const owner = new Int8Array(width * height).fill(-1);
+  for (let p = 0; p < owner.length; p++) {
+    for (let i = alphas.length - 1; i >= 0; i--) {
+      if ((alphas[i]?.[p] ?? 0) >= 0.5) {
+        owner[p] = i;
+        break;
+      }
+    }
+  }
+  const result: EffectLayer[] = [];
+  for (const mask of masks) {
+    const values = new Float32Array(width * height);
+    for (let p = 0; p < values.length; p++) {
+      const x = p % width;
+      values[p] = sampleMask(mask, x, (p - x) / width, width, height);
+    }
+    for (let i = 0; i < alphas.length; i++) {
+      const data = new Uint8ClampedArray(source);
+      let minX = width, minY = height, maxX = -1, maxY = -1;
+      for (let p = 0; p < owner.length; p++) {
+        const a = owner[p] === i ? (values[p] ?? 0) : 0;
+        data[p * 4 + 3] = Math.round(a * 255);
+        if (a <= 0) continue;
+        const x = p % width;
+        const y = (p - x) / width;
+        if (x < minX) minX = x;
+        if (y < minY) minY = y;
+        if (x > maxX) maxX = x;
+        if (y > maxY) maxY = y;
+      }
+      if (maxX < 0) continue;
+      result.push({ owner: i, kind: mask.kind, blob: await encode({ data, width, height }), bbox: [minX, minY, maxX - minX + 1, maxY - minY + 1] });
+    }
+  }
+  return result;
 }
 
 /** 模型名缩成 generator 里的一个词：onnx-community/BiRefNet_lite-ONNX → birefnet-lite */
@@ -143,6 +230,9 @@ export async function segmentToLayerSet(
       ...(ratio === undefined ? {} : { ratio }),
     });
   };
+
+  // 特效识别在别的服务上跑，和这边的估深度、抠主体同时进行，切完层再取结果
+  const effectsPending = options.findEffects?.(image).catch(() => null);
 
   report('loading-model');
   const onModelProgress = (p: LoadProgress): void => {
@@ -203,10 +293,11 @@ export async function segmentToLayerSet(
   const { cuts, prominences, rigid } = sliced;
 
   report('extracting');
-  const { images, stats, width, height } = await extractLayers(image, depth, cuts, {
+  const extracted = await extractLayers(image, depth, cuts, {
     ...options.extract,
     subject,
   });
+  const { images, stats, width, height } = extracted;
 
   const depths = stats.map((s) => s.depth);
   if (subject && depths.length > 1) {
@@ -223,7 +314,7 @@ export async function segmentToLayerSet(
   const parallax = toParallax(depths, rigid);
   const nearest = parallax[stats.length - 1] ?? 0;
   const farthest = parallax[0] ?? 0;
-  const layers: LayerEntry[] = stats.map((stat, i) => ({
+  const base: LayerEntry[] = stats.map((stat, i) => ({
     file: `layer-${i}.png`,
     depth: depths[i] ?? stat.depth,
     parallax: parallax[i] ?? 0,
@@ -244,20 +335,49 @@ export async function segmentToLayerSet(
       : defaultFoilFor((parallax[i] ?? 0) === farthest ? 0 : i, stats.length),
   }));
 
+  // 特效层插在各自那一层后面
+  let fx: EffectLayer[] = [];
+  if (effectsPending) {
+    report('finding-effects');
+    const masks = await effectsPending;
+    if (masks?.length) fx = await buildEffectLayers(extracted, masks, (img) => backend.encodePng(img));
+  }
+  const layers: LayerEntry[] = [];
+  const blobs: Blob[] = [];
+  base.forEach((layer, i) => {
+    layers.push({ ...layer, file: `layer-${layers.length}.png` });
+    blobs.push(images[i]!);
+    for (const effect of fx) {
+      if (effect.owner !== i) continue;
+      layers.push({
+        file: `layer-${layers.length}.png`,
+        depth: layer.depth,
+        parallax: layer.parallax,
+        bbox: effect.bbox,
+        inpainted: false,
+        role: 'effects',
+        effect: effect.kind,
+        foil: { ...EFFECTS_FOIL },
+      });
+      blobs.push(effect.blob);
+    }
+  });
+  const effectCount = layers.length - base.length;
+
   report('done');
 
   return {
     manifest: {
       version: LAYERS_FORMAT_VERSION,
       source: { width, height },
-      generator: buildGeneratorTag(cuts, prominences, subject ? subjectLabel(options.subjectModel) : null),
+      generator: buildGeneratorTag(cuts, prominences, subject ? subjectLabel(options.subjectModel) : null, effectCount),
       layers,
       effects: {
         halo: defaultHalo(),
         glare: true,
       },
     },
-    images,
+    images: blobs,
   };
 }
 

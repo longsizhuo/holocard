@@ -11,10 +11,8 @@ import '../demo/pearl-drift.css';
 import './masks.css';
 import { HoloCard } from '../renderer/card';
 import { defaultHalo, type FoilType, type LayerSet } from '../format/types';
-import { applyTranslations, lang, onLangChange, setLang, t, type Lang, type MessageKey } from '../i18n';
-
-const BASE = import.meta.env.BASE_URL;
-const POLL_MS = 1500;
+import { t, type MessageKey } from '../i18n';
+import { BASE, failure, need, pixels, setupLang, submitAndWait } from '../tools/page';
 
 /** 预览里能勾选的区域，也就是服务端出的六张遮罩。六张互不重叠，勾选的几张相加就是组合 */
 const REGIONS = ['border', 'frame', 'text', 'background', 'character', 'effects'] as const;
@@ -23,12 +21,6 @@ type Region = (typeof REGIONS)[number];
 const FILES = [...REGIONS, 'labels'] as const;
 type MaskFile = (typeof FILES)[number];
 
-function need<T extends Element>(selector: string): T {
-  const el = document.querySelector<T>(selector);
-  if (!el) throw new Error(`页面上缺少 ${selector}`);
-  return el;
-}
-
 const fileInput = need<HTMLInputElement>('#masks-file');
 const status = need<HTMLParagraphElement>('#masks-status');
 const result = need<HTMLElement>('#masks-result');
@@ -36,88 +28,33 @@ const grid = need<HTMLDivElement>('#masks-grid');
 const foilSelect = need<HTMLSelectElement>('#masks-foil');
 const comboButton = need<HTMLButtonElement>('#masks-combo');
 const regionInputs = [...document.querySelectorAll<HTMLInputElement>('input[name="region"]')];
-const docsLink = need<HTMLAnchorElement>('#docs-link');
 
 let card: HoloCard | null = null;
 /** 当前这组的像素：卡图 RGBA，和各遮罩的灰度 */
 let current: { id: string; width: number; height: number; rgba: Uint8ClampedArray; masks: Record<Region, Uint8ClampedArray> } | null = null;
 
-// ---------- 语言 ----------
-
-function syncDocsLink(l: Lang): void {
-  docsLink.href = `${BASE}docs/${l === 'zh' ? '' : `${l}/`}`;
-}
-applyTranslations();
-syncDocsLink(lang());
-for (const button of document.querySelectorAll<HTMLButtonElement>('.lang [data-lang]')) {
-  button.setAttribute('aria-pressed', String(button.dataset['lang'] === lang()));
-  button.addEventListener('click', () => {
-    const next = button.dataset['lang'];
-    if (next === 'zh' || next === 'en' || next === 'ja') setLang(next);
-  });
-}
-onLangChange((l) => {
-  syncDocsLink(l);
-  for (const button of document.querySelectorAll<HTMLButtonElement>('.lang [data-lang]')) {
-    button.setAttribute('aria-pressed', String(button.dataset['lang'] === l));
-  }
+setupLang(() => {
   if (current) renderGrid(current.id);
 });
-
-// ---------- 和服务端说话 ----------
-
-/** 服务端的错误按 code 翻译；不认识的照原文 */
-async function describe(res: Response): Promise<string> {
-  const body = (await res.json().catch(() => ({}))) as { error?: string; code?: string; params?: Record<string, string | number> };
-  const key = `error.${body.code ?? ''}` as MessageKey;
-  const translated = t(key, body.params);
-  return translated !== key ? translated : (body.error ?? `HTTP ${res.status}`);
-}
 
 function setStatus(text: string): void {
   status.textContent = text;
 }
-
-const sleep = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms));
 
 async function upload(file: File): Promise<void> {
   fileInput.disabled = true;
   result.hidden = true;
   setStatus(t('masks.working'));
   try {
-    const res = await fetch(`${BASE}api/cardmask`, { method: 'POST', body: file, headers: { 'x-holocard-lang': lang() } });
-    if (!res.ok) throw new Error(await describe(res));
-    const { id } = (await res.json()) as { id: string };
-    for (;;) {
-      await sleep(POLL_MS);
-      const poll = await fetch(`${BASE}api/cardmask/${id}`);
-      if (!poll.ok) throw new Error(await describe(poll));
-      const job = (await poll.json()) as { state: string; error?: string; width?: number; height?: number };
-      if (job.state === 'error') throw new Error(job.error ?? '');
-      if (job.state === 'done') {
-        await show(id);
-        setStatus('');
-        return;
-      }
-    }
+    const { id } = await submitAndWait('cardmask', file);
+    await show(id);
+    setStatus('');
   } catch (error) {
-    const message = error instanceof TypeError ? t('error.network') : error instanceof Error ? error.message : String(error);
-    setStatus(t('masks.failed', { message }));
+    setStatus(t('masks.failed', { message: failure(error) }));
   } finally {
     fileInput.disabled = false;
     fileInput.value = '';
   }
-}
-
-async function pixels(url: string): Promise<{ data: Uint8ClampedArray; width: number; height: number }> {
-  const res = await fetch(url);
-  if (!res.ok) throw new Error(await describe(res));
-  const bitmap = await createImageBitmap(await res.blob());
-  const canvas = new OffscreenCanvas(bitmap.width, bitmap.height);
-  const ctx = canvas.getContext('2d');
-  if (!ctx) throw new Error('canvas');
-  ctx.drawImage(bitmap, 0, 0);
-  return { data: ctx.getImageData(0, 0, bitmap.width, bitmap.height).data, width: bitmap.width, height: bitmap.height };
 }
 
 async function show(id: string): Promise<void> {
