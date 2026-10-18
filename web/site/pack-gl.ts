@@ -327,8 +327,8 @@ export function createPack(host: HTMLElement, onDismiss: () => void): PackView {
   }
 }
 
-/** 着色器里的箔面编号 */
-const FOIL_INDEX: Record<FoilType, number> = { sunpillar: 0, holo: 1, rainbow: 2, none: 3 };
+/** 着色器里的箔面编号。卡包没有单独的光效，借彩虹的 */
+const FOIL_INDEX: Record<FoilType, number> = { sunpillar: 0, holo: 1, rainbow: 2, glow: 2, none: 3 };
 
 // ---------- 着色器 ----------
 

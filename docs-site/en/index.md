@@ -79,10 +79,12 @@ The panel next to the card adjusts the current card:
 | One row per layer: drop-down | Foil type of that layer | See the foil table above |
 | One row per layer: slider ("Foil strength for this layer") | Foil strength; disabled for matte layers | 0–1 |
 | "Parallax" switch | Turns parallax on or off | On / off |
-| "Depth and halo" → "Parallax" | Parallax amplitude, as a fraction of card width | 0–16%, default 2% |
-| "Depth and halo" → "Halo intensity" | Card-wide halo strength; 0 turns it off | 0–1, default 0.35 |
-| "Depth and halo" → "Angle sharpness" | Tilt range in which the halo appears; higher is narrower | 10–400, default 120 |
-| "Depth and halo" → "Current halo" | Read-only; how bright the halo is right now | — |
+| "Animated effects" switch | Shown when effects were found in the picture (light trails, halos, magic circles, fire, lightning, sparkles); when on, each effect animates according to its kind. Cards without effects do not show it | On / off, default on |
+| "Depth, halo and effects" → "Parallax" | Parallax amplitude, as a fraction of card width | 0–16%, default 2% |
+| "Depth, halo and effects" → "Halo intensity" | Card-wide halo strength; 0 turns it off | 0–1, default 0.35 |
+| "Depth, halo and effects" → "Angle sharpness" | Tilt range in which the halo appears; higher is narrower | 10–400, default 120 |
+| "Depth, halo and effects" → "Current halo" | Read-only; how bright the halo is right now | — |
+| "Depth, halo and effects" → "Effect strength" | Strength of the effect animation; disabled while "Animated effects" is off. Only shown on cards with effects | 0–1, default 1 |
 
 While a slider is dragged or a foil is changed, the card turns to the angle where the halo is brightest and returns after a moment, so the change is visible.
 
@@ -159,7 +161,9 @@ When signed in, the header button shows your avatar and name, and the panel cont
 
 ## Card masks
 
-Card masks is a separate tool for trading cards at `/masks`, with no link on the home page: upload a finished flat card image to get six non-overlapping foil masks (border, frame, text, character, effects, background) and preview the foil for different combinations. See [Card masks](/en/masks/).
+Card masks is a separate tool for trading cards at `/masks`, linked as "Card masks" under "Tools" in the home page header: upload a finished flat card image to get six non-overlapping foil masks (border, frame, text, character, effects, background) and preview the foil for different combinations. See [Card masks](/en/masks/).
+
+Line art is another standalone tool, at `/lineart` and linked as "Line art" under "Tools" in the home page header: upload an illustration to get its line art on a transparent background, with adjustable line darkness and colour and the option to keep only the subject. See [Line art](/en/lineart/).
 
 ## Retention
 
@@ -187,3 +191,7 @@ Shared cards are kept according to their total views:
 - Because cards are shared automatically when finished, cards made on the website are normally in the shared state; a card counts as not shared only if automatic sharing failed and it was never shared manually.
 - A deleted card is removed immediately, regardless of the table above.
 - Self-hosted deployments can change the base retention with the `HOLOCARD_TTL_MS` environment variable (default 7 days).
+
+## Use for training
+
+Images uploaded to make a card on the site may be selected as training data for HoloCard's image recognition models (currently the effects recognition model, SAM3-Card), as the page footer states. Claude (Anthropic) labels the effects in selected images. Images submitted to the card mask and line art tools or through the API are not used for training.

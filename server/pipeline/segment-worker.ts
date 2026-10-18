@@ -26,6 +26,8 @@ import { SERVER_REFINE_OPTIONS } from '../../src/segmenter/refine';
 import sharp from 'sharp';
 import { sharpImages } from './images';
 import { textProbability } from './textdet';
+import { detectEffects } from './effects';
+import { sketch } from './sketch';
 
 /** 起线程时一次性给的配置 */
 export interface SegmenterConfig {
@@ -36,6 +38,8 @@ export interface SegmenterConfig {
   threads: number;
   /** 抠图用哪个模型，见 server/config.ts 的 MATTE_MODEL */
   matteModel: MatteModelConfig;
+  /** 特效识别服务的地址，按顺序问，见 server/config.ts 的 EFFECTS_URLS */
+  effectsUrls: string[];
 }
 
 export type SegmentRequest =
@@ -53,6 +57,17 @@ export type SegmentRequest =
       /** 在哪抠主角，按卡图宽高归一化。全图卡是整张 */
       region: { x: number; y: number; w: number; h: number };
       textModel: string;
+    }
+  | {
+      /**
+       * 线稿提取（server/pipeline/lineart.ts）分两次来：先只要线稿（几秒），再只要主体（抠图要二十秒上下），
+       * 线稿先给人看。sketchModel 给了就出线稿，matte 为 true 就抠主体
+       */
+      type: 'lineart';
+      /** 规范化过的图（PNG），长边已经缩到 SKETCH_MAX_SIDE 以内 */
+      bytes: Uint8Array<ArrayBuffer>;
+      sketchModel?: string;
+      matte: boolean;
     };
 
 /** 0..1 的概率图 */
@@ -68,6 +83,8 @@ export type SegmentReply =
   | { type: 'done'; manifest: LayerManifest; images: Uint8Array[] }
   /** 卡面遮罩：matte 是 region 里的主角（认不出主体时为 null），text 是整张卡的文字概率 */
   | { type: 'cardmask'; matte: ProbabilityPlane | null; text: ProbabilityPlane }
+  /** 线稿提取：line 是白底黑线的灰度、subject 是主体（没要、认不出时为 null），都和收到的图一样大 */
+  | { type: 'lineart'; line: Uint8Array | null; subject: Uint8Array | null; width: number; height: number }
   | { type: 'error'; message: string };
 
 const port = parentPort;
@@ -113,6 +130,42 @@ async function cardmask(request: Extract<SegmentRequest, { type: 'cardmask' }>):
   );
 }
 
+/** 线稿提取：模型部分在这里做，存文件在主线程（server/pipeline/lineart.ts） */
+async function lineart(request: Extract<SegmentRequest, { type: 'lineart' }>): Promise<void> {
+  const { data, info } = await sharp(request.bytes).removeAlpha().raw().toBuffer({ resolveWithObject: true });
+  let line: Uint8Array | null = null;
+  let t = performance.now();
+  if (request.sketchModel) {
+    line = await sketch(data, info.width, info.height, request.sketchModel);
+    console.log(`[lineart] ${info.width}×${info.height} 线稿 ${((performance.now() - t) / 1000).toFixed(1)}s`);
+  }
+  let subject: Uint8Array | null = null;
+  t = performance.now();
+  if (request.matte) {
+    const matte = await estimateMatte(new Blob([request.bytes], { type: 'image/png' })).catch((error: unknown) => {
+      console.warn(`[lineart] 认不出主体：${error instanceof Error ? error.message : String(error)}`);
+      return null;
+    });
+    // 抠图模型按自己的输入边长出图，缩回这张图的尺寸
+    if (matte) {
+      const plane = Uint8Array.from(matte.data, (v) => Math.round(Math.min(1, Math.max(0, v)) * 255));
+      subject = new Uint8Array(
+        await sharp(plane, { raw: { width: matte.width, height: matte.height, channels: 1 } })
+          .resize(info.width, info.height, { fit: 'fill' })
+          // 不指定的话 sharp 缩放后按 sRGB 出三通道，当单通道读就是一行行错开的条纹
+          .toColourspace('b-w')
+          .raw()
+          .toBuffer(),
+      );
+    }
+  }
+  if (request.matte) console.log(`[lineart] 抠主体 ${((performance.now() - t) / 1000).toFixed(1)}s`);
+  port!.postMessage(
+    { type: 'lineart', line, subject, width: info.width, height: info.height } satisfies SegmentReply,
+    [...(line ? [line.buffer as ArrayBuffer] : []), ...(subject ? [subject.buffer as ArrayBuffer] : [])],
+  );
+}
+
 port.on('message', (request: SegmentRequest) => {
   void (async () => {
     try {
@@ -120,10 +173,15 @@ port.on('message', (request: SegmentRequest) => {
         await cardmask(request);
         return;
       }
+      if (request.type === 'lineart') {
+        await lineart(request);
+        return;
+      }
       const set = await segmentToLayerSet(new Blob([request.bytes]), {
         subjectModel: config.matteModel.id,
         extract: { images: sharpImages, refine: SERVER_REFINE_OPTIONS },
         onProgress: (p) => port.postMessage({ type: 'stage', stage: p.stage } satisfies SegmentReply),
+        findEffects: (image: Blob) => detectEffects(image, config.effectsUrls),
         ...(request.matte
           ? {
               findSubject: (image: Blob) =>

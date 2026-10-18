@@ -61,6 +61,15 @@ function showPackPanel(): void {
 initUpload(deck);
 initAlbums(need<HTMLDialogElement>('#albums'), describeError);
 initAccount(need<HTMLDialogElement>('#account'), need<HTMLButtonElement>('#account-open'), describeError);
+
+// 工具下拉：details 自己不会收起，点别处或按 Esc 收起
+const tools = need<HTMLDetailsElement>('.tools');
+document.addEventListener('click', (event) => {
+  if (tools.open && !tools.contains(event.target as Node)) tools.open = false;
+});
+document.addEventListener('keydown', (event) => {
+  if (event.key === 'Escape') tools.open = false;
+});
 // 页头的「文档」按当前语言进对应的那份
 const docsLink = need<HTMLAnchorElement>('#docs-link');
 function syncDocsLink(l: Lang): void {

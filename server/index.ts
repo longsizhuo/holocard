@@ -44,6 +44,8 @@ import { handleAuth, handleMe } from './routes/account';
 import { handleCards } from './routes/cards';
 import { handleCardmask } from './routes/cardmask';
 import { sweepCardmasks } from './pipeline/cardmask';
+import { handleLineart } from './routes/lineart';
+import { sweepLineart } from './pipeline/lineart';
 import { handleHealth, handlePerf } from './routes/service';
 import { handleSite } from './routes/static';
 import { handleV1 } from './routes/v1';
@@ -65,6 +67,7 @@ const ROUTES: [match: (path: string) => boolean, handle: Handler][] = [
   [(path) => path === '/api/health', handleHealth],
   [(path) => path === '/api/perf', handlePerf],
   [under('/api/cardmask'), handleCardmask],
+  [under('/api/lineart'), handleLineart],
   // 分层任务、层文件、卡片的分享 / 配置 / 删除 / 导出
   [
     (path) => path.startsWith('/api/'),
@@ -87,6 +90,8 @@ async function sweep(): Promise<void> {
   if (removed > 0) console.log(`[sweep] 清理了 ${removed} 张过期卡片`);
   const masks = await sweepCardmasks();
   if (masks > 0) console.log(`[sweep] 清理了 ${masks} 组过期的卡面遮罩`);
+  const lines = await sweepLineart();
+  if (lines > 0) console.log(`[sweep] 清理了 ${lines} 张过期的线稿`);
   try {
     db.prunePerf(90, 200_000);
     db.pruneSessions(Date.now());

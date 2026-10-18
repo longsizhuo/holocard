@@ -9,10 +9,13 @@ holocard/
 ├── web/                  pages (an HTML file's location is its URL)
 │   ├── index.html        home page (shared by all three routes)
 │   ├── masks.html        card mask page /masks
+│   ├── lineart.html      line art page /lineart
 │   ├── site/             site frontend (holocard.longsizhuo.com)
 │   ├── masks/            script of the card mask page
+│   ├── lineart/          script of the line art page
+│   ├── tools/            script shared by the two tool pages
 │   ├── lab/blind/        blind comparison page
-│   └── web/public/           static assets (sample card samples/demo, icons, share images)
+│   └── public/           static assets (sample card samples/demo, icons, share images)
 ├── src/                  libraries imported by the pages and the server; they never import pages
 │   ├── api/              response shapes of the web API /api (types shared by frontend and server)
 │   ├── format/           .layers format: types, reading and validation, author config
@@ -92,7 +95,7 @@ The site frontend, i.e. holocard.longsizhuo.com.
 | File | Responsibility |
 |---|---|
 | `main.ts` | Page entry: creates the deck, wires the panel parts to the current card, switches language, and loads the first screen for the three routes |
-| `tuning.ts` | The page's single HoloCard and the tuning panel (parallax, halo, per-layer foils); saves the owner's changes to the server and tracks which card the panel shows |
+| `tuning.ts` | The page's single HoloCard and the tuning panel (parallax, halo, animated effects, per-layer foils); saves the owner's changes to the server and tracks which card the panel shows |
 | `actions.ts` | Actions on the current card: share, delete, export animation |
 | `upload.ts` | Upload area: shrinks oversized images in the browser, sends them to the server for layering, falls back to the in-browser pipeline when there is no server |
 | `progress.ts` | Progress bar and remaining time while a card is being made |
@@ -137,7 +140,9 @@ The rule-based half of [card masks](/en/masks/), which runs no model:
 
 The page is `web/masks.html` with `web/masks/main.ts`: upload, polling, and a two-layer LayerSet built from the selected regions for the renderer's preview. See `cardmask-eval` in [Local development](/en/develop/) for evaluation.
 
-Card masks are for trading cards only and kept apart from the main flow (photo → layers → holo card): nothing in `src/segmenter/` or `web/site/` imports `src/cardmask/`, the page is a separate entry with no link on the home page, and the server shares only the segmentation worker thread and the matting model (the model stays resident in memory and is not loaded twice), with jobs in the same queue. To remove card masks entirely, delete `src/cardmask/`, `web/masks/`, `web/masks.html`, `server/routes/cardmask.ts`, `server/pipeline/cardmask.ts` and `server/pipeline/textdet.ts`, then remove the route and the periodic cleanup in `server/index.ts`, `cardmaskInWorker` in `jobs.ts`, the `cardmask` message in the worker thread and the `masks` entry in `vite.config.ts`.
+Card masks are for trading cards only and kept apart from the main flow (photo → layers → holo card): nothing in `src/segmenter/` or `web/site/` imports `src/cardmask/`, the page is a separate entry linked from the "Tools" menu in the home page header, and the server shares only the segmentation worker thread and the matting model (the model stays resident in memory and is not loaded twice), with jobs in the same queue. To remove card masks entirely, delete `src/cardmask/`, `web/masks/`, `web/masks.html`, `server/routes/cardmask.ts`, `server/pipeline/cardmask.ts` and `server/pipeline/textdet.ts`, then remove the route and the periodic cleanup in `server/index.ts`, `cardmaskInWorker` in `jobs.ts`, the `cardmask` message in the worker thread and the `masks` entry in `vite.config.ts`.
+
+[Line art](/en/lineart/) is a standalone tool page in the same way: the page is `web/lineart.html` with `web/lineart/` (styles reuse `web/masks/masks.css`), sharing `web/tools/page.ts` with the card mask page (element lookup, language switching, error translation, reading pixels, submit-and-poll); the server side is `server/routes/lineart.ts`, `server/pipeline/lineart.ts`, `server/pipeline/sketch.ts` and the `lineart` message in the worker thread, in the same queue as layering and sharing the matting model. Darkness, colour and subject-only are composed on a canvas in the browser; the server only produces the unadjusted greyscale line art and the subject mask.
 
 ### `web/lab`
 
@@ -159,12 +164,17 @@ The layering service is one Node process that serves the frontend's static files
 | `routes/account.ts` | `/auth/*` sign-in and sign-out; `/api/me/*` current account, claiming and API keys in the account panel |
 | `routes/v1.ts` | The public API `/v1` |
 | `routes/cardmask.ts` | Card masks `/api/cardmask`: upload, status, mask files |
+| `routes/lineart.ts` | Line art `/api/lineart`: upload, status, line art and subject mask |
+| `routes/image-upload.ts` | Image intake for the tool pages (card masks, line art): rate limit, queue cap, size and format checks, normalisation |
 | `pipeline/jobs.ts` | Layering jobs: accepting uploads (`acceptUpload`), the queue, dispatching to the worker thread, nudity detection, thumbnails, resuming on startup |
 | `pipeline/segment-worker.ts` | Long-lived worker thread running the layering pipeline |
+| `pipeline/effects.ts` | Effect detection: sends the image to the SAM3-Card service (`deploy/sam3/serve.py`), trying addresses in order, and returns a mask per kind of effect |
 | `pipeline/images.ts` | sharp image codecs: normalising originals (orientation, EXIF removal, HEIC decoding), converting layers to WebP, album thumbnails |
 | `pipeline/moderation.ts` | NudeNet nudity detection |
 | `pipeline/eta.ts` | Remaining-time estimate from exponentially averaged per-stage durations |
 | `pipeline/cardmask.ts` | Card mask jobs: normalise the card, find the layout (window or panel), have the worker thread matte the character and detect text, build and write the masks; results live in `.cardmasks/<id>/` and are deleted after 24 hours |
+| `pipeline/lineart.ts` | Line art jobs: scale the image and ask the GPU detection service first (`/lineart` of `serve.py`, returning line art and subject together); failing that, have the worker thread produce the line art first (the job is `done` then) and matte the subject after (`subject` is `pending` meanwhile); write the files; results live in `.lineart/<id>/` and are deleted after 24 hours |
+| `pipeline/sketch.ts` | Line art from Anime2Sketch (improved version, ONNX): scale keeping the aspect ratio, pad to a multiple of 256, crop back afterwards |
 | `pipeline/textdet.ts` | PP-OCRv4 text detection (onnxruntime-node), producing a text probability map only |
 | `render/preview.ts` | Captures share images by opening `/render/<id>` in headless Chromium, keeping the browser warm |
 | `render/previews.ts` | Share-image render queue and retries |
@@ -188,7 +198,7 @@ This documentation site. Chinese pages live in `docs-site/<section>/`, English i
 
 ### `deploy`
 
-Install scripts, systemd units and release scripts for production (`deploy/production/`) and staging (`deploy/staging/`). See [Self-hosting](/en/deploy/).
+Install scripts, systemd units and release scripts for production (`deploy/production/`) and staging (`deploy/staging/`); `deploy/sam3/` is the effect detection service (Python, see [Layering pipeline](/en/develop/pipeline#server-side-effect-detection-sam3-card)). See [Self-hosting](/en/deploy/).
 
 ## How frontend and server work together
 

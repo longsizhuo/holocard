@@ -3,7 +3,7 @@ import { defineConfig } from 'vite';
 
 const web = (path: string) => fileURLToPath(new URL(`web/${path}`, import.meta.url));
 
-// 页面都在 web/ 下（html 的位置就是线上地址：web/index.html 是 /，web/masks.html 是 /masks），
+// 页面都在 web/ 下（html 的位置就是线上地址：web/index.html 是 /，web/masks.html 是 /masks，web/lineart.html 是 /lineart），
 // 前后端共用的库在 src/，服务端在 server/。路径写成绝对的：脚本里换了工作目录调 build() 也对（见 scripts/og-preview.ts）
 export default defineConfig({
   root: web(''),
@@ -37,8 +37,8 @@ export default defineConfig({
     // 产物目录在 root 外面，vite 默认不清空，要明说
     emptyOutDir: true,
     rollupOptions: {
-      // 两个页面：首页（卡带、分享页、渲染页都是它）和卡面遮罩页（/masks，见 web/masks/main.ts）
-      input: { main: web('index.html'), masks: web('masks.html') },
+      // 三个页面：首页（卡带、分享页、渲染页都是它）、卡面遮罩页（/masks，见 web/masks/main.ts）、线稿提取页（/lineart，见 web/lineart/main.ts）
+      input: { main: web('index.html'), masks: web('masks.html'), lineart: web('lineart.html') },
     },
   },
 });

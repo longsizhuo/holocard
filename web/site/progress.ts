@@ -28,7 +28,8 @@ const PROGRESS_SPANS: Partial<Record<MessageKey, readonly [number, number, numbe
   'stage.estimating-depth': [0.2, 0.3, 5],
   'stage.analyzing': [0.3, 0.32, 1],
   'stage.finding-subject': [0.32, 0.86, 28],
-  'stage.extracting': [0.86, 0.93, 3],
+  'stage.extracting': [0.86, 0.91, 3],
+  'stage.finding-effects': [0.91, 0.93, 2],
   'stage.done': [0.93, 0.95, 1],
   'progress.fetching': [0.95, 0.99, 2],
 };

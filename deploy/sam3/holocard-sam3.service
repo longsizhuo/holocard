@@ -1,0 +1,21 @@
+# 特效识别的 CPU 兜底（deploy/sam3/serve.py，127.0.0.1:8796）：显卡机不通时分层服务来问这里。
+# 闲置 15 分钟卸掉模型（常驻约 6GB），下次再加载约一分钟。安装见 deploy/README.md「特效识别」
+[Unit]
+Description=HoloCard 特效识别（SAM3-Card，CPU 兜底）
+After=network.target
+
+[Service]
+User=ubuntu
+# sam3 的代码和 venv 是手装的（见 deploy/README.md），serve.py 从它的目录 import
+WorkingDirectory=/home/ubuntu/sam3
+ExecStart=/home/ubuntu/sam3venv/bin/python /opt/holocard/sam3/serve.py --base /srv/holocard-models/sam3/sam3.pt --ckpt /srv/holocard-models/sam3/sam3card-v11soup.pt --device cpu --port 8796 --idle 900
+# 卡在 8G、不许用交换：超了只杀它自己，不连累线上分层服务和同机别的服务
+MemoryMax=8G
+MemorySwapMax=0
+# 和分层服务抢 CPU 时让一让：它只是兜底，慢一点没关系
+Nice=10
+Restart=on-failure
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target

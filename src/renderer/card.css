@@ -145,6 +145,25 @@
   mask-repeat: no-repeat;
 }
 
+/*
+ * 光效（glow）的流动白光：每层都有这个元素，只有这一层用光效、亮部遮罩算好之后才显示。
+ * 不放在 .hc__shine 里面：箔面静止时 opacity 为 0，子元素会跟着一起看不见，白光要一直流。
+ * 配方在 foils.css
+ */
+.hc__flow {
+  position: absolute;
+  inset: 0;
+  display: none;
+  pointer-events: none;
+
+  -webkit-mask-image: var(--hc-flow-mask);
+  mask-image: var(--hc-flow-mask);
+  -webkit-mask-size: 100% 100%;
+  mask-size: 100% 100%;
+  -webkit-mask-repeat: no-repeat;
+  mask-repeat: no-repeat;
+}
+
 /* ---------- 整卡炫光与高光的高光保护 ---------- */
 
 /*

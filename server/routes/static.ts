@@ -31,6 +31,9 @@ function robotsTxt(): string {
     'Disallow: /models/',
     '',
     `Sitemap: ${PUBLIC_ORIGIN}/sitemap.xml`,
+    // 文档的 sitemap 由 VitePress 构建时生成（docs-site/.vitepress/config.ts），里面的地址写死官方站，
+    // 所以只有官方站登记它：自托管的站点登记了，搜索引擎拿到的也全是别家的地址
+    ...(PUBLIC_ORIGIN === 'https://holocard.longsizhuo.com' ? [`Sitemap: ${PUBLIC_ORIGIN}/docs/sitemap.xml`] : []),
     '',
   ].join('\n');
 }

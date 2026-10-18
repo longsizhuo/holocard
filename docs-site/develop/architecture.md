@@ -9,10 +9,13 @@ holocard/
 ├── web/                  页面（html 的位置就是线上地址）
 │   ├── index.html        首页（三种路由共用）
 │   ├── masks.html        卡面遮罩页 /masks
+│   ├── lineart.html      线稿提取页 /lineart
 │   ├── site/             站点前端（holocard.longsizhuo.com）
 │   ├── masks/            卡面遮罩页的脚本
+│   ├── lineart/          线稿提取页的脚本
+│   ├── tools/            两个工具页共用的脚本
 │   ├── lab/blind/        双盲对比页
-│   └── web/public/           静态资源（示例卡 samples/demo、图标、分享图）
+│   └── public/           静态资源（示例卡 samples/demo、图标、分享图）
 ├── src/                  库：页面和服务端都从这里引用，库不引用页面
 │   ├── api/              网页接口 /api 返回的结构（前后端共用的类型）
 │   ├── format/           .layers 格式：类型、读写与校验、作者配置
@@ -92,7 +95,7 @@ holocard/
 | 文件 | 职责 |
 |---|---|
 | `main.ts` | 页面入口：建卡带，把面板各部分接到当前这张卡上，语言切换，按三种路由加载首屏 |
-| `tuning.ts` | 页面上那一张 HoloCard 与调参面板（视差、炫光、各层箔面），主人调完后存回服务端；记着面板正对着哪张卡 |
+| `tuning.ts` | 页面上那一张 HoloCard 与调参面板（视差、炫光、特效动效、各层箔面），主人调完后存回服务端；记着面板正对着哪张卡 |
 | `actions.ts` | 对当前这张卡的操作：分享、删除、导出动图 |
 | `upload.ts` | 上传区：太大的图先在浏览器里缩小，交给服务端分层，没有服务端时回退到浏览器端流水线 |
 | `progress.ts` | 做卡时的进度条与剩余时间 |
@@ -137,7 +140,9 @@ holocard/
 
 页面是 `web/masks.html` 与 `web/masks/main.ts`：上传、轮询、按勾选区域合成预览用的两层 LayerSet 交给渲染器。评测见[本地开发](/develop/)中的 `cardmask-eval`。
 
-卡面遮罩只面向游戏卡，和主流程（照片 → 分层 → 闪卡）是分开的：`src/cardmask/` 不被 `src/segmenter/`、`web/site/` 引用，页面是独立的入口，首页不放链接；服务端只共用分层线程和抠图模型（抠图模型常驻内存，不另加载一份），任务排同一个队。要整体去掉卡面遮罩：删除 `src/cardmask/`、`web/masks/`、`web/masks.html`、`server/routes/cardmask.ts`、`server/pipeline/cardmask.ts`、`server/pipeline/textdet.ts`，再去掉 `server/index.ts` 里的路由与定时清理、`jobs.ts` 的 `cardmaskInWorker`、分层线程里的 `cardmask` 消息、`vite.config.ts` 里的 `masks` 入口。
+卡面遮罩只面向游戏卡，和主流程（照片 → 分层 → 闪卡）是分开的：`src/cardmask/` 不被 `src/segmenter/`、`web/site/` 引用，页面是独立的入口，首页页头的「工具」下拉里放一个链接；服务端只共用分层线程和抠图模型（抠图模型常驻内存，不另加载一份），任务排同一个队。要整体去掉卡面遮罩：删除 `src/cardmask/`、`web/masks/`、`web/masks.html`、`server/routes/cardmask.ts`、`server/pipeline/cardmask.ts`、`server/pipeline/textdet.ts`，再去掉 `server/index.ts` 里的路由与定时清理、`jobs.ts` 的 `cardmaskInWorker`、分层线程里的 `cardmask` 消息、`vite.config.ts` 里的 `masks` 入口。
+
+[线稿提取](/lineart/)是同样独立的工具页：页面 `web/lineart.html` 与 `web/lineart/`（样式沿用 `web/masks/masks.css`），和卡面遮罩页共用 `web/tools/page.ts`（取元素、语言切换、错误翻译、读像素、提交并轮询）；服务端是 `server/routes/lineart.ts`、`server/pipeline/lineart.ts`、`server/pipeline/sketch.ts` 和分层线程里的 `lineart` 消息，同样排分层的队、共用抠图模型。深浅、颜色、只要主体都在前端用画布合成，服务端只出未调整的灰度线稿和主体遮罩。
 
 ### `web/lab`
 
@@ -159,12 +164,17 @@ holocard/
 | `routes/account.ts` | `/auth/*` 登录与退出，`/api/me/*` 当前账号、认领与个人中心的 API key |
 | `routes/v1.ts` | 对外接口 `/v1` |
 | `routes/cardmask.ts` | 卡面遮罩 `/api/cardmask`：上传、状态、遮罩文件 |
+| `routes/lineart.ts` | 线稿提取 `/api/lineart`：上传、状态、线稿与主体遮罩 |
+| `routes/image-upload.ts` | 工具页（卡面遮罩、线稿提取）收图：限流、排队上限、大小与格式校验、规范化 |
 | `pipeline/jobs.ts` | 分层任务：收上传（`acceptUpload`）、队列、调度工作线程、裸露识别、缩略图、启动时续跑 |
 | `pipeline/segment-worker.ts` | 分层流水线的常驻工作线程 |
+| `pipeline/effects.ts` | 特效识别：把图发给 SAM3-Card 识别服务（`deploy/sam3/serve.py`），按地址顺序问，拿回每类特效的遮罩 |
 | `pipeline/images.ts` | sharp 图片编解码：原图规范化（摆正方向、去除 EXIF、HEIC 解码）、层图转 WebP、卡册缩略图 |
 | `pipeline/moderation.ts` | NudeNet 裸露识别 |
 | `pipeline/eta.ts` | 剩余时间估计：按阶段的耗时指数平均 |
 | `pipeline/cardmask.ts` | 卡面遮罩任务：规范化卡图、找版式（画框或内板）、交分层线程抠主角和找文字、拼遮罩写文件；结果在 `.cardmasks/<id>/`，24 小时后删除 |
+| `pipeline/lineart.ts` | 线稿提取任务：缩图，先问显卡机的识别服务（`serve.py` 的 `/lineart`，线稿和主体一次回来）；不通就交分层线程先出线稿（做完即 done）、再抠主体（期间 `subject` 为 `pending`），写文件；结果在 `.lineart/<id>/`，24 小时后删除 |
+| `pipeline/sketch.ts` | Anime2Sketch（improved 版，ONNX）出线稿：按比例缩放、补边到 256 的倍数，算完裁回 |
 | `pipeline/textdet.ts` | PP-OCRv4 文字检测（onnxruntime-node），只出文字概率图 |
 | `render/preview.ts` | 用无头 Chromium 打开 `/render/<id>` 截分享图，浏览器常驻复用 |
 | `render/previews.ts` | 分享图的渲染队列与失败重试 |
@@ -188,7 +198,7 @@ npm 包 `@holocard/player` 的发布目录：`package.json`、`README.md`、示�
 
 ### `deploy`
 
-线上（`deploy/production/`）与 staging（`deploy/staging/`）的安装脚本、systemd 单元与发版脚本。见[自托管部署](/deploy/)。
+线上（`deploy/production/`）与 staging（`deploy/staging/`）的安装脚本、systemd 单元与发版脚本；`deploy/sam3/` 是特效识别服务（Python，见[分层流水线](/develop/pipeline#服务端识别特效-sam3-card)）。见[自托管部署](/deploy/)。
 
 ## 前后端协作
 

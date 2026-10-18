@@ -884,6 +884,36 @@ select {
 }
 .head-btn:hover { border-color: rgba(123, 95, 208, 0.45); }
 
+/* 工具下拉：原生 details，菜单浮在按钮下方，不把页头撑高。按钮排在这一组最左边，菜单往右展开不会出屏 */
+.tools { position: relative; flex: none; }
+.tools > summary { list-style: none; }
+.tools > summary::-webkit-details-marker { display: none; }
+.tools > summary::after { content: ' ▾'; font-size: 0.8em; }
+.tools__menu {
+  position: absolute;
+  top: calc(100% + 6px);
+  left: 0;
+  z-index: 30;
+  display: grid;
+  min-width: 9em;
+  padding: 6px;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: var(--surface-solid);
+  box-shadow: 0 8px 20px -12px rgba(60, 50, 90, 0.5);
+}
+.tools__menu a {
+  padding: 8px 12px;
+  border-radius: 10px;
+  color: var(--fg);
+  font-size: 13px;
+  font-weight: 600;
+  text-decoration: none;
+  white-space: nowrap;
+}
+.tools__menu a:hover,
+.tools__menu a:focus-visible { background: rgba(123, 95, 208, 0.1); }
+
 /* ---------- 卡册、个人中心的窗口 ---------- */
 
 /*
