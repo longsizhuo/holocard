@@ -6,7 +6,7 @@
  *   2. cookie hc_lang       用户在页头手动切过一次就记住。用 cookie 而不是 localStorage，
  *                           服务端发页面时才读得到，页面一出来就是对的语言，不会先闪一下中文
  *   3. Accept-Language / navigator.languages
- *   4. 中文
+ *   4. 英文（DEFAULT_LANG）
  */
 
 import { en, ja, zh, type MessageKey, type Messages } from './messages';
@@ -16,6 +16,12 @@ export type Lang = 'zh' | 'en' | 'ja';
 export const LANGS: readonly Lang[] = ['zh', 'en', 'ja'];
 
 export const LANG_COOKIE = 'hc_lang';
+
+/**
+ * 以英文为主：浏览器语言三种都不沾边（还有不带 Accept-Language 的爬虫）时用它；
+ * 各种地址上也只有它不带 ?lang=，中文、日文带。index.html 的原文仍是中文，见 localizeHtml
+ */
+export const DEFAULT_LANG: Lang = 'en';
 
 const TABLES: Record<Lang, Messages> = { zh, en, ja };
 

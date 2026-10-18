@@ -2,7 +2,7 @@
 
 線画抽出はイラストを線画に変換します。白背景の線を透明背景の線にし、線の色の変更や被写体だけを残す設定をして PNG でダウンロードできます。
 
-入口：[holocard.longsizhuo.com/lineart](https://holocard.longsizhuo.com/lineart)。独立したツールで、トップページのヘッダーの「ツール」→「線画抽出」から開けます。
+入口：[holocard.longsizhuo.com/lineart](https://holocard.longsizhuo.com/lineart?lang=ja)。独立したツールで、トップページのヘッダーの「ツール」→「線画抽出」から開けます。
 
 ## 使い方
 

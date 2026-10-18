@@ -106,9 +106,9 @@ check(new URL(page.url()).pathname === `/c/${ID}`, '开包后地址栏换成卡�
 check((await page.locator('#owner').isVisible()) && (await page.locator('#export').isVisible()), '自己的卡：删除、导出都出来');
 await page.click('#share-btn');
 await page.waitForFunction(() => document.querySelector('#share-url')?.value.includes('/c/'), null, { timeout: 5000 }).catch(() => {});
-check((await page.inputValue('#share-url')).endsWith(`/c/${ID}`), '点分享，链接填好');
+check((await page.inputValue('#share-url')).endsWith(`/c/${ID}?lang=zh`), '点分享，链接填好，带上中文');
 await page.click('.lang [data-lang="en"]');
-check((await page.inputValue('#share-url')).endsWith(`/c/${ID}?lang=en`), '切英文后分享链接带上语言');
+check((await page.inputValue('#share-url')).endsWith(`/c/${ID}`), '切英文后分享链接不带语言（英文是默认）');
 await page.click('.lang [data-lang="zh"]');
 
 const before = requests.length;

@@ -11,6 +11,7 @@
  */
 
 import { chromium, type Browser, type Page } from 'playwright-core';
+import { DEFAULT_LANG } from '../../src/i18n/core';
 
 /** OG 图的标准尺寸，微信、Twitter、Telegram 都按这个比例裁 */
 export const PREVIEW_WIDTH = 1200;
@@ -144,7 +145,7 @@ export interface PreviewOptions {
    * 调分享图时用来看不同角度下箔面和炫光的样子。
    */
   pose?: { x: number; y: number };
-  /** 分享图右边那段字用哪种语言（zh / en / ja），不给就是中文 */
+  /** 分享图右边那段字用哪种语言（zh / en / ja），不给就是默认语言（英文） */
   lang?: string;
 }
 
@@ -170,10 +171,10 @@ export async function renderPreview(
       query: {
         ...(options.pose ? { pose: `${options.pose.x},${options.pose.y}` } : {}),
         /*
-         * 中文也要显式带上：不带的话渲染页按无头浏览器自己的语言选，
-         * 服务器上的 Chromium 是 en-US，中文分享图会被渲染成英文。
+         * 默认语言也要显式带上：不带的话渲染页按无头浏览器自己的语言选，
+         * 换一台机器、一个浏览器语言，分享图的语言就跟着变了。
          */
-        lang: options.lang ?? 'zh',
+        lang: options.lang ?? DEFAULT_LANG,
       },
     },
     async (page) => {

@@ -1,6 +1,6 @@
 import { stat, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
-import type { Lang } from '../../src/i18n/core';
+import { DEFAULT_LANG, LANGS, type Lang } from '../../src/i18n/core';
 import { OUT_DIR, PORT } from '../config';
 import { db } from '../store';
 import { renderPreview } from './preview';
@@ -77,7 +77,7 @@ function pumpPreviews(): void {
 }
 
 /*
- * 分享过、却没有分享图的卡补渲染一遍（中文那张；别的语言有人打开时再补）。
+ * 分享过、却一张分享图都没有的卡补渲染一遍（默认语言那张；别的语言有人打开时再补）。
  * 以前渲染失败就算了，上线头一天 32 张分享过的卡里有 23 张没图。
  * 排在队列里一张张来，不耽误启动；要等服务开始监听之后再调——渲染页是从本服务取的。
  */
@@ -85,9 +85,21 @@ export async function backfillPreviews(): Promise<void> {
   let missing = 0;
   for (const card of db.byStatus('done')) {
     if (!card.shared) continue;
-    if (await stat(join(OUT_DIR, card.id, previewFile('zh'))).catch(() => null)) continue;
-    queuePreview(card.id, 'zh');
+    if (await anyPreview(card.id)) continue;
+    queuePreview(card.id, DEFAULT_LANG);
     missing++;
   }
   if (missing > 0) console.log(`[preview] ${missing} 张分享过的卡缺分享图，排队补渲染`);
+}
+
+/**
+ * 这张卡已有的分享图里挑一张：先默认语言，再按 LANGS 的顺序。没有返回 null。
+ * 某个语言的还没渲染出来时拿它顶上，有图总比没图强
+ */
+export async function anyPreview(id: string): Promise<{ lang: Lang; mtimeMs: number } | null> {
+  for (const lang of new Set([DEFAULT_LANG, ...LANGS])) {
+    const info = await stat(join(OUT_DIR, id, previewFile(lang))).catch(() => null);
+    if (info) return { lang, mtimeMs: info.mtimeMs };
+  }
+  return null;
 }

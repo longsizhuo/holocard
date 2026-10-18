@@ -8,7 +8,7 @@
  *     放在产物目录的 .cardmasks/<id>/ 下
  *   - 特效遮罩的来源：自己起一个假的识别服务（接口同 deploy/sam3/serve.py），它说不在时按规则出（effectsSource 为 rules）；
  *     回「没有特效」时仍算模型的结果；回左右两半两类、尺寸不同的遮罩时并起来，两半都成了特效，文字不被特效占掉
- *   - 页面：/masks 发 masks.html，?lang=en 时标题是英文；浏览器里上传一张图 → 出预览卡片、六张遮罩和分区总览，
+ *   - 页面：/masks 发 masks.html，不带 ?lang= 且浏览器语言三种都不沾边时是英文，?lang=zh 时是中文；浏览器里上传一张图 → 出预览卡片、六张遮罩和分区总览，
  *     勾选「主角」后预览重新渲染，全程没有页面报错
  *
  * 用法（要 Node 22）：先 pnpm build && pnpm build:server，再
@@ -161,10 +161,10 @@ assert.ok(both.left - empty.left > half * 0.2 && both.right - empty.right > half
 assert.equal(both.text, empty.text, '文字不被特效占掉');
 
 // ---------- 页面 ----------
-const page404 = await fetch(`${BASE}/masks`);
+const page404 = await fetch(`${BASE}/masks`, { headers: { 'accept-language': 'fr-FR' } });
 assert.equal(page404.status, 200, '/masks 发 masks.html');
-assert.match(await page404.text(), /<title data-i18n="masks.title">卡面遮罩/);
-assert.match(await (await fetch(`${BASE}/masks?lang=en`)).text(), /<title data-i18n="masks.title">Card masks/);
+assert.match(await page404.text(), /<html lang="en"[\s\S]*<title data-i18n="masks.title">Card masks/, '浏览器语言都不沾边时是英文');
+assert.match(await (await fetch(`${BASE}/masks?lang=zh`)).text(), /<title data-i18n="masks.title">卡面遮罩/);
 
 const channel = process.env.HOLOCARD_BROWSER_CHANNEL ?? '';
 const browser = await chromium.launch({ ...(channel ? { channel } : {}), args: ['--no-sandbox'] });

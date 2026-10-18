@@ -1,40 +1,40 @@
 # HoloCard
 
-中文 | [English](README.en.md)
+English | [中文](README.zh-CN.md)
 
 [![npm @holocard/player](https://img.shields.io/npm/v/@holocard/player?label=npm%20%40holocard%2Fplayer)](https://www.npmjs.com/package/@holocard/player)
 
-[![HoloCard](web/public/og.jpg)](https://holocard.longsizhuo.com)
+[![HoloCard](web/public/og-en.jpg)](https://holocard.longsizhuo.com)
 
-HoloCard 将照片自动分层，渲染为可交互的全息卡片：服务端估计照片深度并切分为前、中、后景若干层，每层配置独立的箔面，卡片随指针或设备倾斜转动。线上地址：https://holocard.longsizhuo.com
+HoloCard splits a photo into layers automatically and renders it as an interactive holographic card: the server estimates depth, separates the image into foreground, middle and background layers, assigns each layer its own foil, and the card turns with the pointer or device tilt. Live site: https://holocard.longsizhuo.com
 
-箔面效果与交互手感移植自 [pokemon-cards-css](https://github.com/simeydotme/pokemon-cards-css)（Simon Goellner，GPL-3.0）。该项目的每张卡片需要手工绘制箔面遮罩，HoloCard 使用分层算法自动生成遮罩，使任意照片都可以制作成卡片。
+The foil effects and interaction are ported from [pokemon-cards-css](https://github.com/simeydotme/pokemon-cards-css) (Simon Goellner, GPL-3.0). That project requires a hand-drawn foil mask for every card; HoloCard generates the masks with a layering algorithm, so any photo can become a card.
 
-## 文档
+## Documentation
 
-完整文档发布在 https://holocard.longsizhuo.com/docs/ ，源文件位于 [`docs-site/`](docs-site/)。
+The full documentation is published at https://holocard.longsizhuo.com/docs/en/ ; the sources are in [`docs-site/`](docs-site/).
 
-| 主题 | 链接 |
+| Topic | Link |
 |---|---|
-| 介绍与使用 | [/docs/](https://holocard.longsizhuo.com/docs/) |
-| API | [/docs/api/](https://holocard.longsizhuo.com/docs/api/) |
-| 播放器 `@holocard/player` | [/docs/player/](https://holocard.longsizhuo.com/docs/player/) |
-| 文件格式 `.layers` | [/docs/format/](https://holocard.longsizhuo.com/docs/format/) |
-| 本地开发与验证脚本 | [/docs/develop/](https://holocard.longsizhuo.com/docs/develop/) |
-| 架构、分层流水线、渲染器 | [/docs/develop/architecture](https://holocard.longsizhuo.com/docs/develop/architecture) |
-| 自托管部署 | [/docs/deploy/](https://holocard.longsizhuo.com/docs/deploy/) |
+| Guide | [/docs/en/](https://holocard.longsizhuo.com/docs/en/) |
+| API | [/docs/en/api/](https://holocard.longsizhuo.com/docs/en/api/) |
+| Player `@holocard/player` | [/docs/en/player/](https://holocard.longsizhuo.com/docs/en/player/) |
+| File format `.layers` | [/docs/en/format/](https://holocard.longsizhuo.com/docs/en/format/) |
+| Local development and verification scripts | [/docs/en/develop/](https://holocard.longsizhuo.com/docs/en/develop/) |
+| Architecture, layering pipeline, renderer | [/docs/en/develop/architecture](https://holocard.longsizhuo.com/docs/en/develop/architecture) |
+| Self-hosting | [/docs/en/deploy/](https://holocard.longsizhuo.com/docs/en/deploy/) |
 
-本站自身的运维手册（服务器、staging、发版）见 [`deploy/README.md`](deploy/README.md)。
+The operations runbook for the hosted site (servers, staging, releases) is in [`deploy/README.md`](deploy/README.md) (Chinese).
 
-## 快速开始
+## Quick start
 
 ```bash
 corepack enable && pnpm install
-pnpm dev            # 前端：http://localhost:5273
-pnpm dev:server     # 分层服务：http://localhost:8791（需要模型权重，见本地开发文档）
-pnpm docs:dev       # 文档站
+pnpm dev            # front end: http://localhost:5273
+pnpm dev:server     # layering service: http://localhost:8791 (needs model weights; see Local development)
+pnpm docs:dev       # documentation site
 ```
 
-## 许可
+## License
 
-GPL-3.0-only，见 [LICENSE](LICENSE)。
+GPL-3.0-only; see [LICENSE](LICENSE).

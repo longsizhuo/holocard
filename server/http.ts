@@ -5,7 +5,7 @@
 import type { ApiErrorBody } from '../src/api';
 import { timingSafeEqual } from 'node:crypto';
 import type { IncomingMessage, ServerResponse } from 'node:http';
-import { isLang, langFromAcceptLanguage, langFromCookie, type Lang } from '../src/i18n/core';
+import { DEFAULT_LANG, isLang, langFromAcceptLanguage, langFromCookie, type Lang } from '../src/i18n/core';
 
 /**
  * 限流按什么记。IPv6 按 /64 记：一个用户手上通常是一整段 /64，逐个地址记的话每个请求换个地址就绕过去了。
@@ -106,8 +106,8 @@ export function fail(
 
 /**
  * 这次请求用哪种语言：地址上的 ?lang= → 接口请求头 x-holocard-lang（前端已经定好的语言）
- * → cookie → Accept-Language → 中文。和前端 src/i18n 的规则一致，
- * 页面一出来就是对的语言，不会先闪一下中文再变。
+ * → cookie → Accept-Language → 英文。和前端 src/i18n 的规则一致，
+ * 页面一出来就是对的语言，不会先闪一下别的语言再变。
  */
 export function requestLang(req: IncomingMessage, url: URL): Lang {
   const fromUrl = url.searchParams.get('lang');
@@ -115,7 +115,7 @@ export function requestLang(req: IncomingMessage, url: URL): Lang {
   const fromHeader = req.headers['x-holocard-lang'];
   if (isLang(fromHeader)) return fromHeader;
   return (
-    langFromCookie(req.headers.cookie) ?? langFromAcceptLanguage(req.headers['accept-language']) ?? 'zh'
+    langFromCookie(req.headers.cookie) ?? langFromAcceptLanguage(req.headers['accept-language']) ?? DEFAULT_LANG
   );
 }
 
