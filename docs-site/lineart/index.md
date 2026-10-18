@@ -2,7 +2,7 @@
 
 线稿提取把一张插画转成线稿：白底上的线条变成透明底，可以换线条颜色、只保留主体，下载为 PNG。
 
-入口：[holocard.longsizhuo.com/lineart](https://holocard.longsizhuo.com/lineart)。这是独立工具，从首页页头「工具」里的「线稿提取」进入。
+入口：[holocard.longsizhuo.com/lineart](https://holocard.longsizhuo.com/lineart?lang=zh)。这是独立工具，从首页页头「工具」里的「线稿提取」进入。
 
 ## 使用
 

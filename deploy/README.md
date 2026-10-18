@@ -260,9 +260,9 @@ ssh oracle 'cd /opt/holocard && node22/bin/node db.mjs perf 30'   # 最近 30 �
 | | 做法 |
 |---|---|
 | `robots.txt` | 服务端按 `PUBLIC_ORIGIN` 现生成。允许所有爬虫（包括 AI 的），只挡 `/render/`（截分享图的内部页）、`/api/jobs`、`/api/cards` 和 `/models/`（27MB 的权重） |
-| `sitemap.xml` | 同上，首页的中、英、日三个版本，每条都用 `xhtml:link` 列出全部语言版本；`lastmod` 取 index.html 的修改时间。官方站的 robots.txt 里还登记了文档的 `/docs/sitemap.xml`，VitePress 构建时生成，同一页的各语言版本同样互相标注；里面的地址写死官方站，所以自托管和 staging 不登记它 |
+| `sitemap.xml` | 同上，首页、卡面遮罩 `/masks`、线稿提取 `/lineart` 各自的中、英、日三个版本，每条都用 `xhtml:link` 列出全部语言版本，`x-default` 是不带参数的地址（三种语言都不沾边时发英文）；`lastmod` 取对应 html 的修改时间。官方站的 robots.txt 里还登记了文档的 `/docs/sitemap.xml`，VitePress 构建时生成，同一页的各语言版本同样互相标注，`x-default` 指向英文版；里面的地址写死官方站，所以自托管和 staging 不登记它 |
 | `llms.txt` | 给 AI 读的说明，静态文件 `public/llms.txt`，中英日三段，内容摘自 README |
-| 首页 | 每种语言一个规范地址（`/`、`/?lang=en`、`/?lang=ja`）+ hreflang（`x-default` 指向不带参数、按浏览器语言自动选的 `/`）+ JSON-LD（`WebApplication` + `SoftwareSourceCode`）。结构化数据里的描述直接读页面的 meta description，不另写一份 |
+| 首页 | 每种语言一个规范地址（英文 `/`、中文 `/?lang=zh`、日文 `/?lang=ja`）+ hreflang（`x-default` 指向不带参数、按浏览器语言自动选的 `/`）+ JSON-LD（`WebApplication` + `SoftwareSourceCode`）。结构化数据里的描述直接读页面的 meta description，不另写一份 |
 | 卡片页 `/c/<id>` | `noindex, nofollow`，不进 sitemap |
 | 层文件 `/api/layers/` | 响应头 `x-robots-tag: noindex`。**不在 robots.txt 里挡**：分享图就在这下面，Twitter 的爬虫遵守 robots.txt，挡了分享卡片就没图 |
 | 不存在的路径 | 返回 404（页面照旧显示首页，人看不出区别）。以前一律 200，搜索引擎会把 `/abc` 这类当成首页的重复页 |
@@ -281,13 +281,14 @@ ssh oracle 'cd /opt/holocard && node22/bin/node db.mjs perf 30'   # 最近 30 �
 少翻一个键类型检查就过不去。前端和服务端共用这一份。
 
 这次请求用哪种语言，先到先得：地址上的 `?lang=` → 接口请求头 `x-holocard-lang` → cookie `hc_lang`
-（页头手动切过一次就记住）→ `Accept-Language` → 中文。
+（页头手动切过一次就记住）→ `Accept-Language` → 英文。以英文为主：没有语言偏好的访客和爬虫看到英文，
+地址上也只有英文不带 `?lang=`（`DEFAULT_LANG`，在 `src/i18n/core.ts`）。
 
 - **页面**：服务端发 index.html 时按语言把标了 `data-i18n` 的静态文字、标题、描述都换好（`localizeHtml`），
-  页面一出来就是对的语言，不会先闪一下中文。HTML 响应带 `Vary: Accept-Language, Cookie`。
+  页面一出来就是对的语言，不会先闪一下别的语言。HTML 响应带 `Vary: Accept-Language, Cookie`。
   页头切换语言是就地换，不刷新页面——刷新会丢掉面板上还没保存的调参
 - **接口报错**：返回 `code`（`rate_limited`、`card_not_found`…）和参数，前端按当前语言翻译；`error` 字段仍是中文原文
-- **分享链接**：带分享人的语言（`/c/<id>?lang=en`，中文不带），对方看到的预览标题、描述、分享图和打开后的界面都是这个语言
+- **分享链接**：带分享人的语言（`/c/<id>?lang=zh`，英文不带），对方看到的预览标题、描述、分享图和打开后的界面都是这个语言
 - **做完卡自动分享**：服务端分层一完成，前端就用 `history.replaceState` 把地址栏换成这张卡的分享链接（不刷新页面），
   同时在后台调一次分享接口，分享框直接显示链接。原来要点「生成分享链接」，只有 28% 的人点；现在手机用户
   用浏览器菜单分享、复制地址栏，发出去的都是这张卡而不是首页，刷新也不会丢卡。

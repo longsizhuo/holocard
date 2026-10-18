@@ -2,7 +2,7 @@
 
 卡面遮罩把一张已经做好的平面卡图拆成几张箔面遮罩，用于 [pokemon-cards-css](https://github.com/simeydotme/pokemon-cards-css) 等以遮罩控制箔面范围的渲染方式。与 HoloCard 的主功能不同，输入是带边框与文字的成品卡，而不是照片；输出是遮罩图，不做视差分层。
 
-入口：[holocard.longsizhuo.com/masks](https://holocard.longsizhuo.com/masks)。这是面向游戏卡的独立工具，从首页页头「工具」里的「卡面遮罩」进入。
+入口：[holocard.longsizhuo.com/masks](https://holocard.longsizhuo.com/masks?lang=zh)。这是面向游戏卡的独立工具，从首页页头「工具」里的「卡面遮罩」进入。
 
 ## 使用
 

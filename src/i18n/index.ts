@@ -7,6 +7,7 @@
  */
 
 import {
+  DEFAULT_LANG,
   FOOT_LINKS,
   LANG_COOKIE,
   LANG_TAG,
@@ -31,7 +32,7 @@ function detect(): Lang {
     const lang = langFromTag(tag);
     if (lang) return lang;
   }
-  return 'zh';
+  return DEFAULT_LANG;
 }
 
 let current: Lang = detect();
@@ -76,14 +77,14 @@ export function applyTranslations(root: ParentNode = document): void {
 /**
  * 用户在页头切换语言。
  * 记进 cookie（服务端下次发页面时就用它），地址栏的 ?lang 也跟着改——
- * 分享链接、收藏夹里存下来的都是当前语言。中文是默认，不带参数。
+ * 分享链接、收藏夹里存下来的都是当前语言。英文是默认，不带参数。
  */
 export function setLang(next: Lang): void {
   if (next === current) return;
   current = next;
   document.cookie = `${LANG_COOKIE}=${next}; path=/; max-age=31536000; samesite=lax`;
   const url = new URL(location.href);
-  if (next === 'zh') url.searchParams.delete('lang');
+  if (next === DEFAULT_LANG) url.searchParams.delete('lang');
   else url.searchParams.set('lang', next);
   history.replaceState(history.state, '', url);
   applyTranslations();
