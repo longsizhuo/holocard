@@ -118,8 +118,11 @@ curl -O https://holocard.longsizhuo.com/v1/masks/9b2e…/files/character.png -H 
 | `window` | イラスト枠の位置 `{x, y, w, h}`（幅・高さで 0〜1 に正規化）。フルアートのカードでは `null` |
 | `panel` | フルアートのカードの内側パネル。形式は `window` と同じ。イラスト枠のあるカードでは `null` |
 | `lines` | 各行のテキストの位置と役割（`name`、`hp`、`body`、`footer`、`art`） |
+| `effectsSource` | エフェクトのマスクの出どころ。`model` は検出モデル、`rules` は検出サービスが使えず規則で求めたもの |
 | `files` | ファイル名からダウンロード URL への対応。完了時のみ |
 | `error.code` | 失敗時は `processing_failed` |
+
+サーバーが再起動すると処理中のジョブは失われ、その後の問い合わせは `404 masks_not_found` を返します。もう一度送信してください。
 
 ### `GET /v1/masks/{id}/files/{name}.png` マスクのダウンロード
 
@@ -130,7 +133,7 @@ curl -O https://holocard.longsizhuo.com/v1/masks/9b2e…/files/character.png -H 
 | `frame.png` | フレーム |
 | `text.png` | テキスト |
 | `character.png` | メインキャラクター |
-| `effects.png` | エフェクト（現在はルールベースで、対応範囲は限定的） |
+| `effects.png` | エフェクト：イラスト中の光の帯・光輪・魔法陣・炎・稲妻・きらめきと、キャラクターの輪郭の内側の帯 |
 | `background.png` | 背景 |
 | `labels.png` | 領域の一覧。各ピクセルを所属する領域の色で塗ったもの |
 

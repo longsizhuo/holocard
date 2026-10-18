@@ -118,8 +118,11 @@ The request body is the same as for `POST /v1/cards`. Card images whose long sid
 | `window` | Art window position `{x, y, w, h}`, normalized to 0–1 by width and height; `null` for full-art cards |
 | `panel` | Inner panel of a full-art card, same format as `window`; `null` for cards with an art window |
 | `lines` | Position and role of each text line (`name`, `hp`, `body`, `footer`, `art`) |
+| `effectsSource` | Where the effects mask came from: `model` for the detection model, `rules` when the detection service was unavailable and rules were used |
 | `files` | Map from file name to download URL; returned only when done |
 | `error.code` | `processing_failed` on failure |
+
+Unfinished jobs are lost when the server restarts; polling then returns `404 masks_not_found`. Submit the image again.
 
 ### `GET /v1/masks/{id}/files/{name}.png` Download a mask
 
@@ -130,7 +133,7 @@ The request body is the same as for `POST /v1/cards`. Card images whose long sid
 | `frame.png` | Frame |
 | `text.png` | Text |
 | `character.png` | Main character |
-| `effects.png` | Effects (currently rule-based, with limited coverage) |
+| `effects.png` | Effects: light trails, halos, magic circles, fire, lightning and sparkles in the artwork, plus a band just inside the character's outline |
 | `background.png` | Background |
 | `labels.png` | Region overview, each pixel colored by its region |
 

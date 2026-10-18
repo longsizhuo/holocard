@@ -8,7 +8,7 @@ import type { IncomingMessage, ServerResponse } from 'node:http';
 import { MAX_UPLOAD, RATE_LIMIT, RATE_WINDOW_MS } from '../config';
 import { clientIp, fail, readBody } from '../http';
 import { ImageError, normalizeOriginal } from '../pipeline/images';
-import { sniffImage } from '../pipeline/jobs';
+import { diskFull, sniffImage } from '../pipeline/jobs';
 
 export async function acceptImage(
   req: IncomingMessage,
@@ -34,8 +34,9 @@ export function tooFrequent(req: IncomingMessage, res: ServerResponse, limited: 
   return true;
 }
 
-/** 读请求体，查大小和格式 */
+/** 读请求体，查大小和格式。盘快满了就不收（遮罩、线稿也写在产物目录里） */
 export async function readImage(req: IncomingMessage, res: ServerResponse): Promise<Buffer | null> {
+  if (await diskFull(res)) return null;
   const limitMb = Math.round(MAX_UPLOAD / 1024 / 1024);
   let bytes: Buffer;
   try {

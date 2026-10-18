@@ -457,10 +457,12 @@ function pump(): void {
   }
 }
 
-/** 产物目录所在的盘还剩多少字节。查不了就是 null，不因为这个拒收 */
-async function freeBytes(dir: string): Promise<number | null> {
-  const info = await statfs(dir).catch(() => null);
-  return info ? info.bavail * info.bsize : null;
+/** 产物目录所在的盘快满了就回 507，返回 true。查不了盘就当没满，不因为这个拒收。工具页收图也用（routes/image-upload.ts） */
+export async function diskFull(res: ServerResponse): Promise<boolean> {
+  const info = await statfs(OUT_DIR).catch(() => null);
+  if (!info || info.bavail * info.bsize >= MIN_FREE_BYTES) return false;
+  fail(res, 507, 'disk_full', '服务器空间不足，稍后再试');
+  return true;
 }
 
 /**
@@ -480,11 +482,7 @@ export async function acceptUpload(
   userId: string | null = null,
 ): Promise<CardRow | null> {
   // 盘快满了就先拒：放在读请求体之前，不白收一张图、白做一遍规范化
-  const free = await freeBytes(OUT_DIR);
-  if (free !== null && free < MIN_FREE_BYTES) {
-    fail(res, 507, 'disk_full', '服务器空间不足，稍后再试');
-    return null;
-  }
+  if (await diskFull(res)) return null;
 
   const limitMb = Math.round(MAX_UPLOAD / 1024 / 1024);
   const tooLarge = (): null => {

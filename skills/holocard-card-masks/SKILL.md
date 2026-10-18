@@ -34,7 +34,7 @@ Calls `https://holocard.longsizhuo.com/v1/masks`. Full reference: https://holoca
    | `frame.png` | Frame |
    | `text.png` | Text |
    | `character.png` | Main character |
-   | `effects.png` | Effects (rule-based for now, limited coverage) |
+   | `effects.png` | Effects: light trails, halos, magic circles, fire, lightning and sparkles in the artwork |
    | `background.png` | Background |
    | `labels.png` | Color-coded overview of all regions |
    | `card.png` | The card, scaled so its long side is at most 1400 px |
@@ -48,7 +48,7 @@ Calls `https://holocard.longsizhuo.com/v1/masks`. Full reference: https://holoca
 | Status | Meaning | What to do |
 |---|---|---|
 | 401 | Missing, invalid or revoked key | Ask the user for a valid key |
-| 404 | Masks expired or belong to another key | Submit again |
+| 404 | Masks expired, belong to another key, or were lost in a server restart while processing | Submit again |
 | 413 / 415 | Image too large / unsupported format | Convert or downscale, then submit again |
 | 429 | Too many submissions in 10 minutes | Wait a few minutes, then retry |
 | 503 | Mask queue full or server busy | Retry after a minute |

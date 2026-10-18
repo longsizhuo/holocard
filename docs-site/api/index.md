@@ -118,8 +118,11 @@ curl -O https://holocard.longsizhuo.com/v1/masks/9b2e…/files/character.png -H 
 | `window` | 画框位置 `{x, y, w, h}`，按宽高归一化到 0–1；全图卡为 `null` |
 | `panel` | 全图卡的内板位置，格式同 `window`；有画框的卡为 `null` |
 | `lines` | 每行文字的位置和角色（`name`、`hp`、`body`、`footer`、`art`） |
+| `effectsSource` | 特效遮罩的来源：`model` 为识别模型得出，`rules` 为识别服务不可用、按规则得出 |
 | `files` | 文件名到下载地址的映射，仅在已完成时返回 |
 | `error.code` | 失败时为 `processing_failed` |
+
+服务重启时，未完成的任务会丢失，之后查询返回 `404 masks_not_found`，重新提交即可。
 
 ### `GET /v1/masks/{id}/files/{name}.png` 下载遮罩
 
@@ -130,7 +133,7 @@ curl -O https://holocard.longsizhuo.com/v1/masks/9b2e…/files/character.png -H 
 | `frame.png` | 框架 |
 | `text.png` | 文字 |
 | `character.png` | 主角 |
-| `effects.png` | 特效（目前按规则识别，覆盖面有限） |
+| `effects.png` | 特效：画中的光带、光晕、魔法阵、火焰、闪电、闪光点，以及主角轮廓内侧一圈 |
 | `background.png` | 背景 |
 | `labels.png` | 分区总览，每个像素按所属区域上色 |
 
