@@ -9,7 +9,7 @@ import { DEFAULT_LANG, LANGS, LANG_TAG, localizeHtml, translate, type Lang } fro
 import { OUT_DIR, PUBLIC_ORIGIN, WEB_DIR } from '../config';
 import { escapeAttr, json } from '../http';
 import { PREVIEW_HEIGHT, PREVIEW_WIDTH } from '../render/preview';
-import { previewFile, queuePreview } from '../render/previews';
+import { anyPreview, previewFile, queuePreview } from '../render/previews';
 import { db } from '../store';
 import { recordHit } from '../store/cards';
 
@@ -156,7 +156,7 @@ function socialTags(o: {
  * 直接决定别人点不点。标签里的 URL 必须是绝对地址。
  *
  * 标题、描述按分享链接上的语言出（分享人的语言）。分享图优先用同一语言的那张；
- * 那张还没渲染出来时先用中文那张顶上——有图总比没图强，卡片本身才是主角。
+ * 那张还没渲染出来时先用别的语言那张顶上（默认语言优先，见 anyPreview）——有图总比没图强，卡片本身才是主角。
  * 图的地址带文件 mtime 当版本号：预览图在 CDN 上按 immutable 缓存，
  * 重新出图之后不换 URL 的话抓取方和边缘都还拿着旧图。
  */
@@ -359,9 +359,9 @@ export async function serveStatic(
     const id = cardPath[1];
     const dir = join(OUT_DIR, id);
     const own = await fileVersion(join(dir, previewFile(lang)));
-    const fallback = own === null && lang !== 'zh' ? await fileVersion(join(dir, previewFile('zh'))) : null;
+    const other = own === null ? await anyPreview(id) : null;
     const preview =
-      own !== null ? { lang, version: own } : fallback !== null ? { lang: 'zh' as Lang, version: fallback } : null;
+      own !== null ? { lang, version: own } : other ? { lang: other.lang, version: Math.floor(other.mtimeMs) } : null;
     body = Buffer.from(injectShareMeta(body.toString('utf8'), id, lang, preview), 'utf8');
 
     // 这个语言的分享图还没有（渲染失败过、或者是新语言），趁有人打开时补一张

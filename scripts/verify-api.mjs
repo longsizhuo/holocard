@@ -13,6 +13,7 @@
  *   - 分享：只有拿着删除口令的人能分享
  *   - 卡面遮罩（/v1/masks）：只有提交它的 key 能看，网页路由上当作不存在，文件不让缓存，带特效的来源；并发提交越不过上限，慢慢传的上传不占位，接口排满时网页照样能交。服务端没装遮罩模型时跳过这段
  *   - 健壮：畸形请求行回 400 而不是把进程打崩；超过 16MB 回 413；路径和方法不对回 404 / 405
+ *   - sitemap：首页、/masks、/lineart 各三个语言版本，英文不带 ?lang=，x-default 是不带参数的地址
  *
  * 用法：
  *   HOLOCARD_DB=<服务端的库> HOLOCARD_OUT_DIR=<服务端的产物目录> node scripts/verify-api.mjs http://127.0.0.1:<端口>
@@ -87,6 +88,19 @@ assert.equal((await call('/v1/cards', { key: a.key })).headers.get('allow'), 'PO
 assert.equal((await (await call('/v1/nope', { key: a.key })).json()).code, 'not_found');
 const huge = await call('/v1/cards', { key: a.key, method: 'POST', body: Buffer.alloc(17 * 1024 * 1024), headers: { 'content-type': 'image/jpeg' } });
 assert.equal(huge.status, 413, `超过 16MB 应当 413，实际 ${huge.status}`);
+
+// ---------- sitemap ----------
+const sitemap = await (await call('/sitemap.xml')).text();
+const locs = [...sitemap.matchAll(/<loc>([^<]*)<\/loc>/g)].map(([, href]) => {
+  const url = new URL(href ?? '');
+  return url.pathname + url.search;
+});
+assert.deepEqual(
+  locs.sort(),
+  ['/', '/?lang=ja', '/?lang=zh', '/lineart', '/lineart?lang=ja', '/lineart?lang=zh', '/masks', '/masks?lang=ja', '/masks?lang=zh'],
+  `sitemap 的页面不对：${locs}`,
+);
+assert.equal(sitemap.match(/hreflang="x-default" href="[^"]*\/masks"/g)?.length, 3, 'x-default 是不带参数的地址');
 
 // ---------- 鉴权 ----------
 const anonymous = await submit(undefined);
