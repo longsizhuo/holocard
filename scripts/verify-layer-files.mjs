@@ -1,16 +1,21 @@
 /**
- * 端到端验证分层 PSD 导出（server/render/psd.ts、POST /api/cards/<id>/export/psd）
+ * 端到端验证分层文件导出：分层 PSD（server/render/psd.ts）和 3D 模型 GLB（server/render/glb.ts），
+ * 接口 POST /api/cards/<id>/export/<psd|glb>
  *
- * 用临时目录起一个服务端，特效识别换成假的（同 verify-effects：合成图回魔法阵和火焰两类），做一张卡，导出 PSD，
- * 用这里自带的小解析器读回来，核对：
+ * 用临时目录起一个服务端，特效识别换成假的（同 verify-effects：合成图回魔法阵和火焰两类），做一张卡，导出 PSD 和 GLB，
+ * 用这里自带的小解析器读回来。PSD 核对：
  *   - 文件头：RGB 8 位，画布和层图一样大；下载头是 .psd 附件
  *   - 图层：最底下是隐藏的原图，往上按 manifest 的顺序一层一个，名字写着远近或特效类型和箔面
  *   - 像素：每层四个通道解压后和层图逐像素相同，裁掉的部分全透明
  *   - 合成图：和各层叠起来一致
- *   - 页面：卡片页面板上点「下载分层 PSD」，浏览器拿到 .psd 下载，页面不报错
+ * GLB 核对：
+ *   - 文件头、JSON 块、二进制块，下载头是 .glb 附件
+ *   - 每层一个节点，挂在同一个父节点下，名字和 PSD 的图层名相同，extras 带箔面、深度、视差、特效类型
+ *   - 平面按视差前后排（视差大的更近），贴图解出来和层图裁出的那块逐像素相同，材质不受光照、半透明
+ *   - 页面：卡片页面板上点「下载分层 PSD」「下载 3D 模型（GLB）」，浏览器各拿到一个下载，页面不报错
  *
  * 用法（要 Node 22）：先 pnpm build && pnpm build:server，再
- *   HOLOCARD_MODEL_DIR=/srv/holocard-models node scripts/verify-psd.mjs
+ *   HOLOCARD_MODEL_DIR=/srv/holocard-models node scripts/verify-layer-files.mjs
  * 模型目录里要有深度和抠图权重
  */
 
@@ -99,16 +104,21 @@ for (let i = 0; ; i++) {
 const manifest = await (await fetch(`${BASE}/api/layers/${job.id}/manifest.json`)).json();
 assert.ok(manifest.layers.some((l) => l.role === 'effects'), '合成图应当有特效层');
 
-let status;
-for (let i = 0; ; i++) {
-  status = await (await fetch(`${BASE}/api/cards/${job.id}/export/psd`, { method: i ? 'GET' : 'POST' })).json();
-  if (status.state === 'done' || status.state === 'error' || i > 60) break;
-  await sleep(1000);
+/** 提交导出、等到生成好，返回文件和下载响应 */
+async function exportFile(format) {
+  let status;
+  for (let i = 0; ; i++) {
+    status = await (await fetch(`${BASE}/api/cards/${job.id}/export/${format}`, { method: i ? 'GET' : 'POST' })).json();
+    if (status.state === 'done' || status.state === 'error' || i > 60) break;
+    await sleep(1000);
+  }
+  assert.equal(status.state, 'done', `${format} 导出应当完成：${JSON.stringify(status)}\n${log.slice(-2000)}`);
+  const [file] = status.files;
+  return { file, res: await fetch(new URL(file.url, BASE)) };
 }
-assert.equal(status.state, 'done', `导出应当完成：${JSON.stringify(status)}\n${log.slice(-2000)}`);
-const [file] = status.files;
+
+const { file, res } = await exportFile('psd');
 assert.match(file.name, /^HoloCard_\w{8}\.psd$/);
-const res = await fetch(new URL(file.url, BASE));
 assert.equal(res.headers.get('content-type'), 'image/vnd.adobe.photoshop');
 assert.match(res.headers.get('content-disposition') ?? '', /attachment; filename="HoloCard_\w{8}\.psd"/);
 const psd = parsePsd(Buffer.from(await res.arrayBuffer()));
@@ -153,6 +163,45 @@ const flat = await sharp({ create: { width: W, height: H, channels: 4, backgroun
   .toBuffer();
 assert.ok(flat.equals(psd.merged), '合成图和各层叠起来一致');
 
+// ---------- GLB ----------
+const glbExport = await exportFile('glb');
+assert.match(glbExport.file.name, /^HoloCard_\w{8}\.glb$/);
+assert.equal(glbExport.res.headers.get('content-type'), 'model/gltf-binary');
+assert.match(glbExport.res.headers.get('content-disposition') ?? '', /attachment; filename="HoloCard_\w{8}\.glb"/);
+const glb = parseGlb(Buffer.from(await glbExport.res.arrayBuffer()));
+const gltf = glb.json;
+assert.equal(gltf.asset.version, '2.0');
+assert.deepEqual(gltf.extensionsUsed, ['KHR_materials_unlit']);
+const root = gltf.nodes[gltf.scenes[gltf.scene].nodes[0]];
+assert.equal(root.children.length, manifest.layers.length, '每层一个节点，挂在同一个父节点下');
+assert.deepEqual(root.extras.effects, manifest.effects, '父节点带整卡的炫光、高光参数');
+let lastZ = -Infinity;
+let lastParallax = -Infinity;
+for (const [i, entry] of manifest.layers.entries()) {
+  const node = gltf.nodes[root.children[i]];
+  assert.equal(node.name, psd.layers[i + 1].name, '节点名和 PSD 图层名相同');
+  assert.deepEqual(node.extras.foil, entry.foil);
+  assert.equal(node.extras.parallax, entry.parallax);
+  assert.equal(node.extras.effect, entry.role === 'effects' ? entry.effect : undefined);
+  const prim = gltf.meshes[node.mesh].primitives[0];
+  const material = gltf.materials[prim.material];
+  assert.equal(material.alphaMode, 'BLEND');
+  assert.ok(material.extensions.KHR_materials_unlit, '材质不受光照，颜色和原图一样');
+  // manifest 由远到近，视差不减：平面一层比一层靠前（视差相同的也错开一点）
+  const z = gltf.accessors[prim.attributes.POSITION].min[2];
+  assert.ok(entry.parallax >= lastParallax, 'manifest 应当由远到近');
+  assert.ok(z > lastZ, `第 ${i} 层应当在前一层前面`);
+  lastZ = z;
+  lastParallax = entry.parallax;
+  // 贴图就是层图裁出的那块，位置和 PSD 里一样
+  const image = gltf.images[gltf.textures[material.pbrMetallicRoughness.baseColorTexture.index].source];
+  const view = gltf.bufferViews[image.bufferView];
+  const tex = await sharp(glb.bin.subarray(view.byteOffset, view.byteOffset + view.byteLength)).ensureAlpha().raw().toBuffer({ resolveWithObject: true });
+  const layer = psd.layers[i + 1];
+  assert.deepEqual([tex.info.width, tex.info.height], [layer.right - layer.left, layer.bottom - layer.top], '贴图尺寸是裁出的那块');
+  assert.ok(tex.data.equals(layer.rgba), `第 ${i} 层的贴图和层图对不上`);
+}
+
 // ---------- 页面上的按钮 ----------
 const channel = process.env.HOLOCARD_BROWSER_CHANNEL ?? '';
 const browser = await chromium.launch({ ...(channel ? { channel } : {}), args: ['--no-sandbox'] });
@@ -164,14 +213,29 @@ const errors = [];
 page.on('pageerror', (e) => errors.push(String(e)));
 await page.goto(`${BASE}/c/${job.id}?lang=zh`);
 await page.waitForSelector('#export-psd:visible', { timeout: 30_000 });
-assert.equal((await page.textContent('#export-psd'))?.trim(), '下载分层 PSD');
-const [dl] = await Promise.all([page.waitForEvent('download', { timeout: 60_000 }), page.click('#export-psd')]);
-assert.match(dl.suggestedFilename(), /^HoloCard_\w{8}\.psd$/, `下载的文件名：${dl.suggestedFilename()}`);
+for (const [selector, label, ext] of [['#export-psd', '下载分层 PSD', 'psd'], ['#export-glb', '下载 3D 模型（GLB）', 'glb']]) {
+  assert.equal((await page.textContent(selector))?.trim(), label);
+  const [dl] = await Promise.all([page.waitForEvent('download', { timeout: 60_000 }), page.click(selector)]);
+  assert.match(dl.suggestedFilename(), new RegExp(`^HoloCard_\\w{8}\\.${ext}$`), `下载的文件名：${dl.suggestedFilename()}`);
+}
 assert.deepEqual(errors, [], '页面不报错');
 await browser.close();
 
-console.log(`psd ok：${psd.layers.length} 个图层，${(res.headers.get('content-length') / 1e6).toFixed(1)}MB`);
+console.log(`layer files ok：PSD ${psd.layers.length} 个图层 ${(res.headers.get('content-length') / 1e6).toFixed(1)}MB，GLB ${root.children.length} 个平面 ${(glbExport.res.headers.get('content-length') / 1e6).toFixed(1)}MB`);
 process.exit(0);
+
+// ---------- GLB 读取：拆出 JSON 块和二进制块 ----------
+function parseGlb(buf) {
+  assert.equal(buf.readUInt32LE(0), 0x46546c67, 'GLB 魔数');
+  assert.equal(buf.readUInt32LE(4), 2);
+  assert.equal(buf.readUInt32LE(8), buf.length, '文件头记的长度和实际一致');
+  const jsonLen = buf.readUInt32LE(12);
+  assert.equal(buf.readUInt32LE(16), 0x4e4f534a, '第一块是 JSON');
+  const json = JSON.parse(buf.toString('utf8', 20, 20 + jsonLen));
+  const binAt = 20 + jsonLen;
+  assert.equal(buf.readUInt32LE(binAt + 4), 0x004e4942, '第二块是 BIN');
+  return { json, bin: buf.subarray(binAt + 8, binAt + 8 + buf.readUInt32LE(binAt)) };
+}
 
 // ---------- 最小的 PSD 读取：只认 psd.ts 写的那种（RGB 8 位、PackBits） ----------
 function parsePsd(buf) {

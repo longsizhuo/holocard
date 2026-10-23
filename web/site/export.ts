@@ -4,7 +4,7 @@
  *                  原先给的是实况照片，但网页存进去的一对文件「照片」不会合成（见 server/render/export.ts）
  *   安卓            动态照片：一个 JPEG（末尾接着视频），直接下载
  *   电脑            APNG，后缀 .png，直接下载
- * 另有不分设备的分层 PSD（各层各一个图层，给想接着改图的人），直接下载。
+ * 另有不分设备的分层 PSD（各层各一个图层，给想接着改图的人）和 3D 模型 GLB（给想自己渲染的人），直接下载。
  * 文件都在服务端生成（server/render/export.ts），这里只负责提交、等待、交到用户手上。
  */
 
@@ -12,7 +12,7 @@ import type { ExportedFile, ExportStatus } from '../../src/api';
 import { apiError, apiHeaders, ApiError } from './api';
 import type { MessageKey } from '../../src/i18n';
 
-export type ExportFormat = 'gif' | 'motion' | 'apng' | 'psd';
+export type ExportFormat = 'gif' | 'motion' | 'apng' | 'psd' | 'glb';
 
 export type Platform = 'ios' | 'android' | 'desktop';
 

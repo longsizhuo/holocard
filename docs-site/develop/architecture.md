@@ -180,6 +180,7 @@ holocard/
 | `render/previews.ts` | 分享图的渲染队列与失败重试 |
 | `render/export.ts` / `render/motionphoto.ts` | 导出动图（GIF、APNG、安卓动态照片） |
 | `render/psd.ts` | 导出分层 PSD：手写的最小 PSD 编码（RGB 8 位、PackBits），每层按实际不透明的范围裁 |
+| `render/glb.ts` | 导出 3D 模型（glTF 二进制）：每层一块平面按视差前后错开，不受光照的材质，箔面等参数写在节点的 `extras` 里 |
 | `render/exports.ts` | 导出的排队与状态 |
 | `store/db.ts` | 卡片数据库（`node:sqlite`）：卡片、会话、API key、管理员、性能埋点；`store/index.ts` 打开库 |
 | `store/cards.ts` | 保留策略（`keepMs`、`expiresAt`）、访问计数、过期清理、旧格式迁移 |
@@ -277,7 +278,7 @@ onnxruntime-node 的推理同步运行在调用线程上，切层与补全是纯
 两者都由服务端用 Playwright 打开自己的 `/render/<id>` 页面截取，画面与用户看到的是同一套渲染。
 
 - **分享图**（`server/render/preview.ts`）：1200×630，每种语言一张（`preview.jpg`、`preview-en.jpg`、`preview-ja.jpg`）。渲染队列一次一张，失败重试；卡片页被打开时发现缺图会补做，服务启动时也会补齐。
-- **导出动图**（`server/render/export.ts`）：`POST /api/cards/<id>/export/<gif|motion|apng|psd>` 提交，`GET` 同一地址查询状态。前端按设备选择动图格式：iPhone / iPad 为 GIF，安卓为动态照片（JPEG 末尾接 MP4），电脑为 APNG；分层 PSD 不分设备，直接从层文件拼，不经无头浏览器。导出按 IP 限流，生成的文件放在卡片目录中，随卡片一起过期或删除。
+- **导出动图**（`server/render/export.ts`）：`POST /api/cards/<id>/export/<gif|motion|apng|psd|glb>` 提交，`GET` 同一地址查询状态。前端按设备选择动图格式：iPhone / iPad 为 GIF，安卓为动态照片（JPEG 末尾接 MP4），电脑为 APNG；分层 PSD 和 3D 模型 GLB 不分设备，直接从层文件拼，不经无头浏览器。导出按 IP 限流，生成的文件放在卡片目录中，随卡片一起过期或删除。
 
 本地 `pnpm dev:server` 不发送前端页面，因此无法截图；调试这两项使用 `pnpm og`。
 

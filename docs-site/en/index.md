@@ -111,6 +111,8 @@ The export button in the panel offers a format that can go straight into the dev
 
 "Download layered PSD" below the button downloads a PSD file on any device, for further editing in Photoshop, Krita and similar tools: the bottom layer is the original image (hidden), followed by the depth layers from far to near, each followed by its effect layers. Each layer's transparency is that layer's foil mask, and the layer names give the position or effect type and the foil chosen on the site (for example `Near (holo foil 80%)`, `Effect: fire (glow foil 100%)`); the foils themselves are web effects and are not included in the PSD.
 
+"Download 3D model (GLB)" next to it downloads a binary glTF model to render yourself in Blender, Unity, Godot, three.js and the like: each layer is a transparent plane, offset front to back by parallax (the card is 1 unit tall, and the layer with the most parallax sits 0.06 in front of the farthest), with unlit materials so colours match the image. Each node's `extras` hold the foil, its strength, the effect type, depth and parallax; the parent node holds the card's halo and glare settings. For FBX, import the GLB into Blender and export from there.
+
 Export is not limited to the owner; cards shared by others can be exported too. The in-app browsers of WeChat and QQ block downloads; open the page in the system browser via "···" in the top right first.
 
 ### Deleting

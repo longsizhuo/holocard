@@ -59,7 +59,7 @@ export async function buildPsd(dir: string): Promise<Buffer> {
   return encodePsd(W, H, layers, merged);
 }
 
-async function rgbaOf(input: Buffer, W: number, H: number): Promise<Buffer> {
+export async function rgbaOf(input: Buffer, W: number, H: number): Promise<Buffer> {
   return sharp(input).resize(W, H, { fit: 'fill' }).ensureAlpha().raw().toBuffer();
 }
 
@@ -78,7 +78,7 @@ export function opaqueBox(rgba: Buffer, W: number, H: number): [number, number, 
   return x1 < 0 ? [0, 0, 1, 1] : [x0, y0, x1 - x0 + 1, y1 - y0 + 1];
 }
 
-function crop(rgba: Buffer, W: number, x: number, y: number, w: number, h: number): Buffer {
+export function crop(rgba: Buffer, W: number, x: number, y: number, w: number, h: number): Buffer {
   const out = Buffer.alloc(w * h * 4);
   for (let row = 0; row < h; row++) rgba.copy(out, row * w * 4, ((y + row) * W + x) * 4, ((y + row) * W + x + w) * 4);
   return out;
