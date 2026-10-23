@@ -8,6 +8,7 @@
  *   - 图层：最底下是隐藏的原图，往上按 manifest 的顺序一层一个，名字写着远近或特效类型和箔面
  *   - 像素：每层四个通道解压后和层图逐像素相同，裁掉的部分全透明
  *   - 合成图：和各层叠起来一致
+ *   - 没有原图的老卡（迁移来的）：照样导出，只是少了原图层
  * GLB 核对：
  *   - 文件头、JSON 块、二进制块，下载头是 .glb 附件
  *   - 每层一个节点，挂在同一个父节点下，名字和 PSD 的图层名相同，extras 带箔面、深度、视差、特效类型
@@ -22,7 +23,7 @@
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
 import { createServer } from 'node:http';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdtempSync, readdirSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -162,6 +163,13 @@ const flat = await sharp({ create: { width: W, height: H, channels: 4, backgroun
   .raw()
   .toBuffer();
 assert.ok(flat.equals(psd.merged), '合成图和各层叠起来一致');
+
+// ---------- 没有原图的老卡 ----------
+// 删掉原图和刚导出的文件，再导出一次
+const cardDir = join(work, 'layers', job.id);
+for (const name of readdirSync(cardDir)) if (/^(original\.|layers-v)/.test(name)) rmSync(join(cardDir, name));
+const legacy = parsePsd(Buffer.from(await (await exportFile('psd')).res.arrayBuffer()));
+assert.deepEqual(legacy.layers.map((l) => l.name), names, '没有原图时只少了原图层');
 
 // ---------- GLB ----------
 const glbExport = await exportFile('glb');
