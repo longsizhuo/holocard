@@ -7,6 +7,7 @@
  *   - 图层：最底下是隐藏的原图，往上按 manifest 的顺序一层一个，名字写着远近或特效类型和箔面
  *   - 像素：每层四个通道解压后和层图逐像素相同，裁掉的部分全透明
  *   - 合成图：和各层叠起来一致
+ *   - 没有原图的老卡（迁移来的）：照样导出，只是少了原图层
  *   - 页面：卡片页面板上点「下载分层 PSD」，浏览器拿到 .psd 下载，页面不报错
  *
  * 用法（要 Node 22）：先 pnpm build && pnpm build:server，再
@@ -17,7 +18,7 @@
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
 import { createServer } from 'node:http';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdtempSync, readdirSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -99,16 +100,20 @@ for (let i = 0; ; i++) {
 const manifest = await (await fetch(`${BASE}/api/layers/${job.id}/manifest.json`)).json();
 assert.ok(manifest.layers.some((l) => l.role === 'effects'), '合成图应当有特效层');
 
-let status;
-for (let i = 0; ; i++) {
-  status = await (await fetch(`${BASE}/api/cards/${job.id}/export/psd`, { method: i ? 'GET' : 'POST' })).json();
-  if (status.state === 'done' || status.state === 'error' || i > 60) break;
-  await sleep(1000);
+/** 提交导出、等到生成好，返回文件和下载响应 */
+async function exportPsd() {
+  let status;
+  for (let i = 0; ; i++) {
+    status = await (await fetch(`${BASE}/api/cards/${job.id}/export/psd`, { method: i ? 'GET' : 'POST' })).json();
+    if (status.state === 'done' || status.state === 'error' || i > 60) break;
+    await sleep(1000);
+  }
+  assert.equal(status.state, 'done', `导出应当完成：${JSON.stringify(status)}\n${log.slice(-2000)}`);
+  const [file] = status.files;
+  return { file, res: await fetch(new URL(file.url, BASE)) };
 }
-assert.equal(status.state, 'done', `导出应当完成：${JSON.stringify(status)}\n${log.slice(-2000)}`);
-const [file] = status.files;
+const { file, res } = await exportPsd();
 assert.match(file.name, /^HoloCard_\w{8}\.psd$/);
-const res = await fetch(new URL(file.url, BASE));
 assert.equal(res.headers.get('content-type'), 'image/vnd.adobe.photoshop');
 assert.match(res.headers.get('content-disposition') ?? '', /attachment; filename="HoloCard_\w{8}\.psd"/);
 const psd = parsePsd(Buffer.from(await res.arrayBuffer()));
@@ -152,6 +157,13 @@ const flat = await sharp({ create: { width: W, height: H, channels: 4, backgroun
   .raw()
   .toBuffer();
 assert.ok(flat.equals(psd.merged), '合成图和各层叠起来一致');
+
+// ---------- 没有原图的老卡 ----------
+// 删掉原图和刚导出的文件，再导出一次
+const cardDir = join(work, 'layers', job.id);
+for (const name of readdirSync(cardDir)) if (/^(original\.|layers-v)/.test(name)) rmSync(join(cardDir, name));
+const legacy = parsePsd(Buffer.from(await (await exportPsd()).res.arrayBuffer()));
+assert.deepEqual(legacy.layers.map((l) => l.name), names, '没有原图时只少了原图层');
 
 // ---------- 页面上的按钮 ----------
 const channel = process.env.HOLOCARD_BROWSER_CHANNEL ?? '';

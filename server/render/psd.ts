@@ -25,7 +25,10 @@ interface PsdLayer {
   rgba: Buffer;
 }
 
-/** 读卡片目录，拼出 PSD */
+/**
+ * 读卡片目录，拼出 PSD。
+ * ponytail: 在主线程里同步算（裁边、PackBits），层图长边最多 1400，实测一张几百毫秒；图再大或者导出多了卡住接口，再挪进工作线程
+ */
 export async function buildPsd(dir: string): Promise<Buffer> {
   const manifest = JSON.parse(await readFile(join(dir, 'manifest.json'), 'utf8')) as LayerManifest;
   const first = manifest.layers[0];
@@ -36,6 +39,7 @@ export async function buildPsd(dir: string): Promise<Buffer> {
   const H = meta.height ?? manifest.source.height;
 
   const layers: PsdLayer[] = [];
+  const fulls: Buffer[] = [];
   // 原图按上传的格式存（original.jpg / .png / .webp…），迁移来的老卡没有
   const originalName = (await readdir(dir)).find((name) => name.startsWith('original.'));
   const original = originalName ? await readFile(join(dir, originalName)).catch(() => null) : null;
@@ -45,14 +49,15 @@ export async function buildPsd(dir: string): Promise<Buffer> {
   const depthLayers = manifest.layers.filter((l) => l.role !== 'effects');
   for (const layer of manifest.layers) {
     const full = await rgbaOf(await readFile(join(dir, layer.file)), W, H);
+    fulls.push(full);
     // 按实际不透明的像素裁，不用 manifest 的 bbox：它是按阈值算的，边上半透明的一圈会被裁掉
     const [x, y, w, h] = opaqueBox(full, W, H);
     layers.push({ name: layerName(layer, depthLayers), hidden: false, left: x, top: y, width: w, height: h, rgba: crop(full, W, x, y, w, h) });
   }
 
-  // 合成图：没有它很多软件（预览、缩略图）只显示空白
+  // 合成图：没有它很多软件（预览、缩略图）只显示空白。用缩放到画布大小之后的各层叠，层图尺寸不一时也不出错
   const merged = await sharp({ create: { width: W, height: H, channels: 4, background: { r: 255, g: 255, b: 255, alpha: 1 } } })
-    .composite(manifest.layers.map((l) => ({ input: join(dir, l.file) })))
+    .composite(fulls.map((input) => ({ input, raw: { width: W, height: H, channels: 4 as const } })))
     .removeAlpha()
     .raw()
     .toBuffer();
@@ -60,7 +65,8 @@ export async function buildPsd(dir: string): Promise<Buffer> {
 }
 
 async function rgbaOf(input: Buffer, W: number, H: number): Promise<Buffer> {
-  return sharp(input).resize(W, H, { fit: 'fill' }).ensureAlpha().raw().toBuffer();
+  // 原图存盘前已经按 EXIF 摆正、去掉了元数据（见 pipeline/images.ts），rotate() 只是兜底
+  return sharp(input).rotate().resize(W, H, { fit: 'fill' }).ensureAlpha().raw().toBuffer();
 }
 
 /** alpha 不为 0 的像素的包围盒；整层全透明时给左上角一个像素 */
@@ -98,13 +104,16 @@ export function layerName(layer: LayerEntry, depthLayers: readonly LayerEntry[])
 
 /** PackBits：Photoshop 的 RLE。重复 ≥3 个用一个游程，其余原样成段 */
 export function packBits(row: Buffer): Buffer {
-  const out: number[] = [];
+  // 最坏情况每 128 字节多一个段头
+  const out = Buffer.alloc(row.length + Math.ceil(row.length / 128) + 1);
+  let o = 0;
   let i = 0;
   while (i < row.length) {
     let run = 1;
     while (i + run < row.length && run < 128 && row[i + run] === row[i]) run++;
     if (run >= 3) {
-      out.push(257 - run, row[i] ?? 0);
+      out[o++] = 257 - run;
+      out[o++] = row[i] ?? 0;
       i += run;
       continue;
     }
@@ -113,9 +122,10 @@ export function packBits(row: Buffer): Buffer {
       if (i + 2 < row.length && row[i] === row[i + 1] && row[i] === row[i + 2]) break;
       i++;
     }
-    out.push(i - start - 1, ...row.subarray(start, i));
+    out[o++] = i - start - 1;
+    o += row.copy(out, o, start, i);
   }
-  return Buffer.from(out);
+  return out.subarray(0, o);
 }
 
 /** 一个通道按行压缩：返回每行的字节数和压缩后的数据 */
