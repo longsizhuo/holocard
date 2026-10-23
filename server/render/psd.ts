@@ -64,13 +64,13 @@ export async function buildPsd(dir: string): Promise<Buffer> {
   return encodePsd(W, H, layers, merged);
 }
 
-async function rgbaOf(input: Buffer, W: number, H: number): Promise<Buffer> {
+export async function rgbaOf(input: Buffer, W: number, H: number): Promise<Buffer> {
   // 原图存盘前已经按 EXIF 摆正、去掉了元数据（见 pipeline/images.ts），rotate() 只是兜底
   return sharp(input).rotate().resize(W, H, { fit: 'fill' }).ensureAlpha().raw().toBuffer();
 }
 
 /** alpha 不为 0 的像素的包围盒；整层全透明时给左上角一个像素 */
-export function opaqueBox(rgba: Buffer, W: number, H: number): [number, number, number, number] {
+function opaqueBox(rgba: Buffer, W: number, H: number): [number, number, number, number] {
   let x0 = W, y0 = H, x1 = -1, y1 = -1;
   for (let y = 0; y < H; y++) {
     for (let x = 0; x < W; x++) {

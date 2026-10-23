@@ -5,6 +5,7 @@
  *   apng    电脑：  透明底的 APNG，后缀就是 .png，浏览器和大多数看图软件直接能播
  * 另有不按设备分的：
  *   psd     分层 PSD，各层各一个图层，给想在 Photoshop、Krita 里接着改的人（见 psd.ts）
+ *   glb     3D 模型（glTF 二进制），每层一块平面按视差前后错开，给想在 Blender、Unity 里自己渲染的人（见 glb.ts）
  *
  * iPhone 原先给的是实况照片（JPEG + MOV 一对），真机上走不通：网页只能经分享面板把文件存进相册，
  * 「照片」不会把分开存进去的一对合成实况照片（导入 Mac 上的「照片」才会）；
@@ -36,12 +37,13 @@ import type { Page } from 'playwright-core';
 import { withRenderPage } from './preview';
 import { packMotionPhoto } from './motionphoto';
 import { buildPsd } from './psd';
+import { buildGlb } from './glb';
 // upng-js 是 CommonJS（module.exports = UPNG），在 Node 的 ESM 里只能按默认导出取
 import UPNG from 'upng-js';
 
-export type ExportFormat = 'gif' | 'motion' | 'apng' | 'psd';
+export type ExportFormat = 'gif' | 'motion' | 'apng' | 'psd' | 'glb';
 
-export const EXPORT_FORMATS: readonly ExportFormat[] = ['gif', 'motion', 'apng', 'psd'];
+export const EXPORT_FORMATS: readonly ExportFormat[] = ['gif', 'motion', 'apng', 'psd', 'glb'];
 
 /**
  * 导出的版本号，写在文件名里。改了画面、动作或封装参数就加一：
@@ -83,11 +85,13 @@ export function exportFiles(format: ExportFormat, id: string): ExportFile[] {
       return [{ file: `sticker-v${v}.png`, type: 'image/png', download: `${base}.png` }];
     case 'psd':
       return [{ file: `layers-v${v}.psd`, type: 'image/vnd.adobe.photoshop', download: `${base}.psd` }];
+    case 'glb':
+      return [{ file: `model-v${v}.glb`, type: 'model/gltf-binary', download: `${base}.glb` }];
   }
 }
 
 /** 层文件路由要放行的导出文件名 */
-export const EXPORT_FILE = /^(?:gif-v\d+\.gif|motion-v\d+\.jpg|sticker-v\d+\.png|layers-v\d+\.psd)$/;
+export const EXPORT_FILE = /^(?:gif-v\d+\.gif|motion-v\d+\.jpg|sticker-v\d+\.png|layers-v\d+\.psd|model-v\d+\.glb)$/;
 
 /**
  * 这种格式的导出是否已经有了、而且比 manifest 新。
@@ -623,7 +627,9 @@ export async function runExport(
             ? await exportMotion(baseUrl, id, tmp, signal)
             : format === 'psd'
               ? [await buildPsd(dir)]
-              : await exportApng(baseUrl, id, dir, signal);
+              : format === 'glb'
+                ? [await buildGlb(dir)]
+                : await exportApng(baseUrl, id, dir, signal);
       // ponytail: 最多重截一次；主人一直在调的话第二份也可能旧，下次导出时 exportReady 会判旧重做
       if ((await manifestTime()) === before || attempt >= 1) break;
     }

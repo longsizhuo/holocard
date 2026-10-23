@@ -847,9 +847,9 @@ select {
 }
 .export__btn:hover { border-color: rgba(123, 95, 208, 0.45); }
 .export__btn:disabled { opacity: 0.55; cursor: default; }
-/* 分层 PSD：用的人少，给一行文字链接，不和上面的按钮并列 */
+/* 分层 PSD、3D 模型：用的人少，给一行文字链接，不和上面的按钮并列 */
+.export__files { display: flex; flex-wrap: wrap; gap: 4px 16px; }
 .export__more {
-  justify-self: start;
   padding: 0;
   border: 0;
   background: none;

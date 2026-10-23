@@ -130,12 +130,12 @@ export async function handleCards(req: IncomingMessage, res: ServerResponse, url
   }
 
   /*
-   * 导出动图（格式由前端按设备决定，见 web/site/export.ts），以及分层 PSD。
+   * 导出动图（格式由前端按设备决定，见 web/site/export.ts），以及分层 PSD、3D 模型。
    *   POST  没有现成的就排队生成，返回当前状态
    *   GET   只查状态，给前端轮询
    * 生成好的文件就放在卡片目录里，和卡片同生共死：过期、被删时一起清掉。
    */
-  const exportMatch = /^\/api\/cards\/([0-9a-f-]{36})\/export\/(gif|motion|apng|psd)$/.exec(url.pathname);
+  const exportMatch = /^\/api\/cards\/([0-9a-f-]{36})\/export\/(gif|motion|apng|psd|glb)$/.exec(url.pathname);
   if ((req.method === 'POST' || req.method === 'GET') && exportMatch) {
     const job: ExportJob = { id: exportMatch[1] ?? '', format: (exportMatch[2] ?? 'apng') as ExportFormat };
     const card = db.get(job.id);
