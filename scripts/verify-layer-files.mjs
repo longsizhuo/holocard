@@ -12,7 +12,8 @@
  * GLB 核对：
  *   - 文件头、JSON 块、二进制块，下载头是 .glb 附件
  *   - 每层一个节点，挂在同一个父节点下，名字和 PSD 的图层名相同，extras 带箔面、深度、视差、特效类型
- *   - 平面按视差前后排（视差大的更近），贴图解出来和层图裁出的那块逐像素相同，材质不受光照、半透明
+ *   - 平面整张卡大小、中心都在卡面中心（引擎按物体中心排半透明物体的先后），按视差前后排（视差大的更近），
+ *     贴图解出来和层图逐像素相同，材质不受光照、半透明
  *   - 页面：卡片页面板上点「下载分层 PSD」「下载 3D 模型（GLB）」，浏览器各拿到一个下载，页面不报错
  *
  * 用法（要 Node 22）：先 pnpm build && pnpm build:server，再
@@ -196,18 +197,26 @@ for (const [i, entry] of manifest.layers.entries()) {
   assert.equal(material.alphaMode, 'BLEND');
   assert.ok(material.extensions.KHR_materials_unlit, '材质不受光照，颜色和原图一样');
   // manifest 由远到近，视差不减：平面一层比一层靠前（视差相同的也错开一点）
-  const z = gltf.accessors[prim.attributes.POSITION].min[2];
+  const pos = gltf.accessors[prim.attributes.POSITION];
+  assert.deepEqual([pos.min[0] + pos.max[0], pos.min[1] + pos.max[1], pos.min[2], pos.max[2]], [0, 0, 0, 0], '平面中心在卡面中心，前后位置放在节点上');
+  assert.equal(node.translation[0] + node.translation[1], 0);
+  const z = node.translation[2];
   assert.ok(entry.parallax >= lastParallax, 'manifest 应当由远到近');
   assert.ok(z > lastZ, `第 ${i} 层应当在前一层前面`);
   lastZ = z;
   lastParallax = entry.parallax;
-  // 贴图就是层图裁出的那块，位置和 PSD 里一样
+  // 贴图就是整张层图：PSD 里裁出的那块贴回画布上原来的位置
   const image = gltf.images[gltf.textures[material.pbrMetallicRoughness.baseColorTexture.index].source];
   const view = gltf.bufferViews[image.bufferView];
   const tex = await sharp(glb.bin.subarray(view.byteOffset, view.byteOffset + view.byteLength)).ensureAlpha().raw().toBuffer({ resolveWithObject: true });
   const layer = psd.layers[i + 1];
-  assert.deepEqual([tex.info.width, tex.info.height], [layer.right - layer.left, layer.bottom - layer.top], '贴图尺寸是裁出的那块');
-  assert.ok(tex.data.equals(layer.rgba), `第 ${i} 层的贴图和层图对不上`);
+  assert.deepEqual([tex.info.width, tex.info.height], [W, H], '贴图是整张卡大小');
+  const full = Buffer.alloc(W * H * 4);
+  const w = layer.right - layer.left;
+  for (let y = layer.top; y < layer.bottom; y++) layer.rgba.copy(full, (y * W + layer.left) * 4, (y - layer.top) * w * 4, (y - layer.top + 1) * w * 4);
+  // 全透明像素的颜色没有意义（PSD 裁掉的部分记作 0），只比透明度
+  for (const px of [tex.data, full]) for (let p = 0; p < px.length; p += 4) if (!px[p + 3]) px.fill(0, p, p + 3);
+  assert.ok(tex.data.equals(full), `第 ${i} 层的贴图和层图对不上`);
 }
 
 // ---------- 页面上的按钮 ----------

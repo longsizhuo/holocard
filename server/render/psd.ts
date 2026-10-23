@@ -70,7 +70,7 @@ export async function rgbaOf(input: Buffer, W: number, H: number): Promise<Buffe
 }
 
 /** alpha 不为 0 的像素的包围盒；整层全透明时给左上角一个像素 */
-export function opaqueBox(rgba: Buffer, W: number, H: number): [number, number, number, number] {
+function opaqueBox(rgba: Buffer, W: number, H: number): [number, number, number, number] {
   let x0 = W, y0 = H, x1 = -1, y1 = -1;
   for (let y = 0; y < H; y++) {
     for (let x = 0; x < W; x++) {
@@ -84,7 +84,7 @@ export function opaqueBox(rgba: Buffer, W: number, H: number): [number, number, 
   return x1 < 0 ? [0, 0, 1, 1] : [x0, y0, x1 - x0 + 1, y1 - y0 + 1];
 }
 
-export function crop(rgba: Buffer, W: number, x: number, y: number, w: number, h: number): Buffer {
+function crop(rgba: Buffer, W: number, x: number, y: number, w: number, h: number): Buffer {
   const out = Buffer.alloc(w * h * 4);
   for (let row = 0; row < h; row++) rgba.copy(out, row * w * 4, ((y + row) * W + x) * 4, ((y + row) * W + x + w) * 4);
   return out;

@@ -1,7 +1,9 @@
 /**
  * 导出 3D 模型（glTF 二进制，.glb）：给想在 Blender、Unity、Godot、three.js 里自己渲染的人。
  *
- * 每层一块带透明的平面，按视差前后错开：卡面在 XY 平面，高 1、宽按原图比例，朝 +Z（近处的层 z 更大）。
+ * 每层一块整张卡大小、带透明的平面，按视差前后错开：卡面在 XY 平面，高 1、宽按原图比例，朝 +Z（近处的层 z 更大）。
+ * 平面不按不透明区域裁：引擎画半透明物体按物体中心（three.js 用几何中心，Blender 用原点）离镜头远近排先后，
+ * 裁过的平面中心各不相同，斜着看时后面的层会被画到前面；整张卡大小、前后位置放在节点上，排序就只看前后。
  * 层图用不受光照的材质（KHR_materials_unlit），导进去颜色和原图一样；透明度即这一层箔面的遮罩。
  * 箔面是网页里的 CSS 效果，带不过去：配方、强度、特效类型、深度和视差写在每个节点的 extras 里，
  * 怎么渲染由用的人决定。不选 FBX：私有格式、没有好用的开源写入；Blender 能把 glb 再导出成 fbx。
@@ -12,7 +14,7 @@ import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import sharp from 'sharp';
 import type { LayerManifest } from '../../src/format/types';
-import { crop, layerName, opaqueBox, rgbaOf } from './psd';
+import { layerName, rgbaOf } from './psd';
 
 /** 视差最大（parallax = 1）的层离最远的层多远，按卡高算 */
 const DEPTH_SPAN = 0.06;
@@ -44,10 +46,13 @@ export async function buildGlb(dir: string): Promise<Buffer> {
     return bufferViews.length - 1;
   };
 
-  // 所有平面共用一套贴图坐标和三角形：每层的贴图就是裁好的那块
+  // 所有平面共用一块整卡大小的四边形（原点在卡面中心，y 向上），各层只是节点的 z 不同
+  const [l, r, t, b] = [-aspect / 2, aspect / 2, 0.5, -0.5];
+  const position = Buffer.from(new Float32Array([l, b, 0, r, b, 0, r, t, 0, l, t, 0]).buffer);
   const uv = Buffer.from(new Float32Array([0, 1, 1, 1, 1, 0, 0, 0]).buffer);
   const indices = Buffer.from(new Uint16Array([0, 1, 2, 0, 2, 3]).buffer);
-  const accessors: object[] = [
+  const accessors = [
+    { bufferView: addView(position, 34962), componentType: 5126, count: 4, type: 'VEC3', min: [l, b, 0], max: [r, t, 0] },
     { bufferView: addView(uv, 34962), componentType: 5126, count: 4, type: 'VEC2' },
     { bufferView: addView(indices, 34963), componentType: 5123, count: 6, type: 'SCALAR' },
   ];
@@ -60,8 +65,7 @@ export async function buildGlb(dir: string): Promise<Buffer> {
   const nodes: object[] = [];
   for (const [i, layer] of manifest.layers.entries()) {
     const full = await rgbaOf(await readFile(join(dir, layer.file)), W, H);
-    const [x, y, w, h] = opaqueBox(full, W, H);
-    const png = await sharp(crop(full, W, x, y, w, h), { raw: { width: w, height: h, channels: 4 } }).png().toBuffer();
+    const png = await sharp(full, { raw: { width: W, height: H, channels: 4 } }).png().toBuffer();
     images.push({ bufferView: addView(png), mimeType: 'image/png' });
     textures.push({ source: images.length - 1, sampler: 0 });
     const name = layerName(layer, depthLayers);
@@ -73,30 +77,17 @@ export async function buildGlb(dir: string): Promise<Buffer> {
       extensions: { KHR_materials_unlit: {} },
     });
 
-    // 像素坐标换成卡面坐标：原点在卡面中心，y 向上
-    const left = (x / W - 0.5) * aspect;
-    const right = ((x + w) / W - 0.5) * aspect;
-    const top = 0.5 - y / H;
-    const bottom = 0.5 - (y + h) / H;
     // 迁移来的老 manifest 万一缺了视差，按最远处理，别让坐标变成 NaN
     const parallax = Number.isFinite(layer.parallax) ? layer.parallax : 0;
     const z = parallax * DEPTH_SPAN + i * STACK_GAP;
-    const position = new Float32Array([left, bottom, z, right, bottom, z, right, top, z, left, top, z]);
-    accessors.push({
-      bufferView: addView(Buffer.from(position.buffer), 34962),
-      componentType: 5126,
-      count: 4,
-      type: 'VEC3',
-      min: [left, bottom, z],
-      max: [right, top, z],
-    });
     meshes.push({
       name,
-      primitives: [{ attributes: { POSITION: accessors.length - 1, TEXCOORD_0: 0 }, indices: 1, material: materials.length - 1 }],
+      primitives: [{ attributes: { POSITION: 0, TEXCOORD_0: 1 }, indices: 2, material: materials.length - 1 }],
     });
     nodes.push({
       name,
       mesh: meshes.length - 1,
+      translation: [0, 0, z],
       extras: {
         file: layer.file,
         depth: layer.depth,
