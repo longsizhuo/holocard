@@ -78,7 +78,9 @@ export async function buildGlb(dir: string): Promise<Buffer> {
     const right = ((x + w) / W - 0.5) * aspect;
     const top = 0.5 - y / H;
     const bottom = 0.5 - (y + h) / H;
-    const z = layer.parallax * DEPTH_SPAN + i * STACK_GAP;
+    // 迁移来的老 manifest 万一缺了视差，按最远处理，别让坐标变成 NaN
+    const parallax = Number.isFinite(layer.parallax) ? layer.parallax : 0;
+    const z = parallax * DEPTH_SPAN + i * STACK_GAP;
     const position = new Float32Array([left, bottom, z, right, bottom, z, right, top, z, left, top, z]);
     accessors.push({
       bufferView: addView(Buffer.from(position.buffer), 34962),
