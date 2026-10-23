@@ -130,12 +130,12 @@ export async function handleCards(req: IncomingMessage, res: ServerResponse, url
   }
 
   /*
-   * 导出动图（格式由前端按设备决定，见 web/site/export.ts）。
+   * 导出动图（格式由前端按设备决定，见 web/site/export.ts），以及分层 PSD。
    *   POST  没有现成的就排队生成，返回当前状态
    *   GET   只查状态，给前端轮询
    * 生成好的文件就放在卡片目录里，和卡片同生共死：过期、被删时一起清掉。
    */
-  const exportMatch = /^\/api\/cards\/([0-9a-f-]{36})\/export\/(gif|motion|apng)$/.exec(url.pathname);
+  const exportMatch = /^\/api\/cards\/([0-9a-f-]{36})\/export\/(gif|motion|apng|psd)$/.exec(url.pathname);
   if ((req.method === 'POST' || req.method === 'GET') && exportMatch) {
     const job: ExportJob = { id: exportMatch[1] ?? '', format: (exportMatch[2] ?? 'apng') as ExportFormat };
     const card = db.get(job.id);
@@ -306,7 +306,7 @@ export async function handleCards(req: IncomingMessage, res: ServerResponse, url
     try {
       const body = await readFile(join(OUT_DIR, id ?? '', name ?? ''));
       res.writeHead(200, {
-        'content-type': name?.endsWith('.png')
+        'content-type': exported?.type ?? (name?.endsWith('.png')
           ? 'image/png'
           : name?.endsWith('.jpg')
             ? 'image/jpeg'
@@ -314,7 +314,7 @@ export async function handleCards(req: IncomingMessage, res: ServerResponse, url
               ? 'image/webp'
               : name?.endsWith('.gif')
                 ? 'image/gif'
-                : 'application/json; charset=utf-8',
+                : 'application/json; charset=utf-8'),
         ...(exported ? { 'content-disposition': `attachment; filename="${exported.download}"` } : {}),
         'content-length': body.byteLength,
         /*

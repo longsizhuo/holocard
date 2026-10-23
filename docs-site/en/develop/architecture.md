@@ -107,7 +107,7 @@ The site frontend, i.e. holocard.longsizhuo.com.
 | `pack.ts` / `pack-gl.ts` / `pack-art.ts` | Card packs. `pack.ts` is the shared interface and shell; `pack-gl.ts` is the WebGL 3D foil bag; `pack-art.ts` draws the flat fallback without WebGL |
 | `albums-ui.ts` | "My albums": cards made on this device (plus the account's cards when signed in), a native `<dialog>` that opens straight to the grid |
 | `account-ui.ts` | Account panel: signed-in account, sign-out, album entry, and requesting, monitoring and revoking public API keys |
-| `export.ts` | Exported animations: picks GIF / motion photo / APNG by device, submits and waits for the server |
+| `export.ts` | Exported animations: picks GIF / motion photo / APNG by device, submits and waits for the server; the layered PSD goes through here too |
 | `sfx.ts` | Pack sound effects synthesised with Web Audio; the on/off switch is stored locally |
 | `track.ts` | umami analytics; loads nothing when `VITE_UMAMI_ID` is not set |
 | `perf.ts` | Performance beacon: measures 10 seconds of frame rate on an idle page and sends it to `POST /api/perf` |
@@ -179,6 +179,7 @@ The layering service is one Node process that serves the frontend's static files
 | `render/preview.ts` | Captures share images by opening `/render/<id>` in headless Chromium, keeping the browser warm |
 | `render/previews.ts` | Share-image render queue and retries |
 | `render/export.ts` / `render/motionphoto.ts` | Exported animations (GIF, APNG, Android motion photo) |
+| `render/psd.ts` | Layered PSD export: a hand-written minimal PSD encoder (RGB 8-bit, PackBits), each layer cropped to its non-transparent area |
 | `render/exports.ts` | Export queue and status |
 | `store/db.ts` | Card database (`node:sqlite`): cards, sessions, API keys, admins, performance beacons; `store/index.ts` opens it |
 | `store/cards.ts` | Retention (`keepMs`, `expiresAt`), hit counting, expiry sweep, legacy migration |
@@ -276,7 +277,7 @@ Operations that require ownership:
 Both are captured by the server opening its own `/render/<id>` page with Playwright, so they use the same rendering users see.
 
 - **Share images** (`server/render/preview.ts`): 1200×630, one per language (`preview.jpg`, `preview-en.jpg`, `preview-ja.jpg`). Rendering is queued one at a time with retries; a missing image is rendered when the card page is opened, and missing ones are backfilled at startup.
-- **Exported animations** (`server/render/export.ts`): `POST /api/cards/<id>/export/<gif|motion|apng>` submits, `GET` on the same URL reports status. The frontend picks the format by device: GIF on iPhone / iPad, a motion photo (JPEG followed by MP4) on Android, APNG on desktop. Exports are rate-limited per IP, and the files live in the card directory, expiring or being deleted with the card.
+- **Exported animations** (`server/render/export.ts`): `POST /api/cards/<id>/export/<gif|motion|apng|psd>` submits, `GET` on the same URL reports status. The frontend picks the animation format by device: GIF on iPhone / iPad, a motion photo (JPEG followed by MP4) on Android, APNG on desktop; the layered PSD is the same on every device and is assembled from the layer files without the headless browser. Exports are rate-limited per IP, and the files live in the card directory, expiring or being deleted with the card.
 
 `pnpm dev:server` does not serve the frontend, so it cannot take these screenshots; use `pnpm og` to work on them locally.
 
