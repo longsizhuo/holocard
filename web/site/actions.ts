@@ -1,4 +1,4 @@
-/** 面板上对这张卡的操作：分享、删除、导出动图和分层 PSD */
+/** 面板上对这张卡的操作：分享、删除、导出动图、分层 PSD 和 3D 模型 */
 
 import { lang, t, type Lang, type MessageKey } from '../../src/i18n';
 import { deleteCard, isMine, shareCard } from './api';
@@ -30,6 +30,7 @@ const exportBox = need<HTMLDivElement>('#export');
 const exportBtn = need<HTMLButtonElement>('#export-btn');
 const exportHint = need<HTMLElement>('#export-hint');
 const psdBtn = need<HTMLButtonElement>('#export-psd');
+const glbBtn = need<HTMLButtonElement>('#export-glb');
 
 /** 导出按钮按设备说人话：安卓叫动态照片（相册里的叫法），iPhone 存的是 GIF 动图 */
 const platform = detectPlatform();
@@ -238,44 +239,47 @@ async function doExport(): Promise<void> {
 }
 
 /**
- * 下载分层 PSD：各层各一个图层，箔面写在图层名里。不分设备，生成好就下载。
- * 和动图分开排队（服务端是同一条导出队列），按钮自己管自己的状态
+ * 下载分层 PSD（各层各一个图层，箔面写在图层名里）或 3D 模型 GLB（每层一块平面）。不分设备，生成好就下载。
+ * 和动图共用服务端的导出队列，按钮各自管自己的状态
  */
-let psdBusy = false;
-async function doExportPsd(): Promise<void> {
+const fileBtns = { psd: psdBtn, glb: glbBtn } as const;
+const fileBusy = { psd: false, glb: false };
+async function doExportFile(format: 'psd' | 'glb'): Promise<void> {
   const id = current.id;
-  if (!id || psdBusy) return;
+  const btn = fileBtns[format];
+  if (!id || fileBusy[format]) return;
   const app = blockingInAppBrowser();
   if (app) {
     setText(exportHint, 'export.inApp', { app: t(app) });
     return;
   }
-  psdBusy = true;
-  psdBtn.disabled = true;
-  setText(psdBtn, 'export.working');
+  fileBusy[format] = true;
+  btn.disabled = true;
+  setText(btn, 'export.working');
   clearText(exportHint);
-  track('export', { format: 'psd' });
+  track('export', { format });
   try {
-    // 图层名里的箔面按服务端上的配置写，刚调的那一下得先存上
+    // 箔面按服务端上的配置写进文件，刚调的那一下得先存上
     await flushSave();
-    const files = await requestExport(id, 'psd', (state) => {
-      setText(psdBtn, state === 'queued' ? 'export.queued' : 'export.working');
+    const files = await requestExport(id, format, (state) => {
+      setText(btn, state === 'queued' ? 'export.queued' : 'export.working');
     });
     if (current.id === id) files.forEach(download);
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
-    track('export-fail', { format: 'psd', message: message.slice(0, 120) });
+    track('export-fail', { format, message: message.slice(0, 120) });
     setText(exportHint, 'export.failed', { message: describeError(error) });
   } finally {
-    psdBusy = false;
-    psdBtn.disabled = false;
-    setText(psdBtn, 'export.psd');
+    fileBusy[format] = false;
+    btn.disabled = false;
+    setText(btn, format === 'psd' ? 'export.psd' : 'export.glb');
   }
 }
 
 shareBtn.addEventListener('click', () => void doShare());
 exportBtn.addEventListener('click', () => void doExport());
-psdBtn.addEventListener('click', () => void doExportPsd());
+psdBtn.addEventListener('click', () => void doExportFile('psd'));
+glbBtn.addEventListener('click', () => void doExportFile('glb'));
 deleteBtn.addEventListener('click', () => void doDelete());
 shareCopy.addEventListener('click', () => {
   shareUrlInput.select();

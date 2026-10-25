@@ -180,6 +180,7 @@ The layering service is one Node process that serves the frontend's static files
 | `render/previews.ts` | Share-image render queue and retries |
 | `render/export.ts` / `render/motionphoto.ts` | Exported animations (GIF, APNG, Android motion photo) |
 | `render/psd.ts` | Layered PSD export: a hand-written minimal PSD encoder (RGB 8-bit, PackBits), each layer cropped to its non-transparent area |
+| `render/glb.ts` | 3D model export (binary glTF): one plane per layer offset by parallax, unlit materials, foil and other settings in each node's `extras` |
 | `render/exports.ts` | Export queue and status |
 | `store/db.ts` | Card database (`node:sqlite`): cards, sessions, API keys, admins, performance beacons; `store/index.ts` opens it |
 | `store/cards.ts` | Retention (`keepMs`, `expiresAt`), hit counting, expiry sweep, legacy migration |
@@ -277,7 +278,7 @@ Operations that require ownership:
 Both are captured by the server opening its own `/render/<id>` page with Playwright, so they use the same rendering users see.
 
 - **Share images** (`server/render/preview.ts`): 1200×630, one per language (`preview.jpg`, `preview-en.jpg`, `preview-ja.jpg`). Rendering is queued one at a time with retries; a missing image is rendered when the card page is opened, and missing ones are backfilled at startup.
-- **Exported animations** (`server/render/export.ts`): `POST /api/cards/<id>/export/<gif|motion|apng|psd>` submits, `GET` on the same URL reports status. The frontend picks the animation format by device: GIF on iPhone / iPad, a motion photo (JPEG followed by MP4) on Android, APNG on desktop; the layered PSD is the same on every device and is assembled from the layer files without the headless browser. Exports are rate-limited per IP, and the files live in the card directory, expiring or being deleted with the card.
+- **Exported animations** (`server/render/export.ts`): `POST /api/cards/<id>/export/<gif|motion|apng|psd|glb>` submits, `GET` on the same URL reports status. The frontend picks the animation format by device: GIF on iPhone / iPad, a motion photo (JPEG followed by MP4) on Android, APNG on desktop; the layered PSD and the GLB 3D model are the same on every device and are assembled from the layer files without the headless browser. Exports are rate-limited per IP, and the files live in the card directory, expiring or being deleted with the card.
 
 `pnpm dev:server` does not serve the frontend, so it cannot take these screenshots; use `pnpm og` to work on them locally.
 
