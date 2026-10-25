@@ -109,6 +109,8 @@ The export button in the panel offers a format that can go straight into the dev
 | Android | "Save as Motion Photo" | Motion Photo (a JPEG with a video appended) | Downloaded directly |
 | Computer | "Download animation" | APNG (`.png` extension) | Downloaded directly |
 
+"Download layered PSD" below the button downloads a PSD file on any device, for further editing in Photoshop, Krita and similar tools: the bottom layer is the original image (hidden), followed by the depth layers from far to near, each followed by its effect layers. Each layer's transparency is that layer's foil mask, and the layer names give the position or effect type and the foil chosen on the site (for example `Near (holo foil 80%)`, `Effect: fire (glow foil 100%)`); the foils themselves are web effects and are not included in the PSD.
+
 Export is not limited to the owner; cards shared by others can be exported too. The in-app browsers of WeChat and QQ block downloads; open the page in the system browser via "···" in the top right first.
 
 ### Deleting

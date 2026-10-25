@@ -107,7 +107,7 @@ holocard/
 | `pack.ts` / `pack-gl.ts` / `pack-art.ts` | 卡包。`pack.ts` 是共用接口与外壳；`pack-gl.ts` 是 WebGL 三维铝箔袋；`pack-art.ts` 是无 WebGL 时的平面版图案 |
 | `albums-ui.ts` | 「我的卡册」：本设备做过的卡（登录后加上账号名下的卡），原生 `<dialog>`，打开即为网格 |
 | `account-ui.ts` | 个人中心：登录账号、退出、卡册入口，以及对外接口 key 的申请、用量与吊销 |
-| `export.ts` | 导出动图：按设备选择 GIF / 动态照片 / APNG，提交并等待服务端生成 |
+| `export.ts` | 导出动图：按设备选择 GIF / 动态照片 / APNG，提交并等待服务端生成；分层 PSD 也走这里 |
 | `sfx.ts` | 开包音效，用 Web Audio 实时合成，开关保存在本机 |
 | `track.ts` | umami 埋点，未配置 `VITE_UMAMI_ID` 时不加载任何脚本 |
 | `perf.ts` | 性能埋点：页面静置后测量 10 秒帧率，发送到 `POST /api/perf` |
@@ -179,6 +179,7 @@ holocard/
 | `render/preview.ts` | 用无头 Chromium 打开 `/render/<id>` 截分享图，浏览器常驻复用 |
 | `render/previews.ts` | 分享图的渲染队列与失败重试 |
 | `render/export.ts` / `render/motionphoto.ts` | 导出动图（GIF、APNG、安卓动态照片） |
+| `render/psd.ts` | 导出分层 PSD：手写的最小 PSD 编码（RGB 8 位、PackBits），每层按实际不透明的范围裁 |
 | `render/exports.ts` | 导出的排队与状态 |
 | `store/db.ts` | 卡片数据库（`node:sqlite`）：卡片、会话、API key、管理员、性能埋点；`store/index.ts` 打开库 |
 | `store/cards.ts` | 保留策略（`keepMs`、`expiresAt`）、访问计数、过期清理、旧格式迁移 |
@@ -276,7 +277,7 @@ onnxruntime-node 的推理同步运行在调用线程上，切层与补全是纯
 两者都由服务端用 Playwright 打开自己的 `/render/<id>` 页面截取，画面与用户看到的是同一套渲染。
 
 - **分享图**（`server/render/preview.ts`）：1200×630，每种语言一张（`preview.jpg`、`preview-en.jpg`、`preview-ja.jpg`）。渲染队列一次一张，失败重试；卡片页被打开时发现缺图会补做，服务启动时也会补齐。
-- **导出动图**（`server/render/export.ts`）：`POST /api/cards/<id>/export/<gif|motion|apng>` 提交，`GET` 同一地址查询状态。前端按设备选择格式：iPhone / iPad 为 GIF，安卓为动态照片（JPEG 末尾接 MP4），电脑为 APNG。导出按 IP 限流，生成的文件放在卡片目录中，随卡片一起过期或删除。
+- **导出动图**（`server/render/export.ts`）：`POST /api/cards/<id>/export/<gif|motion|apng|psd>` 提交，`GET` 同一地址查询状态。前端按设备选择动图格式：iPhone / iPad 为 GIF，安卓为动态照片（JPEG 末尾接 MP4），电脑为 APNG；分层 PSD 不分设备，直接从层文件拼，不经无头浏览器。导出按 IP 限流，生成的文件放在卡片目录中，随卡片一起过期或删除。
 
 本地 `pnpm dev:server` 不发送前端页面，因此无法截图；调试这两项使用 `pnpm og`。
 

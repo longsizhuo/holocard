@@ -847,6 +847,20 @@ select {
 }
 .export__btn:hover { border-color: rgba(123, 95, 208, 0.45); }
 .export__btn:disabled { opacity: 0.55; cursor: default; }
+/* 分层 PSD：用的人少，给一行文字链接，不和上面的按钮并列 */
+.export__more {
+  justify-self: start;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--muted);
+  font: inherit;
+  font-size: 12px;
+  text-decoration: underline;
+  cursor: pointer;
+}
+.export__more:hover { color: var(--accent); }
+.export__more:disabled { opacity: 0.55; cursor: default; text-decoration: none; }
 
 /* 删除入口。故意做得比分享按钮低调，是个不可撤销的操作但不该抢视线 */
 .danger { display: grid; gap: 6px; }
