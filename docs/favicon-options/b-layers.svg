@@ -1,13 +1,1 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32">
-  <defs>
-    <linearGradient id="holo" x1="0" y1="0" x2="1" y2="1">
-      <stop offset="0" stop-color="#ff8fc4"/>
-      <stop offset=".35" stop-color="#ffd76a"/>
-      <stop offset=".65" stop-color="#6cc4ff"/>
-      <stop offset="1" stop-color="#a98bff"/>
-    </linearGradient>
-  </defs>
-  <rect x="12" y="1.5" width="16" height="22" rx="3" fill="#b9a6ff" stroke="#231c3a" stroke-opacity=".35"/>
-  <rect x="8" y="5" width="16" height="22" rx="3" fill="#8fd6ff" stroke="#231c3a" stroke-opacity=".35"/>
-  <rect x="4" y="8.5" width="16" height="22" rx="3" fill="url(#holo)" stroke="#231c3a" stroke-opacity=".45"/>
-</svg>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32"><defs><linearGradient id="holo" x1="0" x2="1" y1="0" y2="1"><stop offset="0" stop-color="#ff8fc4"/><stop offset=".35" stop-color="#ffd76a"/><stop offset=".65" stop-color="#6cc4ff"/><stop offset="1" stop-color="#a98bff"/></linearGradient></defs><rect width="16" height="22" x="12" y="1.5" fill="#b9a6ff" stroke="#231c3a" stroke-opacity=".35" rx="3"/><rect width="16" height="22" x="8" y="5" fill="#8fd6ff" stroke="#231c3a" stroke-opacity=".35" rx="3"/><rect width="16" height="22" x="4" y="8.5" fill="url(#holo)" stroke="#231c3a" stroke-opacity=".45" rx="3"/></svg>
